@@ -1038,7 +1038,7 @@ def factorial(n):
                 <div class="terminal-header">
                     <div class="terminal-title">
                         <span>🖥️</span>
-                        Python Terminal
+                        JavaScript Terminal
                     </div>
                     <div class="terminal-controls">
                         <button class="run-button" id="runButton">
@@ -1054,7 +1054,7 @@ def factorial(n):
                 </div>
                 <div class="terminal-output" id="terminalOutput">
                     <div class="output-line">
-                        <span class="output-info">Python 3.x - AI Code Assistant Terminal</span>
+                        <span class="output-info">JavaScript - AI Code Assistant Terminal</span>
                     </div>
                     <div class="output-line">
                         <span class="output-info">Write your code in the editor above and click "Run Code" to execute it.</span>
@@ -1317,7 +1317,7 @@ def factorial(n):
             terminalOutput.scrollTop = terminalOutput.scrollHeight;
         }
 
-        // Execute Python code via backend
+        // Execute JavaScript code locally
         async function executeCode() {
             if (isRunning) return;
             
@@ -1330,95 +1330,34 @@ def factorial(n):
             isRunning = true;
             runButton.disabled = true;
             runButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Running...</div>';
-            
-            try {
-                // Add execution prompt like real terminals
-                addTerminalOutput(`\n>>> Running Python code...`, 'prompt');
-                
-                // Send code to backend for execution
-                const response = await fetch('/execute', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-User-ID': currentUser.userId,
-                        'X-Assignment-Key': currentUser.assignmentKey
-                    },
-                    body: JSON.stringify({ 
-                        code: code,
-                        user_id: currentUser.userId,
-                        assignment_key: currentUser.assignmentKey
-                    })
-                });
 
-                const result = await response.json();
-                
-                // Debug logging
-                console.log('🔍 Execution result:', result);
-                console.log('📤 Output:', result.output);
-                console.log('📤 Error:', result.error);
-                console.log('📤 Execution time:', result.execution_time);
-                
-                if (!response.ok) {
-                    throw new Error(result.detail || `Server error: ${response.status}`);
-                }
-                
-                // Display output exactly like VS Code terminal
-                if (result.output && result.output.trim()) {
-                    console.log('✅ Displaying output:', result.output);
-                    // Split output by lines and display each line
-                    const outputLines = result.output.trim().split('\n');
-                    outputLines.forEach(line => {
-                        addTerminalOutput(line, 'normal');
-                    });
-                } else {
-                    console.log('⚠️ No output received from backend');
-                }
-                
-                // Display errors if any (like VS Code)
-                if (result.error && result.error.trim()) {
-                    console.log('🚨 Displaying error:', result.error);
-                    const errorLines = result.error.trim().split('\n');
-                    errorLines.forEach(line => {
-                        if (line.trim()) {
-                            addTerminalOutput(line, 'error');
-                        }
-                    });
-                    
-                    // Add helpful tips for common errors (collapsed, like VS Code)
-                    if (result.error.includes('IndentationError')) {
-                        addTerminalOutput('💡 IndentationError: Check your code indentation (use 4 spaces)', 'warning');
-                    } else if (result.error.includes('NameError')) {
-                        addTerminalOutput('💡 NameError: Variable not defined before use', 'warning');
-                    } else if (result.error.includes('SyntaxError')) {
-                        addTerminalOutput('💡 SyntaxError: Check syntax (colons, parentheses, quotes)', 'warning');
-                    } else if (result.error.includes('ModuleNotFoundError')) {
-                        addTerminalOutput('💡 ModuleNotFoundError: Module not available in this environment', 'warning');
-                    }
-                }
-                
-                // Add empty line for spacing if there was output or error
-                if ((result.output && result.output.trim()) || (result.error && result.error.trim())) {
-                    addTerminalOutput('', 'normal');
-                }
-                
-                // Execution summary (like VS Code's status)
-                if (result.error && result.error.trim()) {
-                    addTerminalOutput(`Process finished with exit code 1 (${result.execution_time}ms)`, 'execution-time');
-                } else {
-                    addTerminalOutput(`Process finished with exit code 0 (${result.execution_time}ms)`, 'execution-time');
-                }
-                
+            // Temp overwrite console.log()
+            const defaultLog = console.log;
+            console.log = function(...args) {
+                // Still run original console log
+                defaultLog.apply(this,args);
+
+                addTerminalOutput(args);
+            }
+
+            try{
+                addTerminalOutput(`\nRunning code...`, 'prompt');
+                const startTime = Date.now();
+
+                const run = new Function(code);
+                run();
+
+                const finishTime = Date.now();
+                addTerminalOutput(`Process finished (${finishTime-startTime}ms)`, 'execution-time');
+                addTerminalOutput(`Ready to run your code!`, 'prompt');
             } catch (error) {
                 console.error('❌ Execution error:', error);
-                addTerminalOutput(`\nConnection Error:`, 'error');
+                addTerminalOutput('❌ Execution error:', 'error');
                 addTerminalOutput(error.message, 'error');
-                
-                if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-                    addTerminalOutput('💡 Make sure the FastAPI backend is running on http://localhost:8000', 'warning');
-                } else if (error.message.includes('500')) {
-                    addTerminalOutput('💡 Internal server error. Check the backend logs for details.', 'warning');
-                }
             }
+
+            // Return console.log() to default functionality
+            console.log = defaultLog;
             
             isRunning = false;
             runButton.disabled = false;
@@ -1429,7 +1368,7 @@ def factorial(n):
         function clearTerminal() {
             terminalOutput.innerHTML = `
                 <div class="output-line">
-                    <span class="output-info">Python 3.x - AI Code Assistant Terminal</span>
+                    <span class="output-info">JavaScript - AI Code Assistant Terminal</span>
                 </div>
                 <div class="output-line">
                     <span class="output-info">Write your code in the editor above and click "Run Code" to execute it.</span>
@@ -1976,7 +1915,7 @@ def factorial(n):
             console.log('🚀 Initializing editor...');
             
             // Initialize Prism.js first
-            initializePrism();
+            //initializePrism();
             
             updateLineNumbers();
             
