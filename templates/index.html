@@ -904,6 +904,13 @@
             background: #252526;
         }
 
+        canvas {
+            border: 1px solid #333;
+            display: block;
+            margin: 20px auto;
+            background-color: #F5F5F5;
+        }
+
         /* Responsive design */
         @media (max-width: 1200px) {
             .sidebar {
@@ -1010,8 +1017,8 @@
         <div class="editor-section">
             <div class="editor-main">
                 <div class="header">
-                    <span class="header-icon">⚡</span>
-                    AI Code Editor
+                    <span class="header-icon">✏️</span>
+                    Code Editor
                     <div class="user-info">
                         <span id="userDisplay">User: --</span>
                         <button class="logout-btn" id="logoutBtn">Logout</button>
@@ -1023,11 +1030,7 @@
                     <textarea 
                         class="code-editor" 
                         id="codeEditor" 
-                        placeholder="Start typing your Python code here...
-# Example:
-def factorial(n):
-    if n == 0:
-        return 1"
+                        placeholder='var ctx = canvas.getContext("2d");'
                         spellcheck="false"
                     ></textarea>
                 </div>
@@ -1065,12 +1068,41 @@ def factorial(n):
                     <div class="output-line">
                         <span class="output-prompt">>>> </span><span class="output-info">Ready to run your code!</span>
                     </div>
-                    <canvas id="myCanvas" width="200" height="100" style="border:1px solid #000000;">
-                    </canvas>
                 </div>
             </div>
         </div>
         
+        <!-- Canvas Section -->
+        <div class="sidebar">
+            <div class="header">
+                <span class="header-icon">📌</span>
+                Info
+            </div>
+            <div class="analysis-panel" id="analysisPanel">
+                <div class="analysis-section">
+                    <div class="analysis-content">
+                        <div class="analysis-text">
+                            <p><strong>Instructions</strong></p>
+                            <p>You are given access to the variable <strong>"canvas"</strong> which allows you to modify the picture below.</p>
+                            <p>You can <strong>run your JavaScript code</strong> from the terminal to change the canvas.</p>
+                            <p><em>Check the problem description for more information. Good luck!</em></p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="analysis-section">
+                    <div class="analysis-content">
+                        <div class="analysis-title">
+                            <span>🎨</span>
+                            Canvas
+                        </div>
+                        <canvas id="myCanvas" width="400" height="300"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Section -->
         <div class="sidebar">
             <div class="header">
                 <span class="header-icon">🤖</span>
@@ -1079,19 +1111,27 @@ def factorial(n):
             <div class="analysis-panel" id="analysisPanel">
                 <div class="analysis-section">
                     <div class="analysis-content">
-                        <div class="analysis-title">
-                            <span>📊</span>
-                            Problem Description
-                        </div>
-                        <div class="analysis-text" id="analysisText">
-                            <p><strong>Welcome to AI Code Assistant!</strong></p>
-                            <p>Start typing Python code and the AI will:</p>
+                        <div class="analysis-text">
+                            <p><strong>Hello! I am your AI Coding Assistant!</strong></p>
+                            <p>Start typing JavaScript code and I will:</p>
                             <ul>
                                 <li><strong>Identify the problem</strong> you're trying to solve</li>
                                 <li><strong>Suggest the next line</strong> of code to write</li>
                                 <li><strong>Help you complete</strong> your implementation</li>
                             </ul>
-                            <p><em>The AI continuously analyzes your code as you type...</em></p>
+                            <p><em>I will continuously analyze your code as you type...</em></p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="analysis-section">
+                    <div class="analysis-content">
+                        <div class="analysis-title">
+                            <span>🔮</span>
+                            PROBLEM GUESS
+                        </div>
+                        <div class="analysis-text" id="analysisText">
+                            <div class="loading"><span class="spinner"></span>Loading...</div>
                         </div>
                     </div>
                 </div>
@@ -1099,14 +1139,12 @@ def factorial(n):
                 <div class="analysis-section">
                     <div class="analysis-content">
                         <div class="analysis-title">
-                            <span>🔮</span>
-                            Next Line Suggestion
+                            <span>💡</span>
+                            SUGGESTION
                         </div>
-                        <div class="suggested-code" id="suggestedCode">    else:
-        return n * factorial(n - 1)</div>
+                        <div class="suggested-code" id="suggestedCode"></div>
                     </div>
                 </div>
-            </div>
             
             <div class="status">
                 <div class="status-dot" id="statusDot"></div>
@@ -1144,6 +1182,7 @@ def factorial(n):
     <!-- Python component will be auto-loaded by the autoloader plugin -->
 
     <script>
+        // Test showing canvas in terminal
         // https://www.w3schools.com/html/html5_canvas.asp
         var c = document.getElementById("myCanvas");
         var ctx = c.getContext("2d");
@@ -1323,7 +1362,7 @@ def factorial(n):
             
             const code = codeEditor.value.trim();
             if (!code) {
-                addTerminalOutput('No code to execute. Please write some Python code first.', 'warning');
+                addTerminalOutput('No code to execute. Please write some JavaScript code first.', 'warning');
                 return;
             }
             
@@ -1341,11 +1380,18 @@ def factorial(n):
             }
 
             try{
+                const canvas = document.createElement("canvas");
+                canvas.id = "myCanvas";
+                canvas.width = 400;
+                canvas.height = 300;
+
                 addTerminalOutput(`\nRunning code...`, 'prompt');
                 const startTime = Date.now();
 
-                const run = new Function(code);
-                run();
+                const run = new Function(["canvas"], code);
+                run(canvas);
+
+                document.getElementById("myCanvas").replaceWith(canvas);
 
                 const finishTime = Date.now();
                 addTerminalOutput(`Process finished (${finishTime-startTime}ms)`, 'execution-time');
@@ -1706,7 +1752,7 @@ def factorial(n):
         // Enhanced input handling
         codeEditor.addEventListener('input', (e) => {
             updateLineNumbers();
-            applySyntaxHighlighting();
+            //applySyntaxHighlighting();
             debounceAnalysis();
         });
 
@@ -1721,7 +1767,7 @@ def factorial(n):
         window.addEventListener('resize', () => {
             setTimeout(() => {
                 updateLineNumbers();
-                applySyntaxHighlighting();
+                //applySyntaxHighlighting();
                 syncScroll();
             }, 100);
         });
@@ -1750,7 +1796,7 @@ def factorial(n):
                     codeEditor.selectionStart = codeEditor.selectionEnd = start + 4;
                 }
                 
-                applySyntaxHighlighting();
+                //applySyntaxHighlighting();
                 updateLineNumbers();
             }
             
@@ -1767,7 +1813,7 @@ def factorial(n):
                 codeEditor.selectionStart = codeEditor.selectionEnd = start + 1 + newIndent.length;
                 
                 updateLineNumbers();
-                applySyntaxHighlighting();
+                //applySyntaxHighlighting();
                 debounceAnalysis();
             }
             
@@ -1791,7 +1837,7 @@ def factorial(n):
                 codeEditor.value = codeEditor.value.substring(0, lineStart) + newLineText + 
                                  (lineEnd === -1 ? '' : codeEditor.value.substring(lineEnd));
                 
-                applySyntaxHighlighting();
+                //applySyntaxHighlighting();
             }
         });
 
@@ -1822,23 +1868,16 @@ def factorial(n):
             
             if (!code) {
                 analysisText.innerHTML = `
-                    <p><strong>Welcome to AI Code Assistant!</strong></p>
-                    <p>Start typing Python code and the AI will:</p>
-                    <ul>
-                        <li><strong>Identify the problem</strong> you're trying to solve</li>
-                        <li><strong>Suggest the next line</strong> of code to write</li>
-                        <li><strong>Help you complete</strong> your implementation</li>
-                    </ul>
-                    <p><em>The AI continuously analyzes your code as you type...</em></p>
+                    <div class="loading"><span class="spinner"></span>Waiting for your code...</div>
                 `;
-                suggestedCode.textContent = "    else:\n        return n * factorial(n - 1)";
+                suggestedCode.textContent = `<div class="loading"><span class="spinner"></span>Waiting for your code...</div>`;
                 return;
             }
 
             // Update status with enhanced feedback
             statusDot.className = 'status-dot connecting';
             statusText.textContent = 'AI Analyzing...';
-            analysisText.innerHTML = '<div class="loading"><span class="spinner"></span>🤖 AI is analyzing your code structure and logic...</div>';
+            analysisText.innerHTML = '<div class="loading"><span class="spinner"></span>🤖 AI is analyzing your code...</div>';
 
             try {
                 // Include user info in the request
@@ -1930,9 +1969,9 @@ def factorial(n):
             // Load example code after a short delay
             setTimeout(() => {
                 if (codeEditor.value.trim() === '') {
-                    codeEditor.value = 'def factorial(n):\n    if n == 0:\n        return 1\n    ';
+                    codeEditor.value = 'var ctx = canvas.getContext("2d");\nctx.font = "30px Arial";\nctx.fillText("Hello World!", 10, 50);\n';
                     updateLineNumbers();
-                    applySyntaxHighlighting();
+                    //applySyntaxHighlighting();
                     analyzeCode();
                 }
             }, 1500);
