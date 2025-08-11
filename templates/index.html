@@ -172,14 +172,6 @@
             display: flex;
             flex-direction: column;
             border-right: 2px solid #333;
-            /* Temporary Fix for scrolling errors */
-            overflow-y: scroll;
-        }
-
-        .editor-main {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
         }
 
         .terminal-section {
@@ -1015,26 +1007,25 @@
 
     <!-- Main Application (initially hidden) -->
     <div class="container hidden" id="mainApp">
+        <!-- Code Editor Section -->
         <div class="editor-section">
-            <div class="editor-main">
-                <div class="header">
-                    <span class="header-icon">✏️</span>
-                    Code Editor
-                    <div class="user-info">
-                        <span id="userDisplay">User: --</span>
-                        <button class="logout-btn" id="logoutBtn">Logout</button>
-                    </div>
+            <div class="header">
+                <span class="header-icon">✏️</span>
+                Code Editor
+                <div class="user-info">
+                    <span id="userDisplay">User: --</span>
+                    <button class="logout-btn" id="logoutBtn">Logout</button>
                 </div>
-                <div class="editor-container">
-                    <div class="line-numbers" id="lineNumbers">1</div>
-                    <div class="syntax-highlight" id="syntaxHighlight"></div>
-                    <textarea 
-                        class="code-editor" 
-                        id="codeEditor" 
-                        placeholder='var ctx = canvas.getContext("2d");'
-                        spellcheck="false"
-                    ></textarea>
-                </div>
+            </div>
+            <div class="editor-container">
+                <div class="line-numbers" id="lineNumbers">1</div>
+                <div class="syntax-highlight" id="syntaxHighlight"></div>
+                <textarea 
+                    class="code-editor" 
+                    id="codeEditor" 
+                    placeholder='var ctx = canvas.getContext("2d");'
+                    spellcheck="false"
+                ></textarea>
             </div>
             
             <!-- Terminal Section -->
