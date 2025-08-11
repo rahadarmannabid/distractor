@@ -5,8 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Code Assistant</title>
     <!-- Prism.js for syntax highlighting - Fixed with proper loading order -->
-    <!-- TODO: syntax highlighting
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet">-->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet">
     <!-- Marked.js for markdown rendering -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/5.1.1/marked.min.js"></script>
     
@@ -480,7 +479,7 @@
             font-family: inherit;
             font-size: 14px;
             line-height: 1.5;
-            color: #d4d4d4;
+            color: transparent;
             white-space: pre;
             overflow-wrap: normal;
             overflow-x: auto;
@@ -502,7 +501,7 @@
             overflow: hidden;
             pointer-events: none;
             z-index: 1;
-            color: transparent;
+            color: #d4d4d4;
             background: transparent !important;
         }
 
@@ -1026,7 +1025,7 @@
                 </div>
                 <div class="editor-container">
                     <div class="line-numbers" id="lineNumbers">1</div>
-                    <!--<div class="syntax-highlight" id="syntaxHighlight"></div>-->
+                    <div class="syntax-highlight" id="syntaxHighlight"></div>
                     <textarea 
                         class="code-editor" 
                         id="codeEditor" 
@@ -1176,9 +1175,8 @@
     </div>
 
     <!-- Load Prism.js for syntax highlighting AFTER the DOM is ready -->
-    <!-- TODO: syntax highlighing
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script> -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
     <!-- Python component will be auto-loaded by the autoloader plugin -->
 
     <script>
@@ -1596,21 +1594,20 @@
             }
             
             try {
-                // Ensure Prism is loaded and Python language is available
-                if (window.Prism && window.Prism.languages && window.Prism.languages.python) {
-                    const highlighted = window.Prism.highlight(code, window.Prism.languages.python, 'python');
+                // Ensure Prism is loaded and javascript language is available
+                if (window.Prism && window.Prism.languages && window.Prism.languages.javascript) {
+                    const highlighted = window.Prism.highlight(code, window.Prism.languages.javascript, 'javascript');
                     syntaxHighlight.innerHTML = highlighted;
                     console.log('✅ Syntax highlighting applied successfully');
                 } else {
                     // Fallback: use basic highlighting immediately, try Prism later
-                    console.log('⏳ Prism not ready, using fallback highlighting');
-                    syntaxHighlight.innerHTML = createBasicHighlighting(code);
+                    console.log('⏳ Prism not ready');
                     
                     // Try again after a delay if Prism isn't loaded yet
                     if (!window.Prism) {
                         setTimeout(() => {
-                            if (window.Prism && window.Prism.languages && window.Prism.languages.python) {
-                                const highlighted = window.Prism.highlight(codeEditor.value, window.Prism.languages.python, 'python');
+                            if (window.Prism && window.Prism.languages && window.Prism.languages.javascript) {
+                                const highlighted = window.Prism.highlight(codeEditor.value, window.Prism.languages.javascript, 'javascript');
                                 syntaxHighlight.innerHTML = highlighted;
                                 console.log('✅ Delayed syntax highlighting applied successfully');
                             }
@@ -1619,18 +1616,7 @@
                 }
             } catch (e) {
                 console.warn('Syntax highlighting error:', e);
-                syntaxHighlight.innerHTML = createBasicHighlighting(code);
             }
-        }
-
-        // Fallback basic syntax highlighting
-        function createBasicHighlighting(code) {
-            return code
-                .replace(/\b(def|class|if|elif|else|for|while|try|except|finally|with|import|from|return|yield|break|continue|pass|lambda|global|nonlocal|assert|raise|del|and|or|not|in|is|True|False|None)\b/g, '<span class="token keyword">$1</span>')
-                .replace(/'([^']*)'|"([^"]*)"/g, '<span class="token string">\'$1\'</span>')
-                .replace(/#.*/g, '<span class="token comment">$&</span>')
-                .replace(/\b\d+\.?\d*\b/g, '<span class="token number">$&</span>')
-                .replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/g, '<span class="token function">$1</span>(');
         }
 
         // Initialize Prism.js when DOM is ready
@@ -1648,30 +1634,30 @@
                     console.log('✅ Prism.js loaded successfully');
                     
                     // Check if Python language is loaded
-                    if (window.Prism.languages && window.Prism.languages.python) {
-                        console.log('✅ Python language definition loaded');
+                    if (window.Prism.languages && window.Prism.languages.javascript) {
+                        console.log('✅ JavaScript language definition loaded');
                         // Apply initial syntax highlighting
                         setTimeout(() => {
                             applySyntaxHighlighting();
                         }, 100);
                     } else {
-                        console.log('⏳ Loading Python language definition via autoloader...');
+                        console.log('⏳ Loading JavaScript language definition via autoloader...');
                         // Trigger the autoloader by trying to highlight some Python code
                         if (window.Prism.plugins && window.Prism.plugins.autoloader) {
                             // Create a dummy element to trigger autoloading
                             const dummy = document.createElement('code');
-                            dummy.className = 'language-python';
-                            dummy.textContent = 'def example(): pass';
+                            dummy.className = 'language-javascript';
+                            dummy.textContent = 'let x = 1;';
                             window.Prism.highlightElement(dummy);
                         }
                         
                         // Wait longer for autoloader to work
                         setTimeout(() => {
-                            if (window.Prism.languages && window.Prism.languages.python) {
-                                console.log('✅ Python language definition loaded after autoloader');
+                            if (window.Prism.languages && window.Prism.languages.javascript) {
+                                console.log('✅ JavaScript language definition loaded after autoloader');
                                 applySyntaxHighlighting();
                             } else {
-                                console.warn('⚠️ Python language definition not loaded, using fallback');
+                                console.warn('⚠️ JavaScript language definition not loaded, using fallback');
                                 applySyntaxHighlighting(); // This will use fallback
                             }
                         }, 2000);
@@ -1752,7 +1738,7 @@
         // Enhanced input handling
         codeEditor.addEventListener('input', (e) => {
             updateLineNumbers();
-            //applySyntaxHighlighting();
+            applySyntaxHighlighting();
             debounceAnalysis();
         });
 
@@ -1767,7 +1753,7 @@
         window.addEventListener('resize', () => {
             setTimeout(() => {
                 updateLineNumbers();
-                //applySyntaxHighlighting();
+                applySyntaxHighlighting();
                 syncScroll();
             }, 100);
         });
@@ -1796,7 +1782,7 @@
                     codeEditor.selectionStart = codeEditor.selectionEnd = start + 4;
                 }
                 
-                //applySyntaxHighlighting();
+                applySyntaxHighlighting();
                 updateLineNumbers();
             }
             
@@ -1813,7 +1799,7 @@
                 codeEditor.selectionStart = codeEditor.selectionEnd = start + 1 + newIndent.length;
                 
                 updateLineNumbers();
-                //applySyntaxHighlighting();
+                applySyntaxHighlighting();
                 debounceAnalysis();
             }
             
@@ -1837,7 +1823,7 @@
                 codeEditor.value = codeEditor.value.substring(0, lineStart) + newLineText + 
                                  (lineEnd === -1 ? '' : codeEditor.value.substring(lineEnd));
                 
-                //applySyntaxHighlighting();
+                applySyntaxHighlighting();
             }
         });
 
@@ -1954,7 +1940,7 @@
             console.log('🚀 Initializing editor...');
             
             // Initialize Prism.js first
-            //initializePrism();
+            initializePrism();
             
             updateLineNumbers();
             
@@ -1971,7 +1957,7 @@
                 if (codeEditor.value.trim() === '') {
                     codeEditor.value = 'var ctx = canvas.getContext("2d");\nctx.font = "30px Arial";\nctx.fillText("Hello World!", 10, 50);\n';
                     updateLineNumbers();
-                    //applySyntaxHighlighting();
+                    applySyntaxHighlighting();
                     analyzeCode();
                 }
             }, 1500);
