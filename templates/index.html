@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Code Assistant</title>
-    <!-- Prism.js for syntax highlighting - Fixed with proper loading order -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet">
     <!-- Marked.js for markdown rendering -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/5.1.1/marked.min.js"></script>
+    <!-- Monaco Editor for code editor embed -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs/loader.min.js"></script>
     
     <style>
         * {
@@ -446,148 +446,6 @@
             min-height: 300px;
         }
 
-        .line-numbers {
-            background: #1e1e1e;
-            color: #858585;
-            padding: 20px 8px 20px 5px;
-            text-align: right;
-            font-size: 14px;
-            line-height: 1.5;
-            border-right: 2px solid #333;
-            user-select: none;
-            min-width: 50px;
-            white-space: pre;
-            overflow: hidden;
-            font-family: inherit;
-            z-index: 2;
-            position: relative;
-        }
-
-        .code-editor {
-            flex: 1;
-            padding: 20px;
-            background: transparent;
-            resize: none;
-            border: none;
-            outline: none;
-            font-family: inherit;
-            font-size: 14px;
-            line-height: 1.5;
-            color: transparent;
-            white-space: pre;
-            overflow-wrap: normal;
-            overflow-x: auto;
-            z-index: 3;
-            position: relative;
-            caret-color: #ffffff;
-        }
-
-        .syntax-highlight {
-            position: absolute;
-            top: 20px;
-            left: 70px;
-            right: 20px;
-            bottom: 20px;
-            font-family: inherit;
-            font-size: 14px;
-            line-height: 1.5;
-            white-space: pre;
-            overflow: hidden;
-            pointer-events: none;
-            z-index: 1;
-            color: #d4d4d4;
-            background: transparent !important;
-        }
-
-        /* Enhanced VS Code-like syntax highlighting */
-        .syntax-highlight .token.keyword {
-            color: #c586c0 !important;
-            font-weight: 500;
-        }
-        
-        .syntax-highlight .token.string {
-            color: #ce9178 !important;
-        }
-        
-        .syntax-highlight .token.comment {
-            color: #6a9955 !important;
-            font-style: italic;
-        }
-        
-        .syntax-highlight .token.number {
-            color: #b5cea8 !important;
-        }
-        
-        .syntax-highlight .token.function {
-            color: #dcdcaa !important;
-            font-weight: 500;
-        }
-        
-        .syntax-highlight .token.operator {
-            color: #d4d4d4 !important;
-        }
-        
-        .syntax-highlight .token.punctuation {
-            color: #cccccc !important;
-        }
-
-        .syntax-highlight .token.class-name {
-            color: #4ec9b0 !important;
-        }
-
-        .syntax-highlight .token.builtin {
-            color: #569cd6 !important;
-        }
-
-        .syntax-highlight .token.boolean {
-            color: #569cd6 !important;
-        }
-
-        .syntax-highlight .token.decorator {
-            color: #c586c0 !important;
-        }
-
-        .syntax-highlight .token.namespace {
-            color: #4ec9b0 !important;
-        }
-
-        .syntax-highlight .token.property {
-            color: #9cdcfe !important;
-        }
-
-        .syntax-highlight .token.variable {
-            color: #9cdcfe !important;
-        }
-
-        .syntax-highlight .token.constant {
-            color: #4fc1ff !important;
-        }
-
-        .syntax-highlight .token.triple-quoted-string {
-            color: #ce9178 !important;
-        }
-
-        .syntax-highlight .token.regex {
-            color: #d16969 !important;
-        }
-
-        /* Override all Prism defaults to ensure proper styling */
-        .syntax-highlight pre,
-        .syntax-highlight code {
-            background: transparent !important;
-            color: inherit !important;
-            text-shadow: none !important;
-            font-family: inherit !important;
-            font-size: inherit !important;
-            line-height: inherit !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            border: none !important;
-            border-radius: 0 !important;
-            overflow: visible !important;
-            white-space: pre !important;
-        }
-
         .analysis-panel {
             flex: 1;
             padding: 0;
@@ -904,6 +762,11 @@
             background-color: #F5F5F5;
         }
 
+        #editor {
+            height: 80%;
+            width: 100%;
+        }
+
         /* Responsive design */
         @media (max-width: 1200px) {
             .sidebar {
@@ -1017,16 +880,7 @@
                     <button class="logout-btn" id="logoutBtn">Logout</button>
                 </div>
             </div>
-            <div class="editor-container">
-                <div class="line-numbers" id="lineNumbers">1</div>
-                <div class="syntax-highlight" id="syntaxHighlight"></div>
-                <textarea 
-                    class="code-editor" 
-                    id="codeEditor" 
-                    placeholder='var ctx = canvas.getContext("2d");'
-                    spellcheck="false"
-                ></textarea>
-            </div>
+            <div id="editor"></div>
             
             <!-- Terminal Section -->
             <div class="terminal-section" id="terminalSection">
@@ -1065,6 +919,7 @@
         </div>
         
         <!-- Canvas Section -->
+        <!--
         <div class="sidebar">
             <div class="header">
                 <span class="header-icon">📌</span>
@@ -1092,7 +947,7 @@
                     </div>
                 </div>
             </div>
-        </div>
+        </div>-->
 
         <!-- AI Section -->
         <div class="sidebar">
@@ -1166,20 +1021,6 @@
             </div>
         </div>
     </div>
-
-    <!-- Load Prism.js for syntax highlighting AFTER the DOM is ready -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
-    <!-- Python component will be auto-loaded by the autoloader plugin -->
-
-    <script>
-        // Test showing canvas in terminal
-        // https://www.w3schools.com/html/html5_canvas.asp
-        var c = document.getElementById("myCanvas");
-        var ctx = c.getContext("2d");
-        ctx.font = "30px Arial";
-        ctx.fillText("Hello World", 10, 50);
-    </script>
 
     <script>
         // Global variables for user session
@@ -1290,10 +1131,7 @@
             authScreen.classList.remove('hidden');
         });
 
-        // Original code editor functionality
-        const codeEditor = document.getElementById('codeEditor');
-        const syntaxHighlight = document.getElementById('syntaxHighlight');
-        const lineNumbers = document.getElementById('lineNumbers');
+        // Analysis section
         const analysisText = document.getElementById('analysisText');
         const suggestedCode = document.getElementById('suggestedCode');
         const statusDot = document.getElementById('statusDot');
@@ -1351,7 +1189,7 @@
         async function executeCode() {
             if (isRunning) return;
             
-            const code = codeEditor.value.trim();
+            const code = window.editor.getValue();
             if (!code) {
                 addTerminalOutput('No code to execute. Please write some JavaScript code first.', 'warning');
                 return;
@@ -1430,7 +1268,7 @@
 
         async function submitCode() {
             try {
-                const code = codeEditor.value.trim();
+                const code = window.editor.getValue();
                 
                 if (!code) {
                     addTerminalOutput('No code to submit. Please write some code first.', 'warning');
@@ -1612,136 +1450,6 @@
             }
         }
 
-        // Initialize Prism.js when DOM is ready
-        function initializePrism() {
-            console.log('🚀 Initializing Prism.js...');
-            
-            // Set up autoloader path for CDN
-            if (window.Prism && window.Prism.plugins && window.Prism.plugins.autoloader) {
-                window.Prism.plugins.autoloader.languages_path = 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/';
-            }
-            
-            // Wait for Prism to be available
-            const checkPrism = () => {
-                if (window.Prism) {
-                    console.log('✅ Prism.js loaded successfully');
-                    
-                    // Check if Python language is loaded
-                    if (window.Prism.languages && window.Prism.languages.javascript) {
-                        console.log('✅ JavaScript language definition loaded');
-                        // Apply initial syntax highlighting
-                        setTimeout(() => {
-                            applySyntaxHighlighting();
-                        }, 100);
-                    } else {
-                        console.log('⏳ Loading JavaScript language definition via autoloader...');
-                        // Trigger the autoloader by trying to highlight some Python code
-                        if (window.Prism.plugins && window.Prism.plugins.autoloader) {
-                            // Create a dummy element to trigger autoloading
-                            const dummy = document.createElement('code');
-                            dummy.className = 'language-javascript';
-                            dummy.textContent = 'let x = 1;';
-                            window.Prism.highlightElement(dummy);
-                        }
-                        
-                        // Wait longer for autoloader to work
-                        setTimeout(() => {
-                            if (window.Prism.languages && window.Prism.languages.javascript) {
-                                console.log('✅ JavaScript language definition loaded after autoloader');
-                                applySyntaxHighlighting();
-                            } else {
-                                console.warn('⚠️ JavaScript language definition not loaded, using fallback');
-                                applySyntaxHighlighting(); // This will use fallback
-                            }
-                        }, 2000);
-                        return;
-                    }
-                } else {
-                    console.log('⏳ Waiting for Prism.js to load...');
-                    setTimeout(checkPrism, 100);
-                }
-            };
-            
-            checkPrism();
-        }
-
-        // Optimized line number updates
-        function updateLineNumbers() {
-            const lines = codeEditor.value.split('\n');
-            const lineCount = lines.length;
-            
-            // Only update if line count changed
-            const currentCount = lineNumbers.textContent.split('\n').length;
-            if (currentCount === lineCount) return;
-            
-            let lineNumbersText = '';
-            for (let i = 1; i <= lineCount; i++) {
-                lineNumbersText += i + '\n';
-            }
-            
-            lineNumbers.textContent = lineNumbersText.slice(0, -1);
-        }
-
-        // Smart indentation detection
-        function getCurrentIndentation() {
-            const cursorPos = codeEditor.selectionStart;
-            const textBeforeCursor = codeEditor.value.substring(0, cursorPos);
-            const lines = textBeforeCursor.split('\n');
-            const currentLine = lines[lines.length - 1];
-            
-            const indentMatch = currentLine.match(/^(\s*)/);
-            return indentMatch ? indentMatch[1] : '';
-        }
-
-        // Auto-indent detection for Python
-        function shouldAutoIndent() {
-            const cursorPos = codeEditor.selectionStart;
-            const textBeforeCursor = codeEditor.value.substring(0, cursorPos);
-            const lines = textBeforeCursor.split('\n');
-            const previousLine = lines[lines.length - 2];
-            
-            if (!previousLine) return false;
-            
-            const trimmedLine = previousLine.trim();
-            return (
-                trimmedLine.endsWith(':') ||
-                trimmedLine.startsWith('def ') ||
-                trimmedLine.startsWith('class ') ||
-                trimmedLine.startsWith('if ') ||
-                trimmedLine.startsWith('elif ') ||
-                trimmedLine.startsWith('else:') ||
-                trimmedLine.startsWith('for ') ||
-                trimmedLine.startsWith('while ') ||
-                trimmedLine.startsWith('try:') ||
-                trimmedLine.startsWith('except') ||
-                trimmedLine.startsWith('finally:') ||
-                trimmedLine.startsWith('with ')
-            );
-        }
-
-        // Synchronized scrolling with performance optimization
-        function syncScroll() {
-            requestAnimationFrame(() => {
-                lineNumbers.scrollTop = codeEditor.scrollTop;
-                syntaxHighlight.scrollTop = codeEditor.scrollTop;
-                syntaxHighlight.scrollLeft = codeEditor.scrollLeft;
-            });
-        }
-
-        // Enhanced input handling
-        codeEditor.addEventListener('input', (e) => {
-            updateLineNumbers();
-            applySyntaxHighlighting();
-            debounceAnalysis();
-        });
-
-        // Optimized scroll handling
-        let scrollTimeout;
-        codeEditor.addEventListener('scroll', () => {
-            clearTimeout(scrollTimeout);
-            scrollTimeout = setTimeout(syncScroll, 10);
-        });
-
         // Window resize handling
         window.addEventListener('resize', () => {
             setTimeout(() => {
@@ -1824,7 +1532,7 @@
         function debounceAnalysis() {
             clearTimeout(analysisTimeout);
             
-            const currentCode = codeEditor.value.trim();
+            const currentCode = window.editor.getValue();
             
             // Skip analysis if code hasn't changed meaningfully
             if (currentCode === lastAnalyzedCode) return;
@@ -1840,7 +1548,7 @@
 
         // Enhanced API communication with retries
         async function analyzeCode() {
-            const code = codeEditor.value.trim();
+            const code = window.editor.getValue();
             
             if (code === lastAnalyzedCode) return;
             lastAnalyzedCode = code;
@@ -1928,32 +1636,18 @@
             }
         }
 
-        // Initialize the editor
+        // Initialize the monoaco editor
         function initializeEditor() {
-            console.log('🚀 Initializing editor...');
-            
-            // Initialize Prism.js first
-            initializePrism();
-            
-            updateLineNumbers();
-            
-            // Test Prism.js after initialization
-            setTimeout(() => {
-                console.log('🔍 Testing Prism.js availability...');
-                console.log('window.Prism:', !!window.Prism);
-                console.log('Prism.languages:', window.Prism ? Object.keys(window.Prism.languages || {}) : 'N/A');
-                console.log('Python support:', !!(window.Prism && window.Prism.languages && window.Prism.languages.python));
-            }, 3000);
-            
-            // Load example code after a short delay
-            setTimeout(() => {
-                if (codeEditor.value.trim() === '') {
-                    codeEditor.value = 'var ctx = canvas.getContext("2d");\nctx.font = "30px Arial";\nctx.fillText("Hello World!", 10, 50);\n';
-                    updateLineNumbers();
-                    applySyntaxHighlighting();
-                    analyzeCode();
-                }
-            }, 1500);
+            require.config({ paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs" }});
+            require(["vs/editor/editor.main"], function () {
+                window.editor = monaco.editor.create(document.getElementById("editor"), {
+                    value: "// Write JavaScript here\nconsole.log('Hello World');",
+                    language: "javascript",
+                    theme: "vs-dark",
+                    automaticLayout: true,
+                    minimap: { enabled: false },
+                });
+            });
         }
 
         // Start the application - check for existing session first
@@ -1977,9 +1671,9 @@
 
         // Performance monitoring
         console.log('🚀 AI Code Assistant with Authentication and Terminal loaded successfully!');
-        console.log('💡 Features: User Authentication, Syntax highlighting, Smart indentation, Real-time AI analysis, Python execution, Code submission');
+        //console.log('💡 Features: User Authentication, Syntax highlighting, Smart indentation, Real-time AI analysis, Python execution, Code submission');
         console.log('⌨️  Shortcuts: Ctrl+Enter or F5 (Run) | Ctrl+Shift+C (Clear) | Ctrl+Shift+S (Submit)');
-        console.log('🎨 Syntax highlighting: Enhanced VS Code-like colors with Prism.js');
+        //console.log('🎨 Syntax highlighting: Enhanced VS Code-like colors with Prism.js');
     </script>
 </body>
 </html>
