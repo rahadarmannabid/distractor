@@ -4,11 +4,17 @@
     <meta charset="UTF-8">
     <title>Monaco Editor Example</title>
     <style>
-        /* Flex Container */
         * {
             /* Helps viewport width & height */
             margin: 0px;
         }
+        body {
+            font-family: 'Consolas', 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+
+        /* Flex Container */
         #container {
             display: flex;
             width: 100vw;
@@ -27,11 +33,12 @@
             flex:1;
         }
         #terminal {
-            height: 20vh;
+            height: 30vh;
         }
         #sidebar {
-            width: 20vw;
+            width: 30vw;
         }
+
         /* Resizing */
         #resize-sidebar {
             width: 5px;
@@ -43,24 +50,227 @@
             background-color: darkgray;
             cursor: ns-resize;
         }
+
+        /* Header Styling */
+        .header {
+            display: flex;
+            align-items: center;
+
+            background: linear-gradient(135deg, #2d2d30, #3e3e42);
+            padding: 12px 15px;
+            border-bottom: 1px solid #333;
+            gap: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            white-space: nowrap;
+        }
+        
+        @keyframes glow {
+            from { text-shadow: 0 0 5px rgba(255,255,255,0.3); }
+            to { text-shadow: 0 0 10px rgba(255,255,255,0.6); }
+        }
+        .header span {
+            animation: glow 2s ease-in-out infinite alternate;
+        }
+
+        /* Terminal Button Styling */
+        .terminal-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+
+            margin-left: auto;
+        }
+        .run-button {
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            border: none;
+            border-radius: 4px;
+            padding: 6px 12px;
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .run-button:hover {
+            background: linear-gradient(135deg, #16a34a, #15803d);
+            transform: translateY(-1px);
+            box-shadow: 0 3px 8px rgba(34, 197, 94, 0.4);
+        }
+        .run-button:disabled {
+            background: #404040;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .clear-button {
+            background: #404040;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 12px;
+            color: #cccccc;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .submit-button {
+            background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+            border: none;
+            border-radius: 4px;
+            padding: 6px 12px;
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .submit-button:hover {
+            background: linear-gradient(135deg, #7c3aed, #6d28d9);
+            transform: translateY(-1px);
+            box-shadow: 0 3px 8px rgba(139, 92, 246, 0.4);
+        }
+        .submit-button:disabled {
+            background: #404040;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* Terminal Output Styling */
+        .terminal {
+            display: flex;
+            flex-direction: column;
+        }
+        .terminal-output {
+            font-size: 14px;
+            line-height: 1.5;
+            padding: 15px;
+            overflow-y: auto;
+            word-break: break-word;
+        }
+        .terminal-output::-webkit-scrollbar {
+            width: 8px;
+        }
+        .terminal-output::-webkit-scrollbar-track {
+            background: #1e1e1e;
+        }
+        .terminal-output::-webkit-scrollbar-thumb {
+            background: #404040;
+            border-radius: 4px;
+        }
+        .terminal-output::-webkit-scrollbar-thumb:hover {
+            background: #505050;
+        }
+        .output-line {
+            margin: 2px 0;
+        }
+        .output-prompt {
+            color: #7c3aed;
+            font-weight: bold;
+        }
+        .output-success {
+            color: #22c55e;
+        }
+        .output-error {
+            color: #ff6b6b;
+            background: transparent;
+            padding: 0;
+            border: none;
+            margin: 0;
+        }
+        .output-info {
+            color: #74c0fc;
+        }
+        .output-warning {
+            color: #ffd43b;
+        }
+        .execution-time {
+            color: #868e96;
+            font-size: 12px;
+            font-style: italic;
+            margin-top: 5px;
+        }
+        .terminal-loading {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #f59e0b;
+            margin: 10px 0;
+        }
+        .terminal-spinner {
+            width: 12px;
+            height: 12px;
+            border: 2px solid #333;
+            border-radius: 50%;
+            border-top-color: #f59e0b;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        /* Sidebar Text Styling */
+        .sidebar-text {
+            color: #cccccc;
+            font-size: 13px;
+            line-height: 1.6;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1e1e1e;
+            border-radius: 8px;
+            border-left: 4px solid #007acc;
+            padding: 20px;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
+        }
     </style>
 </head>
 <body>
     <div id="container">
         <div id="content">
-            <div id="header">
-                <h2>✏️ Code Editor</h2>
+            <div id="header" class="header">
+                <h2><span>✏️</span> Code Editor</h2>
             </div>
             <div id="editor"></div>
             <div id="resize-terminal"></div>
-            <div id="terminal">
-                <h2>JavaScript Terminal</h2>
+            <div class="terminal" id="terminal">
+                <div class="header">
+                    <h2><span>🖥️</span> Terminal</h2>
+                    <div class="terminal-controls">
+                        <button class="run-button" id="runButton">▶️ Run</button>
+                        <button class="clear-button" id="clearButton">Clear</button>
+                        <button class="submit-button" id="submitButton">Submit</button>
+                    </div>
+                </div>
+                <div class="terminal-output" id="terminalOutput">
+                    <div class="output-line">
+                        <span class="output-info">JavaScript Terminal</span>
+                    </div>
+                    <div class="output-line">
+                        <span class="output-info">Write your code in the editor above and click "Run Code" to execute it.</span>
+                    </div>
+                    <div class="output-line">
+                        <span class="output-prompt">>>> </span><span class="output-info">Ready to run your code!</span>
+                    </div>
+                </div>
             </div>
         </div>
 
         <div id="resize-sidebar"></div>
         <div id="sidebar">
-            <h2>Problem Description</h2>
+            <div class="header">
+                <h2><span>💭</span> Description</h2>
+            </div>
+            <div class="sidebar-text">
+                hello world
+            </div>
+
         </div>
     </div>
 
@@ -69,13 +279,131 @@
         // INITIALIZE MONACO
         require.config({ paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs" }});
         require(["vs/editor/editor.main"], function () {
-            monaco.editor.create(document.getElementById("editor"), {
+            window.editor = monaco.editor.create(document.getElementById("editor"), {
                 value: "// Write JavaScript here\nconsole.log('Hello World');",
                 language: "javascript",
                 theme: "vs-dark",
                 automaticLayout: true,
             });
         });
+
+        // BUTTONS
+        const runButton = document.getElementById("runButton");
+        const clearButton = document.getElementById("clearButton");
+        runButton.addEventListener('click', executeCode);
+        clearButton.addEventListener('click', clearTerminal);
+
+        let isRunning = false;
+
+        // Execute JavaScript code locally
+        async function executeCode() {
+            if (isRunning) return;
+            
+            const code = window.editor.getValue();
+            if (!code) {
+                addTerminalOutput('No code to execute. Please write some JavaScript code first.', 'warning');
+                return;
+            }
+            
+            isRunning = true;
+            runButton.disabled = true;
+            runButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Running...</div>';
+
+            // Temp overwrite console.log()
+            const defaultLog = console.log;
+            console.log = function(...args) {
+                // Still run original console log
+                defaultLog.apply(this,args);
+
+                addTerminalOutput(args);
+            }
+
+            try{
+                const canvas = document.createElement("canvas");
+                /*
+                //CANVAS OBJECT UNUSED (for now!)
+                canvas.id = "canvas";
+                canvas.width = 400;
+                canvas.height = 300;
+                */
+
+                addTerminalOutput(`\nRunning code...`, 'prompt');
+                const startTime = Date.now();
+
+                const run = new Function(["canvas"], code);
+                run(canvas);
+
+                //document.getElementById("canvas").replaceWith(canvas);
+
+                const finishTime = Date.now();
+                addTerminalOutput(`Process finished (${finishTime-startTime}ms)`, 'execution-time');
+                addTerminalOutput(`Ready to run your code!`, 'prompt');
+            } catch (error) {
+                console.error('❌ Execution error:', error);
+                addTerminalOutput('❌ Execution error:', 'error');
+                addTerminalOutput(error.message, 'error');
+            }
+
+            // Return console.log() to default functionality
+            console.log = defaultLog;
+            
+            isRunning = false;
+            runButton.disabled = false;
+            runButton.innerHTML = '<span>▶️</span>Run Code';
+        }
+
+        // Add output to terminal
+        function addTerminalOutput(text, type = 'normal') {
+            const line = document.createElement('div');
+            line.className = 'output-line';
+            
+            const timestamp = new Date().toLocaleTimeString();
+            
+            switch (type) {
+                case 'success':
+                    line.innerHTML = `<span class="output-success">${text}</span>`;
+                    break;
+                case 'error':
+                    line.innerHTML = `<span class="output-error">${text}</span>`;
+                    break;
+                case 'info':
+                    line.innerHTML = `<span class="output-info">${text}</span>`;
+                    break;
+                case 'warning':
+                    line.innerHTML = `<span class="output-warning">${text}</span>`;
+                    break;
+                case 'prompt':
+                    line.innerHTML = `<span class="output-prompt">>>> </span>${text}`;
+                    break;
+                case 'execution-time':
+                    line.innerHTML = `<span class="execution-time">${text}</span>`;
+                    break;
+                default:
+                    line.textContent = text;
+            }
+            
+            terminalOutput.appendChild(line);
+            terminalOutput.scrollTop = terminalOutput.scrollHeight;
+        }
+
+        // Clear terminal
+        function clearTerminal() {
+            terminalOutput.innerHTML = `
+                <div class="output-line">
+                    <span class="output-info">JavaScript - AI Code Assistant Terminal</span>
+                </div>
+                <div class="output-line">
+                    <span class="output-info">Write your code in the editor above and click "Run Code" to execute it.</span>
+                </div>
+                <div class="output-line">
+                    <span class="output-info">Shortcuts: Ctrl+Enter (Run) | Ctrl+Shift+C (Clear)</span>
+                </div>
+                <div class="output-line">
+                    <span class="output-prompt">>>> </span><span class="output-info">Ready to run your code!</span>
+                </div>
+            `;
+        }
+
 
         // RESIZE HANDLING
         const resize = {};
