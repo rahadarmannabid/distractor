@@ -279,6 +279,19 @@
             font-size: 11px; 
             font-style: italic;
         }
+
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #333;
+            border-radius: 50%;
+            border-top-color: #f8f8f2;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -332,9 +345,9 @@
                 <div class="sidebar-section">
                     <div class="red-box">
                         <h3>🔮 Problem Guess <span class="desc">(based on your code)</span></h3>
-                        <p>hello world</p>
+                        <p id="analysis"><span class="spinner"></span> Loading...</p>
                         <h3>⚠️ Next Line Suggestion</h3>
-                        <code>  let x = 5;</code>
+                        <code id="suggestionGuess"><span class="spinner"></span> Loading...</code>
                     </div>
                 </div>
                 <div class="sidebar-section">
@@ -342,7 +355,7 @@
                         <h3>📝 Problem Description</h3>
                         <p>This is a placeholder. We will also need to implement the next line suggestion with the correct description</p>
                         <h3>⚠️ Next Line Suggestion</h3>
-                        <code>  let x = 5;</code>
+                        <code id="suggestionDesc">  let x = 5;</code>
                     </div>
                 </div>
             </div>
@@ -352,7 +365,11 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs/loader.min.js"></script>
     <script>
-        // INITIALIZE MONACO
+        // INITIALIZE MONACO & ANALYSIS
+        let analysisTimeout;
+        let lastAnalyzedCode = '';
+        const ANALYSIS_DELAY = 1200; // Optimized delay for better UX
+
         require.config({ paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs" }});
         require(["vs/editor/editor.main"], function () {
             window.editor = monaco.editor.create(document.getElementById("editor"), {
@@ -361,7 +378,98 @@
                 theme: "vs-dark",
                 automaticLayout: true,
             });
+            window.editor.onDidChangeModelContent(e => {
+                const code = window.editor.getValue();
+                // detect new lines
+                if (code.split('\n').length === lastAnalyzedCode.split('\n').length) return;
+
+                debounceAnalysis();
+            });
+            debounceAnalysis(); // inital analysis
+            setInterval(debounceAnalysis, 10000); // try to analyze code every 10 seconds
         });
+
+        const analysis = document.getElementById("analysis");
+        const suggestionGuess = document.getElementById("suggestionGuess");
+        const suggestionDesc = document.getElementById("suggestionDesc");
+
+        // Debounced analysis with smart triggers
+        function debounceAnalysis() {
+            clearTimeout(analysisTimeout);
+            
+            const currentCode = window.editor.getValue();
+            if (currentCode === lastAnalyzedCode) return;
+            
+            // Immediate analysis for significant changes
+            const significantChange = Math.abs(currentCode.length - lastAnalyzedCode.length) > 20
+            
+            const delay = significantChange ? 500 : ANALYSIS_DELAY;
+            analysisTimeout = setTimeout(analyzeCode, delay);
+        }
+
+        // Enhanced API communication with retries
+        async function analyzeCode() {
+            const code = window.editor.getValue();
+            
+            if (code === lastAnalyzedCode) return;
+            lastAnalyzedCode = code;
+            
+            if (!code) {
+                analysis.innerHTML = `<span class="spinner"></span>Waiting for your code...`;
+                suggestionGuess.textContent = `<span class="spinner"></span>Waiting for your code...`;
+                return;
+            }
+
+            // Update status with enhanced feedback
+            analysis.innerHTML = '<div class="loading"><span class="spinner"></span>Analyzing your code...</div>';
+
+            try {
+                // Include user info in the request
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-User-ID': 0,
+                        'X-Assignment-Key': 0
+                    },
+                    body: JSON.stringify({ 
+                        code: code
+                    })
+                });
+                if (!response.ok) {
+                    throw new Error(`Server responded with status ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                const problemDescription = data.analysis || "Problem description not available";
+                analysis.textContent = problemDescription;
+                
+                // Clean and format suggested code (ensure max 2 lines)
+                let nextLineCode = data.next_line || "# No suggestions available";
+                nextLineCode = nextLineCode.replace(/^```python\n?|```$/g, '').trim();
+                // Ensure maximum 2 lines
+                const lines = nextLineCode.split('\n');
+                if (lines.length > 2) {
+                    nextLineCode = lines.slice(0, 2).join('\n');
+                }
+                
+                suggestionGuess.textContent = nextLineCode;
+            } catch (error) {
+                console.error('Analysis error:', error);
+                analysis.innerHTML = `
+                    <div class="error-message">
+                        <h3>🔌 Connection Issue</h3>
+                        <p><strong>Error:</strong> ${error.message}</p>
+                    </div>
+                `;
+                // Retry logic
+                setTimeout(() => {
+                    if (window.editor.getValue() === code) {
+                        debounceAnalysis();
+                    }
+                }, 5000);
+            }
+        }
 
         // BUTTONS
         const runButton = document.getElementById("runButton");
