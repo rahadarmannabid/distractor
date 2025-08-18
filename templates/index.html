@@ -563,7 +563,7 @@
                     line.innerHTML = `<span class="execution-time">${text}</span>`;
                     break;
                 default:
-                    line.textContent = text;
+                    line.innerHTML = `<pre>${text}</pre>`;
             }
             
             terminalOutput.appendChild(line);
