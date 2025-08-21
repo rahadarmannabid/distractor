@@ -405,7 +405,9 @@
 
         const analysis = document.getElementById("analysis");
         const suggestionGuess = document.getElementById("suggestionGuess");
+        const historyGuess = [];
         const suggestionDesc = document.getElementById("suggestionDesc");
+        const historyDesc = [];
 
         // Debounced analysis with smart triggers
         function debounceAnalysis() {
@@ -456,7 +458,6 @@
 
                 const data = await response.json();
                 const problemDescription = data.analysis || "Problem description not available";
-                analysis.textContent = problemDescription;
                 
                 // Clean and format suggested code (ensure max 2 lines)
                 let nextLineCode = data.next_line || "# No suggestions available";
@@ -466,8 +467,21 @@
                 if (lines.length > 2) {
                     nextLineCode = lines.slice(0, 2).join('\n');
                 }
-                
+
+                analysis.textContent = problemDescription;
                 suggestionGuess.textContent = nextLineCode;
+
+                historyGuess.push({
+                    timestamp: Date.now(),
+                    analysis: problemDescription,
+                    suggestion: nextLineCode
+                });
+                // TODO: implement suggestions based on correct problem description
+                // for now just add a timestamp for history
+                historyDesc.push({
+                    timestamp: Date.now(),
+                    suggestion: `  let x = 5;`
+                });
             } catch (error) {
                 console.error('Analysis error:', error);
                 analysis.innerHTML = `
