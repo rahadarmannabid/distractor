@@ -702,7 +702,7 @@
             const historyContent = document.createElement("div");
             historyContent.classList.add("sidebar-content");
             // most recent first
-            historyGuess.toReversed().map((item) => {
+            historyDesc.toReversed().map((item) => {
                 historyContent.appendChild(makeHistoryDescItem(item));
             });
             historyDescContent.replaceWith(historyContent);
