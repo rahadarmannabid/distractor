@@ -336,7 +336,6 @@
         <div id="sidebar">
             <div class="header">
                 <h2><span>❗</span> Information</h2>
-                <div class="history-button">Back</div>
             </div>
             <div class="sidebar-content">
                 <div class="sidebar-section">
@@ -472,16 +471,18 @@
                 suggestionGuess.textContent = nextLineCode;
 
                 historyGuess.push({
-                    timestamp: Date.now(),
+                    timestamp: new Date().toLocaleTimeString('en-US'),
                     analysis: problemDescription,
                     suggestion: nextLineCode
                 });
                 // TODO: implement suggestions based on correct problem description
                 // for now just add a timestamp for history
                 historyDesc.push({
-                    timestamp: Date.now(),
+                    timestamp: new Date().toLocaleTimeString('en-US'),
                     suggestion: `  let x = 5;`
                 });
+
+                updateHistory();
             } catch (error) {
                 console.error('Analysis error:', error);
                 analysis.innerHTML = `
@@ -616,11 +617,102 @@
             `;
         }
 
-        // HISTORY BUTTON
+        // HISTORY
+        const informationSidebar = document.getElementById("sidebar");
+        const historyGuessSidebar = makeHistorySidebar();
+        const historyDescSidebar = makeHistorySidebar();
+        
+        let historyGuessContent =  makeHistoryContent();
+        historyGuessSidebar.appendChild(historyGuessContent);
+        let historyDescContent =  makeHistoryContent();
+        historyDescSidebar.appendChild(historyDescContent);
+
         document.getElementById("history-guess").onclick = () => {
-            alert("hello!")
+            document.getElementById("sidebar").replaceWith(historyGuessSidebar);
         }
 
+        document.getElementById("history-desc").onclick = () => {
+            document.getElementById("sidebar").replaceWith(historyDescSidebar);
+        }
+
+        function makeHistorySidebar(){
+            const historySidebar = document.createElement("div");
+            historySidebar.id = "sidebar";
+
+            const header = document.createElement("div");
+            header.classList.add("header");
+            const h2 = document.createElement("h2");
+            h2.innerHTML = `<span>🕓</span> History`;
+            const button = document.createElement("div");
+            button.onclick = () => {
+                document.getElementById("sidebar").replaceWith(informationSidebar);
+            }
+            button.textContent = "Back";
+            button.classList.add("history-button");
+            header.appendChild(h2);
+            header.appendChild(button);
+
+            historySidebar.appendChild(header);
+            return historySidebar;
+        }
+
+        function makeHistoryContent(){
+            const historyContent = document.createElement("div");
+            historyContent.classList.add("sidebar-content");
+            return historyContent;
+        }
+
+        function makeHistoryGuessItem({timestamp, analysis, suggestion}){
+            const historyItem = document.createElement("div");
+            historyItem.classList.add("sidebar-section");
+            historyItem.innerHTML = `
+                    <div class="red-box">
+                        <h3>${timestamp}</h3>
+                        <p>${analysis}</p>
+                        <code>${suggestion}</code>
+                    </div>
+            `;
+            return historyItem;
+        }
+
+        function makeHistoryDescItem({timestamp, suggestion}){
+            const historyItem = document.createElement("div");
+            historyItem.classList.add("sidebar-section");
+            historyItem.innerHTML = `
+                    <div class="green-box">
+                        <h3>${timestamp}</h3>
+                        <code>${suggestion}</code>
+                    </div>
+            `;
+            return historyItem;
+        }
+
+        function updateHistoryGuessList(){
+            const historyContent = document.createElement("div");
+            historyContent.classList.add("sidebar-content");
+            // most recent first
+            historyGuess.toReversed().map((item) => {
+                historyContent.appendChild(makeHistoryGuessItem(item));
+            });
+            historyGuessContent.replaceWith(historyContent);
+            historyGuessContent = historyContent;
+        }
+
+        function updateHistoryDescList(){
+            const historyContent = document.createElement("div");
+            historyContent.classList.add("sidebar-content");
+            // most recent first
+            historyGuess.toReversed().map((item) => {
+                historyContent.appendChild(makeHistoryDescItem(item));
+            });
+            historyDescContent.replaceWith(historyContent);
+            historyDescContent = historyContent;
+        }
+
+        function updateHistory(){
+            updateHistoryGuessList();
+            updateHistoryDescList();
+        }
 
         // RESIZE HANDLING
         const resize = {};
