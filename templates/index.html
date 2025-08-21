@@ -275,9 +275,16 @@
         .sidebar-section p {
             line-height: 1.5;
         }
-        .desc {
-            font-size: 11px; 
-            font-style: italic;
+        .sidebar-header {
+            display: flex;
+            flex-direction: row;
+        }
+        h2, h3 {
+            flex: 1;
+        }
+        .history-button {
+            text-decoration: underline;
+            cursor: pointer;
         }
 
         .spinner {
@@ -329,6 +336,7 @@
         <div id="sidebar">
             <div class="header">
                 <h2><span>❗</span> Information</h2>
+                <div class="history-button">Back</div>
             </div>
             <div class="sidebar-content">
                 <div class="sidebar-section">
@@ -344,7 +352,10 @@
                 </div>
                 <div class="sidebar-section">
                     <div class="red-box">
-                        <h3>🔮 Problem Guess <span class="desc">(based on your code)</span></h3>
+                        <div class="sidebar-header">
+                            <h3>🔮 Problem Guess</h3>
+                            <div id="history-guess" class="history-button">View History</div>
+                        </div>
                         <p id="analysis"><span class="spinner"></span> Loading...</p>
                         <h3>⚠️ Next Line Suggestion</h3>
                         <code id="suggestionGuess"><span class="spinner"></span> Loading...</code>
@@ -352,7 +363,10 @@
                 </div>
                 <div class="sidebar-section">
                     <div class="green-box">
-                        <h3>📝 Problem Description</h3>
+                        <div class="sidebar-header">
+                            <h3>📝 Problem Description</h3>
+                            <div id="history-desc" class="history-button">View History</div>
+                        </div>
                         <p>This is a placeholder. We will also need to implement the next line suggestion with the correct description</p>
                         <h3>⚠️ Next Line Suggestion</h3>
                         <code id="suggestionDesc">  let x = 5;</code>
@@ -586,6 +600,11 @@
                     <span class="output-prompt">>>> </span><span class="output-info">Ready to run your code!</span>
                 </div>
             `;
+        }
+
+        // HISTORY BUTTON
+        document.getElementById("history-guess").onclick = () => {
+            alert("hello!")
         }
 
 
