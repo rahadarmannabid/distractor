@@ -15,12 +15,12 @@
         }
 
         /* Flex Container */
-        #container {
+        #application {
             display: flex;
             width: 100vw;
         }
         #content {
-            /* Child of #container flex-box */
+            /* Child of #application flex-box */
             flex:1;
             min-width: 0;
             /* Self flex-box */
@@ -84,11 +84,31 @@
             from { text-shadow: 0 0 5px rgba(255,255,255,0.3); }
             to { text-shadow: 0 0 10px rgba(255,255,255,0.6); }
         }
-        .header span {
+        span {
             animation: glow 2s ease-in-out infinite alternate;
         }
 
-        /* Terminal Button Styling */
+        /* Header Button Styling */
+        .user-info {
+            margin-left: auto;
+            color: #cccccc;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .logout-btn {
+            background: #ef4444;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            color: white;
+            font-size: 11px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+        .logout-btn:hover {
+            background: #dc2626;
+        }
         .terminal-controls {
             display: flex;
             align-items: center;
@@ -299,13 +319,189 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+        /* Hidden class for showing/hiding screens */
+        .hidden {
+            display: none !important;
+        }
+        /* Authentication Screen Styles */
+        .auth-screen {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #1e1e1e, #2d2d30);
+        }
+        .auth-container {
+            background: linear-gradient(135deg, #252526, #2d2d30);
+            border: 2px solid #404040;
+            border-radius: 12px;
+            padding: 40px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            width: 400px;
+            max-width: 90vw;
+        }
+        .auth-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .auth-title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #4fc3f7;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .auth-subtitle {
+            color: #cccccc;
+            font-size: 14px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        .auth-form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .form-label {
+            color: #569cd6;
+            font-size: 14px;
+            font-weight: 500;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        .form-input {
+            background: #1e1e1e;
+            border: 2px solid #404040;
+            border-radius: 6px;
+            padding: 12px 15px;
+            color: #d4d4d4;
+            font-family: inherit;
+            font-size: 14px;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: #4fc3f7;
+            box-shadow: 0 0 10px rgba(79, 195, 247, 0.3);
+        }
+        .form-input::placeholder {
+            color: #6c6c6c;
+            font-style: italic;
+        }
+        .auth-button {
+            background: linear-gradient(135deg, #4fc3f7, #29b6f6);
+            border: none;
+            border-radius: 6px;
+            padding: 14px 20px;
+            color: white;
+            font-family: 'Segoe UI', sans-serif;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .auth-button:hover {
+            background: linear-gradient(135deg, #29b6f6, #0288d1);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(79, 195, 247, 0.4);
+        }
+        .auth-button:active {
+            transform: translateY(0);
+        }
+        .auth-button:disabled {
+            background: #404040;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .auth-error {
+            background: linear-gradient(135deg, #2d1b1b, #3d2222);
+            border: 2px solid #ef4444;
+            border-radius: 6px;
+            padding: 12px 15px;
+            color: #ef4444;
+            font-size: 14px;
+            font-family: 'Segoe UI', sans-serif;
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .auth-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            color: #4fc3f7;
+            font-family: 'Segoe UI', sans-serif;
+        }
     </style>
 </head>
 <body>
-    <div id="container">
+    <!-- Authentication Screen -->
+    <div class="auth-screen" id="authScreen">
+        <div class="auth-container">
+            <div class="auth-header">
+                <div class="auth-title"><span>✏️</span>Guessing Editor</div>
+                <div class="auth-subtitle">
+                    Please enter your credentials to continue
+                </div>
+            </div>
+            
+            <form class="auth-form" id="authForm">
+                <div class="form-group">
+                    <label class="form-label" for="userId">User ID</label>
+                    <input 
+                        type="text" 
+                        id="userId" 
+                        name="userId" 
+                        class="form-input" 
+                        placeholder="Enter your user ID"
+                        required
+                    >
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="assignmentKey">Assignment Key</label>
+                    <input 
+                        type="text" 
+                        id="assignmentKey" 
+                        name="assignmentKey" 
+                        class="form-input" 
+                        placeholder="Enter your assignment key"
+                        required
+                    >
+                </div>
+                
+                <button type="submit" class="auth-button" id="authButton">
+                    Start Coding
+                </button>
+                
+                <div class="auth-error hidden" id="authError">
+                    <span>⚠️</span>
+                    <span id="authErrorMessage">Invalid credentials. Please try again.</span>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main App (Initally Hidden) -->
+    <div id="application" class="hidden">
         <div id="content">
             <div id="header" class="header">
                 <h2><span>✏️</span> Code Editor</h2>
+                <div class="user-info">
+                    <span id="userDisplay">User: --</span>
+                    <button class="logout-btn" id="logoutBtn">Logout</button>
+                </div>
             </div>
             <div id="editor"></div>
             <div id="resize-terminal"></div>
@@ -366,7 +562,7 @@
                             <h3>📝 Problem Description</h3>
                             <div id="history-desc" class="history-button">View History</div>
                         </div>
-                        <p>This is a placeholder. We will also need to implement the next line suggestion with the correct description</p>
+                        <p id="problemDescriptionDisplay">This is a placeholder. We will also need to implement the next line suggestion with the correct description</p>
                         <h3>⚠️ Next Line Suggestion</h3>
                         <code id="suggestionDesc">  let x = 5;</code>
                     </div>
@@ -378,30 +574,153 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs/loader.min.js"></script>
     <script>
+        // Load Local Storage Data (Saves on refresh)
+        const savedUser = JSON.parse(localStorage.getItem('savedUser') || 'null') || {};
+        const savedCode = localStorage.getItem('savedCode') || null;
+
+        // Global variables for user session
+        let currentUser = {
+            userId: savedUser.userId || null,
+            assignmentKey: savedUser.assignmentKey || null,
+            problemDescription: savedUser.problemDescription || null
+        };
+
+        // AUTHENTICATION HANDLING
+        const authScreen = document.getElementById('authScreen');
+        const mainApp = document.getElementById('application');
+        const authForm = document.getElementById('authForm');
+        const authButton = document.getElementById('authButton');
+        const authError = document.getElementById('authError');
+        const authErrorMessage = document.getElementById('authErrorMessage');
+        const userDisplay = document.getElementById('userDisplay');
+        const problemDescriptionDisplay = document.getElementById('problemDescriptionDisplay');
+
+        // Load app if user data found
+        let initalized = false;
+        if (savedUser.userId){
+            showMainApp();
+        }
+
+        // Handle authentication form submission
+        authForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const userId = document.getElementById('userId').value.trim();
+            const assignmentKey = document.getElementById('assignmentKey').value.trim();
+            
+            if (!userId || !assignmentKey) {
+                showAuthError('Please fill in both User ID and Assignment Key');
+                return;
+            }
+            
+            // Show loading state
+            authButton.disabled = true;
+            authButton.innerHTML = '<div class="auth-loading"><span class="spinner"></span>Authenticating...</div>';
+            hideAuthError();
+            
+            // Simulate authentication (you can replace this with actual API call)
+            try {
+                await authenticateUser(userId, assignmentKey);
+            } catch (error) {
+                showAuthError(error.message);
+                authButton.disabled = false;
+                authButton.textContent = 'Start Coding';
+            }
+        });
+
+        // Simulate user authentication (replace with real API call)
+        async function authenticateUser(userId, assignmentKey) {
+            // Simulate API delay
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            
+            // For demo purposes, accept any non-empty credentials
+            // In production, you would validate against your backend
+            if (userId.length >= 3 && assignmentKey.length >= 5) {
+                // TODO: With Firebase connection get the actual problem description from assignment key
+                const problemDescription = null;
+
+                currentUser = { userId, assignmentKey, problemDescription};
+                
+                // Save to localStorage for session persistence
+                localStorage.setItem('savedUser', JSON.stringify(currentUser));
+                
+                showMainApp();
+            } else {
+                throw new Error('Invalid credentials. User ID must be at least 3 characters and Assignment Key at least 5 characters.');
+            }
+        }
+
+        // Show authentication error
+        function showAuthError(message) {
+            authErrorMessage.textContent = message;
+            authError.classList.remove('hidden');
+        }
+
+        // Hide authentication error
+        function hideAuthError() {
+            authError.classList.add('hidden');
+        }
+
+        // Show main application
+        function showMainApp() {
+            // Initialize the code editor
+            if (!initalized){
+                initializeEditor();
+                initalized = true;
+            } else {
+                // don't initialize, just reset value (happens when login second time)
+                window.editor.setValue("// Write JavaScript here\nconsole.log('Hello World');")
+            }
+
+            // Show everything
+            authScreen.classList.add('hidden');
+            mainApp.classList.remove('hidden');
+            userDisplay.textContent = `User: ${currentUser.userId}`;
+            problemDescriptionDisplay.textContent = currentUser.problemDescription;
+        }
+
+        // Logout functionality
+        document.getElementById('logoutBtn').addEventListener('click', () => {
+            currentUser = { userId: null, assignmentKey: null, problemDescription: null };
+            localStorage.removeItem('savedUser');
+            localStorage.removeItem('savedCode');
+            
+            // Reset the auth form
+            authForm.reset();
+            authButton.disabled = false;
+            authButton.textContent = 'Start Coding';
+            hideAuthError();
+            
+            // Show auth screen
+            mainApp.classList.add('hidden');
+            authScreen.classList.remove('hidden');
+        });
+
         // INITIALIZE MONACO & ANALYSIS
         let analysisTimeout;
         let lastAnalyzedCode = '';
         const ANALYSIS_DELAY = 1200; // Optimized delay for better UX
 
-        require.config({ paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs" }});
-        require(["vs/editor/editor.main"], function () {
-            window.editor = monaco.editor.create(document.getElementById("editor"), {
-                value: "// Write JavaScript here\nconsole.log('Hello World');",
-                language: "javascript",
-                theme: "vs-dark",
-                automaticLayout: true,
+        function initializeEditor(){
+            require.config({ paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs" }});
+            require(["vs/editor/editor.main"], function () {
+                window.editor = monaco.editor.create(document.getElementById("editor"), {
+                    value: savedCode || "// Write JavaScript here\nconsole.log('Hello World');",
+                    language: "javascript",
+                    theme: "vs-dark",
+                    automaticLayout: true,
+                });
+                window.editor.onDidChangeModelContent(e => {
+                    const code = window.editor.getValue();
+                    // detect new lines
+                    if (code.split('\n').length === lastAnalyzedCode.split('\n').length) return;
+                    debounceAnalysis();
+                });
+                debounceAnalysis(); // inital analysis
+                setInterval(debounceAnalysis, 10000); // try to analyze code every 10 seconds
             });
-            window.editor.onDidChangeModelContent(e => {
-                const code = window.editor.getValue();
-                // detect new lines
-                if (code.split('\n').length === lastAnalyzedCode.split('\n').length) return;
-
-                debounceAnalysis();
-            });
-            debounceAnalysis(); // inital analysis
-            setInterval(debounceAnalysis, 10000); // try to analyze code every 10 seconds
-        });
-
+        }
+        
         const analysis = document.getElementById("analysis");
         const suggestionGuess = document.getElementById("suggestionGuess");
         const historyGuess = [];
@@ -413,6 +732,9 @@
             clearTimeout(analysisTimeout);
             
             const currentCode = window.editor.getValue();
+            // Save code progress to Local Storage
+            localStorage.setItem('savedCode', currentCode);
+
             if (currentCode === lastAnalyzedCode) return;
             
             // Immediate analysis for significant changes
@@ -430,8 +752,8 @@
             lastAnalyzedCode = code;
             
             if (!code) {
-                analysis.innerHTML = `<span class="spinner"></span>Waiting for your code...`;
-                suggestionGuess.textContent = `<span class="spinner"></span>Waiting for your code...`;
+                analysis.innerHTML = `<span class="spinner"></span> Waiting for your code...`;
+                suggestionGuess.innerHTML = `<span class="spinner"></span> Waiting for your code...`;
                 return;
             }
 
