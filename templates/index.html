@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Secure Realtime DB Code Assistant</title>
+    <title>AI Guessing</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
     <style>
         * {
@@ -1424,85 +1424,101 @@
         }
 
         // Analyze current code - FIXED: Better error handling and consistent field names
-        async function analyzeCurrentCode() {
-            if (!currentSession.sessionId) {
-                console.warn('No active session for code analysis');
-                return;
-            }
-            
-            const code = window.editor.getValue().trim();
-            if (!code || code === '// Start coding here...') return;
+        // FIXED: Analyze current code with separate suggestions for AI guess and correct description
+async function analyzeCurrentCode() {
+    if (!currentSession.sessionId) {
+        console.warn('No active session for code analysis');
+        return;
+    }
+    
+    const code = window.editor.getValue().trim();
+    if (!code || code === '// Start coding here...') return;
 
-            try {
-                const response = await fetch('/analyze', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        code: code,
-                        user_id: currentSession.userId,
-                        assignment_key: currentSession.assignmentKey,
-                        session_id: currentSession.sessionId
-                    })
-                });
+    try {
+        const response = await fetch('/analyze', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                code: code,
+                user_id: currentSession.userId,
+                assignment_key: currentSession.assignmentKey,
+                session_id: currentSession.sessionId
+            })
+        });
 
-                if (!response.ok) {
-                    throw new Error(`Analysis failed: ${response.statusText}`);
-                }
+        if (!response.ok) {
+            throw new Error(`Analysis failed: ${response.statusText}`);
+        }
 
-                const data = await response.json();
-                const problemDescription = data.analysis || "Problem description not available";
-                let nextLineCode = data.next_line || "// No suggestions available";
+        const data = await response.json();
+        const problemDescription = data.analysis || "Problem description not available";
+        let nextLineCode = data.next_line || "// No suggestions available";
+        
+        // FIXED: Handle separate suggestions for condition 1
+        let correctNextLineCode = nextLineCode; // Default fallback
+        if (currentSession.condition === 1 && data.correct_next_line) {
+            correctNextLineCode = data.correct_next_line;
+        }
 
-                // Clean and format suggested code
-                nextLineCode = nextLineCode.replace(/^```\w*\n?|```$/g, '').trim();
-                const lines = nextLineCode.split('\n');
-                if (lines.length > 2) {
-                    nextLineCode = lines.slice(0, 2).join('\n');
-                }
-
-                analysis.textContent = problemDescription;
-                document.getElementById('suggestionGuess').textContent = nextLineCode;
-
-                // FIXED: Store in guess history with consistent field names
-                currentSession.guessHistory.push({
-                    timestamp: new Date().toISOString(),
-                    problemAnalysis: problemDescription, // FIXED: Consistent field name
-                    nextLine: nextLineCode
-                });
-
-                // Update log counts
-                currentSession.guessLogCount++;
-                guessLogCount.textContent = currentSession.guessLogCount;
-
-                // For condition 1, also update description-based suggestions
-                if (currentSession.condition === 1) {
-                    const descBasedSuggestion = nextLineCode; // Remove the comment addition
-                    document.getElementById('suggestionDesc').textContent = descBasedSuggestion;
-                    
-                    // FIXED: Store in description history with consistent field names
-                    currentSession.descHistory.push({
-                        timestamp: new Date().toISOString(),
-                        problemAnalysis: currentSession.problemDescription || problemDescription, // Use stored problem description
-                        nextLine: descBasedSuggestion
-                    });
-                    
-                    currentSession.descLogCount++;
-                    descLogCount.textContent = currentSession.descLogCount;
-                }
-
-            } catch (error) {
-                console.error('Analysis error:', error);
-                analysis.innerHTML = `
-                    <div class="error-message">
-                        <h3>Connection Issue</h3>
-                        <p><strong>Error:</strong> ${error.message}</p>
-                        <p>Local logging continues...</p>
-                    </div>
-                `;
+        // Clean and format suggested code
+        nextLineCode = nextLineCode.replace(/^```\w*\n?|```$/g, '').trim();
+        const lines = nextLineCode.split('\n');
+        if (lines.length > 2) {
+            nextLineCode = lines.slice(0, 2).join('\n');
+        }
+        
+        // Clean correct suggestion too
+        if (correctNextLineCode !== nextLineCode) {
+            correctNextLineCode = correctNextLineCode.replace(/^```\w*\n?|```$/g, '').trim();
+            const correctLines = correctNextLineCode.split('\n');
+            if (correctLines.length > 2) {
+                correctNextLineCode = correctLines.slice(0, 2).join('\n');
             }
         }
+
+        // FIXED: Display AI guess suggestion (red box)
+        analysis.textContent = problemDescription;
+        document.getElementById('suggestionGuess').textContent = nextLineCode;
+
+        // Store in guess history
+        currentSession.guessHistory.push({
+            timestamp: new Date().toISOString(),
+            problemAnalysis: problemDescription,
+            nextLine: nextLineCode
+        });
+
+        // Update log counts
+        currentSession.guessLogCount++;
+        guessLogCount.textContent = currentSession.guessLogCount;
+
+        // FIXED: For condition 1, display separate correct description suggestion (green box)
+        if (currentSession.condition === 1) {
+            document.getElementById('suggestionDesc').textContent = correctNextLineCode;
+            
+            // Store in description history with correct problem description
+            currentSession.descHistory.push({
+                timestamp: new Date().toISOString(),
+                problemAnalysis: currentSession.problemDescription || problemDescription,
+                nextLine: correctNextLineCode
+            });
+            
+            currentSession.descLogCount++;
+            descLogCount.textContent = currentSession.descLogCount;
+        }
+
+    } catch (error) {
+        console.error('Analysis error:', error);
+        analysis.innerHTML = `
+            <div class="error-message">
+                <h3>Connection Issue</h3>
+                <p><strong>Error:</strong> ${error.message}</p>
+                <p>Local logging continues...</p>
+            </div>
+        `;
+    }
+}
 
         // Terminal and execution functionality
         const runButton = document.getElementById("runButton");

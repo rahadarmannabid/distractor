@@ -487,7 +487,7 @@ def analyze_problem_statement(existing_code):
     {existing_code}
     ```
 
-    Provide ONLY a brief description of what problem this code is trying to solve. Keep it concise (1-3 sentences max).
+    Provide ONLY a brief description of what problem this code is trying to solve. Keep it concise.
     
     Examples of good responses:
     - "This code implements a factorial function using recursion"
@@ -618,12 +618,13 @@ class CodeRequest(BaseModel):
 class CodeResponse(BaseModel):
     analysis: str
     next_line: str
+    correct_next_line: Optional[str] = None
 
 @app.post("/analyze", response_model=CodeResponse)
 async def analyze_code(request: CodeRequest):
     """
     Continuously analyze the provided code using OpenAI and return analysis + next line suggestion
-    Logs all analysis to session for later Firebase upload on submission only
+    FIXED: Generate separate suggestions for AI guess and correct description
     """
     try:
         code = request.code.strip()
@@ -655,47 +656,71 @@ async def analyze_code(request: CodeRequest):
         problem_description = re.sub(r'^Problem.*?:\s*', '', problem_description, flags=re.IGNORECASE)
         problem_description = problem_description.strip()
         
-        # Step 2: Predict the next line
-        next_line = predict_next_line(problem_description, code)
+        # Step 2: Predict the next line based on AI analysis
+        ai_next_line = predict_next_line(problem_description, code)
         
         # Enhanced cleaning for single line output
-        next_line = re.sub(r'```\w*\n?', '', next_line)
-        next_line = re.sub(r'```\n?', '', next_line)
-        next_line = re.sub(r'^Next line[s]?:\s*', '', next_line, flags=re.IGNORECASE)
-        next_line = re.sub(r'^Here[\'s\s]+.*?:\s*', '', next_line, flags=re.IGNORECASE)
+        ai_next_line = re.sub(r'```\w*\n?', '', ai_next_line)
+        ai_next_line = re.sub(r'```\n?', '', ai_next_line)
+        ai_next_line = re.sub(r'^Next line[s]?:\s*', '', ai_next_line, flags=re.IGNORECASE)
+        ai_next_line = re.sub(r'^Here[\'s\s]+.*?:\s*', '', ai_next_line, flags=re.IGNORECASE)
         
         # Ensure only 1-2 lines maximum
-        lines = next_line.strip().split('\n')
+        lines = ai_next_line.strip().split('\n')
         if len(lines) > 2:
-            next_line = '\n'.join(lines[:2])
+            ai_next_line = '\n'.join(lines[:2])
         else:
-            next_line = next_line.strip()
+            ai_next_line = ai_next_line.strip()
         
         # Ensure we have something useful
-        if not next_line or len(next_line.strip()) < 2:
+        if not ai_next_line or len(ai_next_line.strip()) < 2:
             language = detect_programming_language(code)
             if language == "python":
-                next_line = "# Continue your implementation here"
+                ai_next_line = "# Continue your implementation here"
             elif language in ["javascript", "java", "cpp", "csharp"]:
-                next_line = "// Continue your implementation here"
+                ai_next_line = "// Continue your implementation here"
             elif language == "html":
-                next_line = "<!-- Continue your markup here -->"
+                ai_next_line = "<!-- Continue your markup here -->"
             elif language == "css":
-                next_line = "/* Continue your styles here */"
+                ai_next_line = "/* Continue your styles here */"
             else:
-                next_line = "// Continue your implementation here"
+                ai_next_line = "// Continue your implementation here"
         
-        # Step 3: Generate full code suggestion based on AI analysis
+        # FIXED: Step 3 - For condition 1, generate separate next line based on correct description
+        correct_next_line = ai_next_line  # Default fallback
+        session_log = None
+        if session_id and session_id in active_sessions:
+            session_log = active_sessions[session_id]
+            if session_log.condition == 1 and session_log.problem_description:
+                # Generate next line based on correct problem description
+                correct_next_line = predict_next_line(session_log.problem_description, code)
+                
+                # Clean the correct suggestion too
+                correct_next_line = re.sub(r'```\w*\n?', '', correct_next_line)
+                correct_next_line = re.sub(r'```\n?', '', correct_next_line)
+                correct_next_line = re.sub(r'^Next line[s]?:\s*', '', correct_next_line, flags=re.IGNORECASE)
+                correct_next_line = re.sub(r'^Here[\'s\s]+.*?:\s*', '', correct_next_line, flags=re.IGNORECASE)
+                
+                # Ensure only 1-2 lines maximum
+                correct_lines = correct_next_line.strip().split('\n')
+                if len(correct_lines) > 2:
+                    correct_next_line = '\n'.join(correct_lines[:2])
+                else:
+                    correct_next_line = correct_next_line.strip()
+                
+                # Ensure we have something useful
+                if not correct_next_line or len(correct_next_line.strip()) < 2:
+                    correct_next_line = ai_next_line  # Fallback to AI suggestion
+        
+        # Step 4: Generate full code suggestions
         ai_full_code_suggestion = generate_full_code_suggestion(problem_description, code, is_correct_description=False)
         
         # Log this analysis to session if session_id provided
-        if session_id and session_id in active_sessions:
-            session_log = active_sessions[session_id]
-            
-            # Create AI guess entry for problem guessing - FIXED field names
+        if session_log:
+            # Create AI guess entry for problem guessing
             ai_guess_entry = AIGuessEntry(
-                problem_analysis=problem_description,  # FIXED: Use correct field name
-                next_line_suggestion=next_line,
+                problem_analysis=problem_description,
+                next_line_suggestion=ai_next_line,
                 full_code_suggestion=ai_full_code_suggestion,
                 timestamp=datetime.now().isoformat(),
                 analysis_type="ai_problem_guess"
@@ -707,20 +732,18 @@ async def analyze_code(request: CodeRequest):
                 if session_log.correct_description_history is None:
                     session_log.correct_description_history = []
                 
-                # FIXED: Use the stored problem description from session
                 correct_problem_description = session_log.problem_description
-                
                 if not correct_problem_description:
                     logger.warning(f"No problem description available for session {session_id}")
                     correct_problem_description = problem_description  # Fallback to AI analysis
                 
-                # Step 4: Generate full code suggestion based on correct description
+                # Generate full code suggestion based on correct description
                 correct_full_code_suggestion = generate_full_code_suggestion(correct_problem_description, code, is_correct_description=True)
                 
                 # Generate suggestion based on correct problem description
                 correct_desc_entry = AIGuessEntry(
-                    problem_analysis=correct_problem_description,  # FIXED: Use correct field name
-                    next_line_suggestion=next_line,  # Same next line, different context
+                    problem_analysis=correct_problem_description,
+                    next_line_suggestion=correct_next_line,  # FIXED: Use correct next line
                     full_code_suggestion=correct_full_code_suggestion,
                     timestamp=datetime.now().isoformat(),
                     analysis_type="correct_description"
@@ -730,9 +753,11 @@ async def analyze_code(request: CodeRequest):
             # Update local backup only
             save_session_to_local(session_log)
         
+        # FIXED: Return both suggestions
         return CodeResponse(
             analysis=problem_description,
-            next_line=next_line
+            next_line=ai_next_line,
+            correct_next_line=correct_next_line if session_log and session_log.condition == 1 else None
         )
         
     except HTTPException:
