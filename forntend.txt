@@ -1,0 +1,1822 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Secure Realtime DB Code Assistant</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+    <style>
+        * {
+            margin: 0px;
+        }
+        body {
+            font-family: 'Consolas', 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+
+        /* Flex Container */
+        #application {
+            display: flex;
+            width: 100vw;
+        }
+        #content {
+            flex:1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        #editor {
+            min-height: 0;
+            flex:1;
+        }
+        #terminal {
+            height: 30vh;
+        }
+        #sidebar {
+            width: 30vw;
+        }
+
+        /* Resizing */
+        #resize-sidebar {
+            width: 5px;
+            background-color: darkgray;
+            cursor: ew-resize;
+        }
+        #resize-terminal {
+            height: 5px;
+            background-color: darkgray;
+            cursor: ns-resize;
+        }
+
+        /* Dark Theme Scrollbar */
+        *::-webkit-scrollbar {
+            width: 8px;
+        }
+        *::-webkit-scrollbar-track {
+            background: #1e1e1e;
+        }
+        *::-webkit-scrollbar-thumb {
+            background: #404040;
+            border-radius: 4px;
+        }
+        *::-webkit-scrollbar-thumb:hover {
+            background: #505050;
+        }
+
+        /* Header Styling */
+        .header {
+            display: flex;
+            align-items: center;
+            background: linear-gradient(135deg, #2d2d30, #3e3e42);
+            padding: 12px 15px;
+            border-bottom: 1px solid #333;
+            gap: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            white-space: nowrap;
+            overflow-x: clip;
+        }
+
+        /* Header Button Styling */
+        .user-info {
+            margin-left: auto;
+            color: #cccccc;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .logout-btn {
+            background: #ef4444;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            color: white;
+            font-size: 11px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+        .logout-btn:hover {
+            background: #dc2626;
+        }
+        .terminal-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-left: auto;
+        }
+        .run-button {
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            border: none;
+            border-radius: 4px;
+            padding: 6px 12px;
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .run-button:hover {
+            background: linear-gradient(135deg, #16a34a, #15803d);
+            transform: translateY(-1px);
+            box-shadow: 0 3px 8px rgba(34, 197, 94, 0.4);
+        }
+        .run-button:disabled {
+            background: #404040;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .clear-button {
+            background: #404040;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 12px;
+            color: #cccccc;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .submit-button {
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            border: none;
+            border-radius: 4px;
+            padding: 6px 12px;
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .submit-button:hover {
+            background: linear-gradient(135deg, #ea580c, #dc2626);
+            transform: translateY(-1px);
+            box-shadow: 0 3px 8px rgba(249, 115, 22, 0.4);
+        }
+        .submit-button:disabled {
+            background: #404040;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* Font Size Controls */
+        .font-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(64, 64, 64, 0.3);
+            padding: 4px 8px;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+        .font-button {
+            background: #569cd6;
+            border: none;
+            border-radius: 3px;
+            padding: 4px 8px;
+            color: white;
+            font-size: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            min-width: 24px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .font-button:hover {
+            background: #4a86c7;
+            transform: translateY(-1px);
+        }
+        .font-button:active {
+            transform: translateY(0);
+        }
+        .font-size-display {
+            color: #cccccc;
+            font-size: 10px;
+            font-weight: 500;
+            min-width: 30px;
+            text-align: center;
+        }
+
+        /* Terminal Output Styling */
+        .terminal {
+            display: flex;
+            flex-direction: column;
+        }
+        .terminal-output {
+            font-size: 14px;
+            line-height: 1.5;
+            padding: 15px;
+            overflow-y: auto;
+            word-break: break-word;
+        }
+        .output-line {
+            margin: 2px 0;
+        }
+        .output-prompt {
+            color: #f97316;
+            font-weight: bold;
+        }
+        .output-success {
+            color: #22c55e;
+        }
+        .output-error {
+            color: #ff6b6b;
+        }
+        .output-info {
+            color: #74c0fc;
+        }
+        .output-warning {
+            color: #ffd43b;
+        }
+        .execution-time {
+            color: #868e96;
+            font-size: 12px;
+            font-style: italic;
+            margin-top: 5px;
+        }
+        .terminal-loading {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #f59e0b;
+            margin: 10px 0;
+        }
+        .terminal-spinner {
+            width: 12px;
+            height: 12px;
+            border: 2px solid #333;
+            border-radius: 50%;
+            border-top-color: #f59e0b;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        /* Sidebar Styling */
+        #sidebar {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .sidebar-content {
+            overflow-y: auto;
+        }
+        .sidebar-section {
+            padding: 20px;
+            border-bottom: 1px solid #333;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        .sidebar-section .green-box {
+            background: linear-gradient(135deg, #0e2f1e, #1a4d2e);
+            border: 2px solid #14532d;
+            border-radius: 8px;
+            padding: 20px;
+            line-height: 2;
+            color: #4ade80;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        .sidebar-section .red-box {
+            background: linear-gradient(135deg, #0e1a2f, #1a2d4d);
+            border: 2px solid #142953;
+            border-radius: 8px;
+            padding: 20px;
+            line-height: 2;
+            color: #4a83de;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        .sidebar-section code {
+            white-space: pre-wrap;
+            background: #2d2d2d;
+            padding: 3px 8px;
+            border-radius: 4px;
+            color: #f8f8f2;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 14px;
+            border: 1px solid #404040;
+            display: block;
+        }
+        .suggestion-button {
+            background: linear-gradient(135deg, #1e1e1e, #2d2d2d);
+            border: 1px solid #404040;
+            border-radius: 6px;
+            padding: 2px 12px;
+            color: #d4d4d4;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            cursor: pointer;
+            display: block;
+            width: 100%;
+            text-align: left;
+            white-space: pre-wrap;
+            transition: all 0.2s ease;
+            margin-top: 2px;
+            position: relative;
+            overflow: hidden;
+            line-height: 1.4;
+        }
+        .suggestion-button:hover {
+            background: linear-gradient(135deg, #2d2d2d, #3d3d3d);
+            border-color: #569cd6;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .suggestion-button:active {
+            transform: translateY(0);
+        }
+        .suggestion-button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #569cd6, transparent);
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        .suggestion-button:hover::before {
+            opacity: 1;
+        }
+        .suggestion-button::after {
+            content: '⚡ Click to insert';
+            position: absolute;
+            top: 4px;
+            right: 8px;
+            font-size: 10px;
+            color: #888;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            pointer-events: none;
+        }
+        .suggestion-button:hover::after {
+            opacity: 1;
+        }
+        .suggestion-button.red-theme {
+            border-left: 3px solid #de4a4a;
+        }
+        .suggestion-button.red-theme:hover {
+            border-left-color: #ff6b6b;
+            box-shadow: 0 4px 12px rgba(222, 74, 74, 0.2);
+        }
+        .suggestion-button.red-theme::before {
+            background: linear-gradient(90deg, transparent, #de4a4a, transparent);
+        }
+        .suggestion-button.green-theme {
+            border-left: 3px solid #4ade80;
+        }
+        .suggestion-button.green-theme:hover {
+            border-left-color: #22c55e;
+            box-shadow: 0 4px 12px rgba(74, 222, 128, 0.2);
+        }
+        .suggestion-button.green-theme::before {
+            background: linear-gradient(90deg, transparent, #4ade80, transparent);
+        }
+        .suggestion-content {
+            display: block;
+            padding-right: 80px;
+        }
+        .sidebar-section p {
+            line-height: 1.5;
+        }
+        .sidebar-header {
+            display: flex;
+            flex-direction: row;
+        }
+        h2, h3 {
+            flex: 1;
+        }
+        .history-button {
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #333;
+            border-radius: 50%;
+            border-top-color: #f8f8f2;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Hidden class for showing/hiding screens */
+        .hidden {
+            display: none !important;
+        }
+        
+        /* Authentication Screen Styles */
+        .auth-screen {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #1e1e1e, #2d2d30);
+        }
+        .auth-container {
+            background: linear-gradient(135deg, #252526, #2d2d30);
+            border: 2px solid #404040;
+            border-radius: 12px;
+            padding: 40px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            width: 400px;
+            max-width: 90vw;
+        }
+        .auth-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .auth-title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #f97316;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .auth-subtitle {
+            color: #cccccc;
+            font-size: 14px;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        .auth-form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .form-label {
+            color: #569cd6;
+            font-size: 14px;
+            font-weight: 500;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        .form-input {
+            background: #1e1e1e;
+            border: 2px solid #404040;
+            border-radius: 6px;
+            padding: 12px 15px;
+            color: #d4d4d4;
+            font-family: inherit;
+            font-size: 14px;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: #f97316;
+            box-shadow: 0 0 10px rgba(249, 115, 22, 0.3);
+        }
+        .form-input::placeholder {
+            color: #6c6c6c;
+            font-style: italic;
+        }
+        .auth-button {
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            border: none;
+            border-radius: 6px;
+            padding: 14px 20px;
+            color: white;
+            font-family: 'Segoe UI', sans-serif;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .auth-button:hover {
+            background: linear-gradient(135deg, #ea580c, #dc2626);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(249, 115, 22, 0.4);
+        }
+        .auth-button:active {
+            transform: translateY(0);
+        }
+        .auth-button:disabled {
+            background: #404040;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .auth-error {
+            background: linear-gradient(135deg, #2d1b1b, #3d2222);
+            border: 2px solid #ef4444;
+            border-radius: 6px;
+            padding: 12px 15px;
+            color: #ef4444;
+            font-size: 14px;
+            font-family: 'Segoe UI', sans-serif;
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .auth-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            color: #f97316;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        
+        /* Condition indicator */
+        .condition-indicator {
+            background: linear-gradient(135deg, #1e3a8a, #3b82f6);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .condition-2 .condition-indicator {
+            background: linear-gradient(135deg, #7c2d12, #ea580c);
+        }
+
+        /* Session indicator */
+        .session-indicator {
+            background: linear-gradient(135deg, #059669, #10b981);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Success message styles for logout */
+        .success-message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: linear-gradient(135deg, #059669, #10b981);
+            color: white;
+            padding: 20px 30px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            z-index: 9999;
+            min-width: 300px;
+        }
+
+        .success-message .countdown {
+            font-size: 14px;
+            margin-top: 10px;
+            opacity: 0.9;
+        }
+
+        /* Markdown formatting styles for problem description */
+        #problemDescriptionDisplay {
+            white-space: normal;
+            line-height: 1.6;
+        }
+
+        #problemDescriptionDisplay h1, 
+        #problemDescriptionDisplay h2, 
+        #problemDescriptionDisplay h3 {
+            color: #4ade80;
+            margin: 10px 0 5px 0;
+        }
+
+        #problemDescriptionDisplay p {
+            margin: 8px 0;
+        }
+
+        #problemDescriptionDisplay code {
+            background: #2d2d2d;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+        }
+
+        #problemDescriptionDisplay pre {
+            background: #2d2d2d;
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+
+        #problemDescriptionDisplay ul, 
+        #problemDescriptionDisplay ol {
+            padding-left: 20px;
+            margin: 8px 0;
+        }
+
+        #problemDescriptionDisplay li {
+            margin: 4px 0;
+        }
+    </style>
+</head>
+<body>
+    <!-- Authentication Screen -->
+    <div class="auth-screen" id="authScreen">
+        <div class="auth-container">
+            <div class="auth-header">
+                <div class="auth-title">🔒 AI Guessing</div>
+                <div class="auth-subtitle">
+                    Strict authentication required - invalid keys will be rejected
+                </div>
+            </div>
+            
+            <form class="auth-form" id="authForm">
+                <div class="form-group">
+                    <label class="form-label" for="userId">User ID</label>
+                    <input 
+                        type="text" 
+                        id="userId" 
+                        name="userId" 
+                        class="form-input" 
+                        placeholder="Enter your user ID"
+                        required
+                        minlength="3"
+                        autocomplete="off"
+                    >
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="assignmentKey">Assignment Key</label>
+                    <input 
+                        type="text" 
+                        id="assignmentKey" 
+                        name="assignmentKey" 
+                        class="form-input" 
+                        placeholder="Enter valid assignment key"
+                        required
+                        minlength="5"
+                        autocomplete="off"
+                    >
+                    <small style="color: #888; font-size: 11px; margin-top: 4px;">
+                        Only valid assignment keys will be accepted. Random keys will be rejected.
+                    </small>
+                </div>
+                
+                <button type="submit" class="auth-button" id="authButton">
+                    Start Secure Session
+                </button>
+                
+                <div class="auth-error hidden" id="authError">
+                    <span>⚠️</span>
+                    <span id="authErrorMessage">Authentication failed. Please try again.</span>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main App (Initially Hidden) -->
+    <div id="application" class="hidden">
+        <div id="content">
+            <div id="header" class="header">
+                <h2>🔒 AI Guessing</h2>
+                <div class="font-controls">
+                    <button class="font-button" id="decreaseFontBtn">A-</button>
+                    <span class="font-size-display" id="fontSizeDisplay">14px</span>
+                    <button class="font-button" id="increaseFontBtn">A+</button>
+                </div>
+                <div class="user-info">
+                    <span class="session-indicator" id="sessionIndicator">Session: --</span>
+                    <span class="condition-indicator" id="conditionIndicator">Condition ?</span>
+                    <span id="userDisplay">User: --</span>
+                    <button class="logout-btn" id="logoutBtn">End Session</button>
+                </div>
+            </div>
+            <div id="editor"></div>
+            <div id="resize-terminal"></div>
+            <div class="terminal" id="terminal">
+                <div class="header">
+                    <h2>💻 Terminal</h2>
+                    <div class="terminal-controls">
+                        <button class="run-button" id="runButton">▶️ Run</button>
+                        <button class="clear-button" id="clearButton">Clear</button>
+                        <button class="submit-button" id="submitButton">🔥 Submit & Logout</button>
+                    </div>
+                </div>
+                <div class="terminal-output" id="terminalOutput">
+                    <div class="output-line">
+                        <span class="output-info">Secure Database-Integrated Code Assistant Terminal</span>
+                    </div>
+                    <div class="output-line">
+                        <span class="output-info">All coding activity is logged. Automatic logout after submission.</span>
+                    </div>
+                    <div class="output-line">
+                        <span class="output-prompt">>>> </span><span class="output-info">Ready to start coding!</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="resize-sidebar"></div>
+        <div id="sidebar">
+            <div class="header">
+                <h2>📊 AI Analysis</h2>
+            </div>
+            <div class="sidebar-content">
+                <!-- Problem Guess Section -->
+                <div class="sidebar-section">
+                    <div class="red-box">
+                        <div class="sidebar-header">
+                            <h3>🔮 AI Problem Guess</h3>
+                            <div id="history-guess" class="history-button">View History</div>
+                        </div>
+                        <p id="analysis"><span class="spinner"></span> Waiting for code...</p>
+                        <h3>⚡ Next Line Suggestion</h3>
+                        <button class="suggestion-button red-theme" id="suggestionGuessBtn" onclick="insertSuggestion('guess')">
+                            <span class="suggestion-content" id="suggestionGuess"><span class="spinner"></span> Start coding...</span>
+                        </button>
+                        <small style="color: #888; display: block; margin-top: 10px;">
+                            Local entries: <span id="guessLogCount">0</span>
+                        </small>
+                    </div>
+                </div>
+                
+                <!-- Problem Description Section (Condition 1 only) -->
+                <div class="sidebar-section" id="problemDescSection">
+                    <div class="green-box">
+                        <div class="sidebar-header">
+                            <h3>📝 Correct Problem Description</h3>
+                            <div id="history-desc" class="history-button">View History</div>
+                        </div>
+                        <div id="problemDescriptionDisplay" style="line-height: 1.6;">Loading problem description...</div>
+                        <h3>⚡ Next Line Suggestion</h3>
+                        <button class="suggestion-button green-theme" id="suggestionDescBtn" onclick="insertSuggestion('desc')">
+                            <span class="suggestion-content" id="suggestionDesc">Based on correct problem...</span>
+                        </button>
+                        <small style="color: #888; display: block; margin-top: 10px;">
+                            Local entries: <span id="descLogCount">0</span>
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs/loader.min.js"></script>
+    <script>
+        // Global session management with history storage
+        let currentSession = {
+            userId: null,
+            assignmentKey: null,
+            sessionId: null,
+            condition: null,
+            problemDescription: null,
+            startTime: null,
+            guessLogCount: 0,
+            descLogCount: 0,
+            suggestionClickCount: 0,
+            compilerClickCount: 0,
+            // FIXED: Store actual history data with consistent field names
+            guessHistory: [],
+            descHistory: []
+        };
+
+        // Font size management
+        let currentFontSize = 14;
+        const minFontSize = 10;
+        const maxFontSize = 24;
+
+        // UI Elements
+        const authScreen = document.getElementById('authScreen');
+        const mainApp = document.getElementById('application');
+        const authForm = document.getElementById('authForm');
+        const authButton = document.getElementById('authButton');
+        const authError = document.getElementById('authError');
+        const authErrorMessage = document.getElementById('authErrorMessage');
+        const userDisplay = document.getElementById('userDisplay');
+        const conditionIndicator = document.getElementById('conditionIndicator');
+        const sessionIndicator = document.getElementById('sessionIndicator');
+        const problemDescriptionDisplay = document.getElementById('problemDescriptionDisplay');
+        const problemDescSection = document.getElementById('problemDescSection');
+        const guessLogCount = document.getElementById('guessLogCount');
+        const descLogCount = document.getElementById('descLogCount');
+        const analysis = document.getElementById('analysis');
+        const suggestionGuess = document.getElementById('suggestionGuess');
+        const suggestionDesc = document.getElementById('suggestionDesc');
+
+        // Font size controls
+        const increaseFontBtn = document.getElementById('increaseFontBtn');
+        const decreaseFontBtn = document.getElementById('decreaseFontBtn');
+        const fontSizeDisplay = document.getElementById('fontSizeDisplay');
+
+        // Show auth screen initially
+        showAuthScreen();
+
+        function showAuthScreen() {
+            authScreen.classList.remove('hidden');
+            mainApp.classList.add('hidden');
+            
+            // Complete cleanup of previous session
+            if (window.editor) {
+                try {
+                    window.editor.dispose();
+                    window.editor = null;
+                } catch (e) {
+                    console.log('Editor cleanup error:', e);
+                }
+            }
+            
+            // Clear any existing session data - FIXED: Reset all fields properly
+            currentSession = {
+                userId: null,
+                assignmentKey: null,
+                sessionId: null,
+                condition: null,
+                problemDescription: null,
+                startTime: null,
+                guessLogCount: 0,
+                descLogCount: 0,
+                suggestionClickCount: 0,
+                compilerClickCount: 0,
+                guessHistory: [],
+                descHistory: []
+            };
+            
+            // Reset authentication form
+            document.getElementById('userId').value = '';
+            document.getElementById('assignmentKey').value = '';
+            authButton.disabled = false;
+            authButton.textContent = 'Start Secure Session';
+            hideAuthError();
+            
+            // Reset all button states
+            const submitButton = document.getElementById('submitButton');
+            if (submitButton) {
+                submitButton.disabled = false;
+                submitButton.innerHTML = '🔥 Submit & Logout';
+            }
+            
+            const runButton = document.getElementById('runButton');
+            if (runButton) {
+                runButton.disabled = false;
+                runButton.innerHTML = '▶️ Run';
+            }
+            
+            // Reset condition classes
+            document.body.classList.remove('condition-1', 'condition-2');
+            
+            // Reset UI elements
+            userDisplay.textContent = 'User: --';
+            sessionIndicator.textContent = 'Session: --';
+            conditionIndicator.textContent = 'Condition ?';
+            
+            // Clear terminal completely
+            const terminalOutput = document.getElementById('terminalOutput');
+            terminalOutput.innerHTML = `
+                <div class="output-line">
+                    <span class="output-info">Secure Database-Integrated Code Assistant Terminal</span>
+                </div>
+                <div class="output-line">
+                    <span class="output-info">All coding activity is logged. Automatic logout after submission.</span>
+                </div>
+                <div class="output-line">
+                    <span class="output-prompt">>>> </span><span class="output-info">Ready to start coding!</span>
+                </div>
+            `;
+            
+            // Reset sidebar content
+            analysis.innerHTML = '<span class="spinner"></span> Waiting for code...';
+            document.getElementById('suggestionGuess').innerHTML = '<span class="spinner"></span> Start coding...';
+            document.getElementById('suggestionDesc').innerHTML = 'Based on correct problem...';
+            guessLogCount.textContent = '0';
+            descLogCount.textContent = '0';
+            
+            // Hide problem description section
+            problemDescSection.classList.add('hidden');
+        }
+
+        function showMainApp() {
+            authScreen.classList.add('hidden');
+            mainApp.classList.remove('hidden');
+        }
+
+        function showAuthError(message) {
+            authErrorMessage.textContent = message;
+            authError.classList.remove('hidden');
+        }
+
+        function hideAuthError() {
+            authError.classList.add('hidden');
+        }
+
+        function showSuccessMessage(message, countdown = 3) {
+            const successDiv = document.createElement('div');
+            successDiv.className = 'success-message';
+            successDiv.innerHTML = `
+                <div>${message}</div>
+                <div class="countdown">Redirecting in <span id="countdownNumber">${countdown}</span> seconds...</div>
+            `;
+            document.body.appendChild(successDiv);
+
+            let timeLeft = countdown;
+            const countdownEl = document.getElementById('countdownNumber');
+            
+            const timer = setInterval(() => {
+                timeLeft--;
+                if (countdownEl) countdownEl.textContent = timeLeft;
+                
+                if (timeLeft <= 0) {
+                    clearInterval(timer);
+                    if (document.body.contains(successDiv)) {
+                        document.body.removeChild(successDiv);
+                    }
+                    setTimeout(() => {
+                        showAuthScreen();
+                    }, 100);
+                }
+            }, 1000);
+        }
+
+        // FIXED: History Display Functions - Consistent field names
+        function showHistoryInline(type) {
+            const isGuessHistory = type === 'guess';
+            const history = isGuessHistory ? currentSession.guessHistory : currentSession.descHistory;
+            const targetElement = isGuessHistory ? 
+                document.getElementById('analysis') : 
+                document.getElementById('problemDescriptionDisplay');
+            
+            // Toggle between current analysis and history view
+            const isShowingHistory = targetElement.getAttribute('data-showing-history') === 'true';
+            
+            if (isShowingHistory) {
+                // Switch back to current analysis
+                if (isGuessHistory) {
+                    // Show current analysis
+                    const currentAnalysis = currentSession.guessHistory.length > 0 ? 
+                        currentSession.guessHistory[currentSession.guessHistory.length - 1].problemAnalysis : 
+                        '<span class="spinner"></span> Waiting for code...';
+                    targetElement.innerHTML = currentAnalysis;
+                } else {
+                    // Show problem description
+                    if (currentSession.problemDescription) {
+                        try {
+                            const parsedMarkdown = marked.parse(currentSession.problemDescription);
+                            targetElement.innerHTML = parsedMarkdown;
+                        } catch (e) {
+                            console.error('Markdown parsing error:', e);
+                            targetElement.innerHTML = currentSession.problemDescription;
+                        }
+                    } else {
+                        targetElement.innerHTML = 'Loading problem description...';
+                    }
+                }
+                targetElement.setAttribute('data-showing-history', 'false');
+                
+                // Update button text
+                const button = isGuessHistory ? 
+                    document.getElementById('history-guess') : 
+                    document.getElementById('history-desc');
+                button.textContent = 'View History';
+            } else {
+                // Show history
+                let historyHTML = '';
+                
+                if (history.length === 0) {
+                    historyHTML = `
+                        <div style="text-align: center; color: #888; font-style: italic; padding: 20px;">
+                            No history entries yet. Start coding to see AI analysis!
+                        </div>
+                    `;
+                } else {
+                    historyHTML = `<div style="max-height: 300px; overflow-y: auto; font-size: 12px;">`;
+                    
+                    // Show last 5 entries in reverse chronological order (newest first)
+                    const entriesToShow = Math.min(5, history.length);
+                    for (let i = history.length - 1; i >= history.length - entriesToShow; i--) {
+                        const entry = history[i];
+                        const timeStr = new Date(entry.timestamp).toLocaleTimeString();
+                        
+                        historyHTML += `
+                            <div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 8px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                    <span style="color: #569cd6; font-weight: bold;">Entry #${i + 1}</span>
+                                    <span style="color: #888; font-size: 10px;">${timeStr}</span>
+                                </div>
+                                <div style="margin-bottom: 5px;">
+                                    <strong style="color: #4ade80;">Analysis:</strong><br>
+                                    <span style="color: #d4d4d4; line-height: 1.3;">${entry.problemAnalysis}</span>
+                                </div>
+                                <div style="background: #2d2d2d; padding: 4px 6px; border-radius: 3px; font-family: 'Consolas', monospace; font-size: 11px; color: #4ade80;">
+                                    <strong>Suggestion:</strong> ${entry.nextLine}
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    if (history.length > 5) {
+                        historyHTML += `<div style="text-align: center; color: #888; font-size: 10px; font-style: italic;">Showing last 5 of ${history.length} entries</div>`;
+                    }
+                    
+                    historyHTML += `</div>`;
+                }
+                
+                targetElement.innerHTML = historyHTML;
+                targetElement.setAttribute('data-showing-history', 'true');
+                
+                // Update button text
+                const button = isGuessHistory ? 
+                    document.getElementById('history-guess') : 
+                    document.getElementById('history-desc');
+                button.textContent = 'Hide History';
+            }
+        }
+
+        // Insert suggestion into editor with proper indentation
+        function insertSuggestion(type) {
+            if (!window.editor) {
+                addTerminalOutput('Editor not initialized', 'error');
+                return;
+            }
+
+            // Track suggestion clicks
+            currentSession.suggestionClickCount++;
+
+            let suggestionText = '';
+            if (type === 'guess') {
+                suggestionText = document.getElementById('suggestionGuess').textContent.trim();
+            } else if (type === 'desc') {
+                suggestionText = document.getElementById('suggestionDesc').textContent.trim();
+                suggestionText = suggestionText.replace(' // Based on correct problem', '');
+            }
+
+            // Don't insert if it's a loading state or empty
+            if (!suggestionText || 
+                suggestionText.includes('Start coding...') || 
+                suggestionText.includes('Based on correct problem...') ||
+                suggestionText.includes('No suggestions available') ||
+                suggestionText.includes('spinner')) {
+                addTerminalOutput('No valid suggestion to insert', 'warning');
+                return;
+            }
+
+            // Get current cursor position and model
+            const position = window.editor.getPosition();
+            const model = window.editor.getModel();
+            
+            // Get current line content and calculate indentation
+            const currentLineContent = model.getLineContent(position.lineNumber);
+            const currentIndentation = getCurrentIndentation(currentLineContent);
+            
+            // Determine if we need to add a new line
+            const isAtEndOfLine = position.column > currentLineContent.length;
+            const needsNewLine = currentLineContent.trim() !== '' || !isAtEndOfLine;
+            
+            // Process the suggestion text to preserve and apply proper indentation
+            let processedSuggestion = processSuggestionWithIndentation(suggestionText, currentIndentation);
+            
+            // Prepare the final text to insert
+            let textToInsert = needsNewLine ? '\n' + processedSuggestion : processedSuggestion;
+            
+            // For single line suggestions, if we're not at the start of a line, add proper spacing
+            if (!needsNewLine && position.column > 1 && !currentLineContent.endsWith(' ')) {
+                textToInsert = ' ' + textToInsert;
+            }
+
+            // Insert the suggestion using Monaco's command system for better undo support
+            window.editor.executeEdits('copilot-suggestion', [{
+                range: {
+                    startLineNumber: position.lineNumber,
+                    startColumn: position.column,
+                    endLineNumber: position.lineNumber,
+                    endColumn: position.column
+                },
+                text: textToInsert
+            }]);
+
+            // Calculate new cursor position
+            const insertedLines = textToInsert.split('\n');
+            const newLineNumber = position.lineNumber + insertedLines.length - 1;
+            const lastLine = insertedLines[insertedLines.length - 1];
+            const newColumn = insertedLines.length === 1 ? 
+                position.column + textToInsert.length : 
+                lastLine.length + 1;
+            
+            // Set cursor position and focus
+            window.editor.setPosition({
+                lineNumber: newLineNumber,
+                column: newColumn
+            });
+            window.editor.focus();
+
+            // Trigger formatting if it's a complete statement
+            if (suggestionText.includes('{') || suggestionText.includes('}') || suggestionText.includes(';')) {
+                setTimeout(() => {
+                    window.editor.getAction('editor.action.formatDocument')?.run();
+                }, 100);
+            }
+
+            // Log the insertion
+            const sourceType = type === 'guess' ? 'AI Problem Guess' : 'Problem Description';
+            addTerminalOutput(`Inserted suggestion from ${sourceType}`, 'success');
+            const preview = suggestionText.split('\n')[0].substring(0, 40);
+            addTerminalOutput(`Code: ${preview}${suggestionText.length > 40 ? '...' : ''}`, 'info');
+        }
+
+        // Helper function to get current line indentation
+        function getCurrentIndentation(lineContent) {
+            const match = lineContent.match(/^(\s*)/);
+            return match ? match[1] : '';
+        }
+
+        // Helper function to process suggestion with proper indentation
+        function processSuggestionWithIndentation(suggestion, baseIndentation) {
+            const lines = suggestion.split('\n');
+            if (lines.length === 1) {
+                return suggestion.trim();
+            }
+
+            const processedLines = [];
+            let additionalIndent = '';
+            
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (line === '') {
+                    processedLines.push('');
+                    continue;
+                }
+
+                if (i === 0) {
+                    processedLines.push(baseIndentation + line);
+                } else {
+                    const prevLine = lines[i - 1].trim();
+                    
+                    if (prevLine.endsWith('{') || 
+                        prevLine.endsWith('(') ||
+                        prevLine.includes('if ') ||
+                        prevLine.includes('for ') ||
+                        prevLine.includes('while ') ||
+                        prevLine.includes('function') ||
+                        prevLine.includes('=>')) {
+                        additionalIndent = '    ';
+                    }
+                    
+                    if (line.startsWith('}') || line.startsWith(')')) {
+                        additionalIndent = '';
+                    }
+                    
+                    processedLines.push(baseIndentation + additionalIndent + line);
+                }
+            }
+
+            return processedLines.join('\n');
+        }
+
+        function updateFontSize(newSize) {
+            currentFontSize = Math.max(minFontSize, Math.min(maxFontSize, newSize));
+            fontSizeDisplay.textContent = `${currentFontSize}px`;
+            
+            if (window.editor) {
+                window.editor.updateOptions({
+                    fontSize: currentFontSize
+                });
+            }
+
+            const terminalOutput = document.getElementById('terminalOutput');
+            if (terminalOutput) {
+                terminalOutput.style.fontSize = `${currentFontSize}px`;
+            }
+
+            decreaseFontBtn.disabled = currentFontSize <= minFontSize;
+            increaseFontBtn.disabled = currentFontSize >= maxFontSize;
+        }
+
+        function increaseFontSize() {
+            updateFontSize(currentFontSize + 1);
+            addTerminalOutput(`Font size increased to ${currentFontSize}px`, 'info');
+        }
+
+        function decreaseFontSize() {
+            updateFontSize(currentFontSize - 1);
+            addTerminalOutput(`Font size decreased to ${currentFontSize}px`, 'info');
+        }
+
+        // Font size event listeners
+        increaseFontBtn.addEventListener('click', increaseFontSize);
+        decreaseFontBtn.addEventListener('click', decreaseFontSize);
+
+        // Handle authentication
+        authForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const userId = document.getElementById('userId').value.trim();
+            const assignmentKey = document.getElementById('assignmentKey').value.trim();
+            
+            if (!userId || !assignmentKey) {
+                showAuthError('Please fill in both User ID and Assignment Key');
+                return;
+            }
+
+            if (userId.length < 3) {
+                showAuthError('User ID must be at least 3 characters long');
+                return;
+            }
+
+            if (assignmentKey.length < 5) {
+                showAuthError('Assignment Key must be at least 5 characters long');
+                return;
+            }
+            
+            authButton.disabled = true;
+            authButton.innerHTML = '<div class="auth-loading"><span class="spinner"></span>Authenticating...</div>';
+            hideAuthError();
+            
+            try {
+                await startNewSession(userId, assignmentKey);
+            } catch (error) {
+                showAuthError(error.message);
+                authButton.disabled = false;
+                authButton.textContent = 'Start Secure Session';
+            }
+        });
+
+        async function startNewSession(userId, assignmentKey) {
+            try {
+                const response = await fetch('/authenticate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        user_id: userId,
+                        assignment_key: assignmentKey
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    if (response.status === 400 && errorData.detail.includes('Invalid assignment key')) {
+                        throw new Error('Invalid assignment key. Access denied. Please check your credentials.');
+                    }
+                    throw new Error(errorData.detail || `Authentication failed: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                
+                // Update session data - FIXED: Properly initialize all fields
+                currentSession = {
+                    userId: userId,
+                    assignmentKey: assignmentKey,
+                    sessionId: data.session_id,
+                    condition: data.condition,
+                    problemDescription: data.problem_description,
+                    startTime: new Date().toISOString(),
+                    guessLogCount: 0,
+                    descLogCount: 0,
+                    suggestionClickCount: 0,
+                    compilerClickCount: 0,
+                    guessHistory: [],
+                    descHistory: []
+                };
+
+                // Update UI
+                userDisplay.textContent = `User: ${userId}`;
+                sessionIndicator.textContent = `Session: ${data.session_id.substring(0, 16)}...`;
+                conditionIndicator.textContent = `Condition ${data.condition}`;
+                
+                // Handle condition-specific UI
+                if (data.condition === 1) {
+                    problemDescSection.classList.remove('hidden');
+                    if (data.problem_description) {
+                        // Parse markdown and set as HTML - FIXED: Add error handling
+                        try {
+                            const parsedMarkdown = marked.parse(data.problem_description);
+                            problemDescriptionDisplay.innerHTML = parsedMarkdown;
+                        } catch (e) {
+                            console.error('Markdown parsing error:', e);
+                            problemDescriptionDisplay.innerHTML = data.problem_description;
+                        }
+                    }
+                    document.body.classList.add('condition-1');
+                    document.body.classList.remove('condition-2');
+                } else {
+                    problemDescSection.classList.add('hidden');
+                    document.body.classList.add('condition-2');
+                    document.body.classList.remove('condition-1');
+                }
+
+                // FIXED: Add error handling to editor initialization
+                try {
+                    await initializeEditor();
+                    showMainApp();
+                } catch (editorError) {
+                    console.error('Editor initialization failed:', editorError);
+                    throw new Error('Failed to initialize code editor. Please refresh and try again.');
+                }
+                
+                // Add terminal welcome messages
+                setTimeout(() => {
+                    addTerminalOutput(`Secure session started successfully!`, 'success');
+                    addTerminalOutput(`User ID: ${userId}`, 'info');
+                    addTerminalOutput(`Assignment: ${assignmentKey}`, 'info');
+                    addTerminalOutput(`Condition: ${data.condition}`, 'info');
+                    addTerminalOutput(`Session ID: ${data.session_id}`, 'info');
+                    addTerminalOutput(`Database: Ready for logging`, 'info');
+                    addTerminalOutput(`IMPORTANT: Submitting code will automatically log you out`, 'warning');
+                    addTerminalOutput(`TIP: Use A+/A- buttons to adjust font size (Current: ${currentFontSize}px)`, 'info');
+                }, 100);
+
+            } catch (error) {
+                console.error('Authentication error:', error);
+                throw error;
+            }
+        }
+
+        // Initialize Monaco Editor - FIXED: Better error handling
+        async function initializeEditor() {
+            return new Promise((resolve, reject) => {
+                if (window.editor) {
+                    try {
+                        window.editor.dispose();
+                        window.editor = null;
+                    } catch (e) {
+                        console.log('Previous editor cleanup:', e);
+                    }
+                }
+                
+                const editorContainer = document.getElementById('editor');
+                if (!editorContainer) {
+                    reject(new Error('Editor container not found'));
+                    return;
+                }
+                
+                editorContainer.innerHTML = '';
+                
+                require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs' }});
+                require(['vs/editor/editor.main'], function () {
+                    try {
+                        window.editor = monaco.editor.create(editorContainer, {
+                            value: '// Start coding here...\n',
+                            language: 'javascript',
+                            theme: 'vs-dark',
+                            automaticLayout: true,
+                            minimap: { enabled: true },
+                            scrollBeyondLastLine: false,
+                            wordWrap: 'on',
+                            lineNumbers: 'on',
+                            folding: true,
+                            selectOnLineNumbers: true,
+                            matchBrackets: 'always',
+                            fontSize: currentFontSize
+                        });
+
+                        // AI analysis triggers on meaningful content changes with debouncing
+                        let analysisTimeout;
+                        let lastAnalyzedContent = '';
+                        
+                        window.editor.onDidChangeModelContent(() => {
+                            // Clear existing timeout to prevent multiple rapid calls
+                            clearTimeout(analysisTimeout);
+                            
+                            // Set timeout for analysis - only triggers after user stops making changes
+                            analysisTimeout = setTimeout(() => {
+                                const currentContent = window.editor.getValue().trim();
+                                
+                                // Only analyze if content actually changed meaningfully
+                                if (currentContent !== lastAnalyzedContent && currentContent.length > 0) {
+                                    analyzeCurrentCode();
+                                    lastAnalyzedContent = currentContent;
+                                }
+                            }, 2000); // 2-second delay to avoid constant analysis
+                        });
+                        
+                        updateFontSize(currentFontSize);
+                        resolve();
+                    } catch (error) {
+                        console.error('Monaco Editor initialization failed:', error);
+                        reject(error);
+                    }
+                }, function (err) {
+                    console.error('Monaco Editor loading failed:', err);
+                    reject(new Error('Failed to load Monaco Editor'));
+                });
+            });
+        }
+
+        // Analyze current code - FIXED: Better error handling and consistent field names
+        async function analyzeCurrentCode() {
+            if (!currentSession.sessionId) {
+                console.warn('No active session for code analysis');
+                return;
+            }
+            
+            const code = window.editor.getValue().trim();
+            if (!code || code === '// Start coding here...') return;
+
+            try {
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        code: code,
+                        user_id: currentSession.userId,
+                        assignment_key: currentSession.assignmentKey,
+                        session_id: currentSession.sessionId
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Analysis failed: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                const problemDescription = data.analysis || "Problem description not available";
+                let nextLineCode = data.next_line || "// No suggestions available";
+
+                // Clean and format suggested code
+                nextLineCode = nextLineCode.replace(/^```\w*\n?|```$/g, '').trim();
+                const lines = nextLineCode.split('\n');
+                if (lines.length > 2) {
+                    nextLineCode = lines.slice(0, 2).join('\n');
+                }
+
+                analysis.textContent = problemDescription;
+                document.getElementById('suggestionGuess').textContent = nextLineCode;
+
+                // FIXED: Store in guess history with consistent field names
+                currentSession.guessHistory.push({
+                    timestamp: new Date().toISOString(),
+                    problemAnalysis: problemDescription, // FIXED: Consistent field name
+                    nextLine: nextLineCode
+                });
+
+                // Update log counts
+                currentSession.guessLogCount++;
+                guessLogCount.textContent = currentSession.guessLogCount;
+
+                // For condition 1, also update description-based suggestions
+                if (currentSession.condition === 1) {
+                    const descBasedSuggestion = nextLineCode; // Remove the comment addition
+                    document.getElementById('suggestionDesc').textContent = descBasedSuggestion;
+                    
+                    // FIXED: Store in description history with consistent field names
+                    currentSession.descHistory.push({
+                        timestamp: new Date().toISOString(),
+                        problemAnalysis: currentSession.problemDescription || problemDescription, // Use stored problem description
+                        nextLine: descBasedSuggestion
+                    });
+                    
+                    currentSession.descLogCount++;
+                    descLogCount.textContent = currentSession.descLogCount;
+                }
+
+            } catch (error) {
+                console.error('Analysis error:', error);
+                analysis.innerHTML = `
+                    <div class="error-message">
+                        <h3>Connection Issue</h3>
+                        <p><strong>Error:</strong> ${error.message}</p>
+                        <p>Local logging continues...</p>
+                    </div>
+                `;
+            }
+        }
+
+        // Terminal and execution functionality
+        const runButton = document.getElementById("runButton");
+        const clearButton = document.getElementById("clearButton");
+        const submitButton = document.getElementById("submitButton");
+        const logoutBtn = document.getElementById("logoutBtn");
+        
+        runButton.addEventListener('click', executeCode);
+        clearButton.addEventListener('click', clearTerminal);
+        submitButton.addEventListener('click', submitToDatabase);
+        logoutBtn.addEventListener('click', endSession);
+
+        let isRunning = false;
+
+        // Execute JavaScript code locally
+        async function executeCode() {
+            if (isRunning) return;
+            
+            // Track compiler clicks
+            currentSession.compilerClickCount++;
+            
+            const code = window.editor.getValue();
+            if (!code) {
+                addTerminalOutput('No code to execute. Please write some code first.', 'warning');
+                return;
+            }
+            
+            isRunning = true;
+            runButton.disabled = true;
+            runButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Running...</div>';
+
+            const originalLog = console.log;
+            const originalError = console.error;
+            const originalWarn = console.warn;
+            
+            // Capture console outputs
+            console.log = function(...args) {
+                originalLog.apply(this, args);
+                addTerminalOutput(args.join(' '));
+            };
+            
+            console.error = function(...args) {
+                originalError.apply(this, args);
+                addTerminalOutput(args.join(' '), 'error');
+            };
+            
+            console.warn = function(...args) {
+                originalWarn.apply(this, args);
+                addTerminalOutput(args.join(' '), 'warning');
+            };
+
+            try {
+                const canvas = document.createElement("canvas");
+                addTerminalOutput(`Running code...`, 'prompt');
+                const startTime = Date.now();
+
+                // FIXED: Better error handling for code execution
+                const run = new Function(["canvas"], code);
+                run(canvas);
+
+                const finishTime = Date.now();
+                addTerminalOutput(`Process finished (${finishTime-startTime}ms)`, 'execution-time');
+                addTerminalOutput(`Ready for more code!`, 'prompt');
+            } catch (error) {
+                console.error('Execution error:', error);
+                addTerminalOutput('Execution error:', 'error');
+                addTerminalOutput(error.message, 'error');
+            } finally {
+                // Restore original console functions
+                console.log = originalLog;
+                console.error = originalError;
+                console.warn = originalWarn;
+                
+                isRunning = false;
+                runButton.disabled = false;
+                runButton.innerHTML = '▶️ Run';
+            }
+        }
+
+        // Submit to Database and FORCE LOGOUT
+        async function submitToDatabase() {
+            if (!currentSession.sessionId) {
+                addTerminalOutput('No active session to submit', 'error');
+                return;
+            }
+
+            const code = window.editor.getValue();
+            if (!code.trim()) {
+                addTerminalOutput('No code to submit. Please write some code first.', 'warning');
+                return;
+            }
+
+            // Confirm submission with logout warning
+            const confirmSubmit = confirm(
+                'IMPORTANT: Submitting your code will automatically log you out of this session.\n\n' +
+                'You will need to start a new session with your credentials to continue coding.\n\n' +
+                'Are you sure you want to submit and logout?'
+            );
+
+            if (!confirmSubmit) {
+                addTerminalOutput('Submission cancelled by user', 'warning');
+                return;
+            }
+
+            submitButton.disabled = true;
+            submitButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Submitting & Logging out...</div>';
+
+            try {
+                const response = await fetch('/submit', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        code: code,
+                        user_id: currentSession.userId,
+                        assignment_key: currentSession.assignmentKey,
+                        session_id: currentSession.sessionId,
+                        timestamp: new Date().toISOString(),
+                        suggestion_clicked: currentSession.suggestionClickCount,
+                        compiler_clicked: currentSession.compilerClickCount
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Submission failed: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                addTerminalOutput(`✅ ${result.message}`, 'success');
+                addTerminalOutput(`🔥 Database Status: ${result.firebase_status}`, 'info');
+                addTerminalOutput(`📊 Submission ID: ${result.submission_id}`, 'info');
+                addTerminalOutput(`📈 Problem Guess Logs: ${currentSession.guessLogCount}`, 'info');
+                addTerminalOutput(`🖱️ Suggestions Clicked: ${currentSession.suggestionClickCount}`, 'info');
+                addTerminalOutput(`⚡ Compiler Runs: ${currentSession.compilerClickCount}`, 'info');
+                if (currentSession.condition === 1) {
+                    addTerminalOutput(`📋 Description-based Logs: ${currentSession.descLogCount}`, 'info');
+                }
+                
+                // Check if Firebase save was successful before logging out
+                if (result.firebase_status === 'success') {
+                    addTerminalOutput(`🔓 Database save successful - logging out now...`, 'success');
+                    setTimeout(() => {
+                        showSuccessMessage(
+                            'Code submitted successfully to Database!\nSession ended for security.', 
+                            3
+                        );
+                    }, 500);
+                } else {
+                    addTerminalOutput(`⚠️ Database save failed but data preserved locally - logging out...`, 'warning');
+                    setTimeout(() => {
+                        showSuccessMessage(
+                            'Submission completed with local backup.\nSession ended for security.', 
+                            3
+                        );
+                    }, 500);
+                }
+
+            } catch (error) {
+                console.error('Submission error:', error);
+                addTerminalOutput(`❌ Submission failed: ${error.message}`, 'error');
+                addTerminalOutput(`💾 Data preserved locally in session logs`, 'warning');
+                submitButton.disabled = false;
+                submitButton.innerHTML = '🔥 Submit & Logout';
+            }
+        }
+
+        // End session manually
+        function endSession() {
+            if (confirm('Are you sure you want to end this session? Any unsaved code will be lost.')) {
+                addTerminalOutput('🔓 Session ended by user', 'warning');
+                showSuccessMessage('Session ended. Redirecting to login...', 2);
+            }
+        }
+
+        // Add output to terminal
+        function addTerminalOutput(text, type = 'normal') {
+            const line = document.createElement('div');
+            line.className = 'output-line';
+            
+            switch (type) {
+                case 'success':
+                    line.innerHTML = `<span class="output-success">${text}</span>`;
+                    break;
+                case 'error':
+                    line.innerHTML = `<span class="output-error">${text}</span>`;
+                    break;
+                case 'info':
+                    line.innerHTML = `<span class="output-info">${text}</span>`;
+                    break;
+                case 'warning':
+                    line.innerHTML = `<span class="output-warning">${text}</span>`;
+                    break;
+                case 'prompt':
+                    line.innerHTML = `<span class="output-prompt">>>> </span>${text}`;
+                    break;
+                case 'execution-time':
+                    line.innerHTML = `<span class="execution-time">${text}</span>`;
+                    break;
+                default:
+                    line.innerHTML = `<pre>${text}</pre>`;
+            }
+            
+            const terminalOutput = document.getElementById('terminalOutput');
+            terminalOutput.appendChild(line);
+            terminalOutput.scrollTop = terminalOutput.scrollHeight;
+        }
+
+        // Clear terminal
+        function clearTerminal() {
+            const terminalOutput = document.getElementById('terminalOutput');
+            terminalOutput.innerHTML = `
+                <div class="output-line">
+                    <span class="output-info">Secure Database-Integrated Code Assistant Terminal</span>
+                </div>
+                <div class="output-line">
+                    <span class="output-info">Session: ${currentSession.sessionId || 'None'}</span>
+                </div>
+                <div class="output-line">
+                    <span class="output-info">Condition ${currentSession.condition || '?'} - Secure logging active</span>
+                </div>
+                <div class="output-line">
+                    <span class="output-warning">⚠️  REMINDER: Submitting code will automatically log you out</span>
+                </div>
+                <div class="output-line">
+                    <span class="output-prompt">>>> </span><span class="output-info">Continue coding!</span>
+                </div>
+            `;
+        }
+
+        // History functionality - Show inline in red-box
+        document.getElementById("history-guess").onclick = () => {
+            showHistoryInline('guess');
+        }
+
+        const historyDescButton = document.getElementById("history-desc");
+        if (historyDescButton) {
+            historyDescButton.onclick = () => {
+                showHistoryInline('desc');
+            }
+        }
+
+        // Keyboard shortcuts for font size
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+                e.preventDefault();
+                if (currentFontSize < maxFontSize) {
+                    increaseFontSize();
+                }
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+                e.preventDefault();
+                if (currentFontSize > minFontSize) {
+                    decreaseFontSize();
+                }
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+                e.preventDefault();
+                updateFontSize(14);
+                addTerminalOutput(`Font size reset to ${currentFontSize}px`, 'info');
+            }
+        });
+
+        // Resize handling
+        const resize = {};
+        resize.sidebar = false;
+        resize.terminal = false;
+        
+        document.getElementById('resize-sidebar').addEventListener('mousedown', (e) => {
+            resize.sidebar = true;
+            document.addEventListener('mousemove', handleSidebarResize);
+            document.addEventListener('mouseup', handleMouseUp);
+        });
+
+        document.getElementById('resize-terminal').addEventListener('mousedown', (e) => {
+            resize.terminal = true;
+            document.addEventListener('mousemove', handleTerminalResize);
+            document.addEventListener('mouseup', handleMouseUp);
+        });
+
+        function handleSidebarResize(e) {
+            if (!resize.sidebar) return;
+            document.getElementById('sidebar').style.width = `${window.innerWidth - e.clientX}px`;
+        }
+
+        function handleTerminalResize(e) {
+            if (!resize.terminal) return;
+            document.getElementById('terminal').style.height = `${window.innerHeight - e.clientY}px`;
+        }
+
+        function handleMouseUp() {
+            resize.sidebar = false;
+            resize.terminal = false;
+            document.removeEventListener('mouseup', handleMouseUp);
+            document.removeEventListener('mousemove', handleSidebarResize);
+            document.removeEventListener('mousemove', handleTerminalResize);
+        }
+
+        // Prevent accidental page close
+        window.addEventListener('beforeunload', (e) => {
+            if (currentSession.sessionId) {
+                e.preventDefault();
+                e.returnValue = 'You have an active secure coding session! Submit your code to Database before leaving to save your work.';
+                return e.returnValue;
+            }
+        });
+
+        // Clear form on page load
+        window.addEventListener('load', () => {
+            if (!authScreen.classList.contains('hidden')) {
+                document.getElementById('userId').value = '';
+                document.getElementById('assignmentKey').value = '';
+            }
+        });
+    </script>
+</body>
+</html>

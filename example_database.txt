@@ -1,0 +1,217 @@
+{
+  "condition_1": {
+    "Condition1_all": {
+      "alice": {
+        "summary": {
+          "starting_time": "2024-01-15T14:30:22.156Z",
+          "submitted_code": "function factorial(n) {\n    if (n <= 1) {\n        return 1;\n    }\n    return n * factorial(n - 1);\n}\n\nconsole.log('Factorial of 5:', factorial(5));",
+          "suggestion_clicked": 8,
+          "compiler_clicked": 3,
+          "end_time": "2024-01-15T15:45:33.892Z"
+        },
+        "logs": {
+          "ai_guesses": {
+            "1": {
+              "ai_analysis": "This code implements a recursive factorial function",
+              "timestamp": "2024-01-15T14:31:15.234Z",
+              "next_line_suggestion": "(n) {",
+              "full_code_suggestion": "function factorial(n) {\n    if (n <= 1) return 1;\n    return n * factorial(n - 1);\n}"
+            },
+            "2": {
+              "ai_analysis": "Building a factorial function with base case handling",
+              "timestamp": "2024-01-15T14:33:42.567Z",
+              "next_line_suggestion": "        return 1;",
+              "full_code_suggestion": "function factorial(n) {\n    if (n <= 1) {\n        return 1;\n    }\n    return n * factorial(n - 1);\n}"
+            },
+            "3": {
+              "ai_analysis": "Completing the recursive case for factorial calculation",
+              "timestamp": "2024-01-15T14:35:28.891Z",
+              "next_line_suggestion": "    }",
+              "full_code_suggestion": "function factorial(n) {\n    if (n <= 1) {\n        return 1;\n    }\n    return n * factorial(n - 1);\n}"
+            },
+            "4": {
+              "ai_analysis": "Adding the recursive multiplication step",
+              "timestamp": "2024-01-15T14:37:15.223Z",
+              "next_line_suggestion": "    return n * factorial(n - 1);",
+              "full_code_suggestion": "function factorial(n) {\n    if (n <= 1) {\n        return 1;\n    }\n    return n * factorial(n - 1);\n}"
+            }
+          },
+          "correct_guesses": {
+            "1": {
+              "correct_analysis": "Implementation of factorial function using recursion with proper base case",
+              "timestamp": "2024-01-15T14:31:15.234Z",
+              "next_line_suggestion": "(n) {",
+              "full_code_suggestion": "function factorial(n) {\n    if (n <= 1) return 1;\n    return n * factorial(n - 1);\n}"
+            },
+            "2": {
+              "correct_analysis": "Factorial function with base case for numbers less than or equal to 1",
+              "timestamp": "2024-01-15T14:33:42.567Z",
+              "next_line_suggestion": "        return 1;",
+              "full_code_suggestion": "function factorial(n) {\n    if (n <= 1) {\n        return 1;\n    }\n    return n * factorial(n - 1);\n}"
+            },
+            "3": {
+              "correct_analysis": "Completing factorial implementation with recursive multiplication",
+              "timestamp": "2024-01-15T14:35:28.891Z",
+              "next_line_suggestion": "    }",
+              "full_code_suggestion": "function factorial(n) {\n    if (n <= 1) {\n        return 1;\n    }\n    return n * factorial(n - 1);\n}"
+            },
+            "4": {
+              "correct_analysis": "Final step of factorial function with recursive call",
+              "timestamp": "2024-01-15T14:37:15.223Z",
+              "next_line_suggestion": "    return n * factorial(n - 1);",
+              "full_code_suggestion": "function factorial(n) {\n    if (n <= 1) {\n        return 1;\n    }\n    return n * factorial(n - 1);\n}"
+            }
+          }
+        }
+      },
+      "charlie": {
+        "summary": {
+          "starting_time": "2024-01-16T09:15:33.224Z",
+          "submitted_code": "class Calculator {\n    constructor() {\n        this.result = 0;\n    }\n    \n    add(num) {\n        this.result += num;\n        return this;\n    }\n    \n    subtract(num) {\n        this.result -= num;\n        return this;\n    }\n    \n    multiply(num) {\n        this.result *= num;\n        return this;\n    }\n    \n    getResult() {\n        return this.result;\n    }\n}\n\nconst calc = new Calculator();\nconsole.log(calc.add(10).subtract(3).multiply(2).getResult());",
+          "suggestion_clicked": 12,
+          "compiler_clicked": 5,
+          "end_time": "2024-01-16T10:42:18.556Z"
+        },
+        "logs": {
+          "ai_guesses": {
+            "1": {
+              "ai_analysis": "Creating a Calculator class with constructor initialization",
+              "timestamp": "2024-01-16T09:16:22.445Z",
+              "next_line_suggestion": "    constructor() {",
+              "full_code_suggestion": "class Calculator {\n    constructor() {\n        this.result = 0;\n    }\n    \n    add(num) {\n        this.result += num;\n        return this;\n    }\n}"
+            },
+            "2": {
+              "ai_analysis": "Building calculator class with method chaining capabilities",
+              "timestamp": "2024-01-16T09:18:45.667Z",
+              "next_line_suggestion": "        this.result = 0;",
+              "full_code_suggestion": "class Calculator {\n    constructor() {\n        this.result = 0;\n    }\n    \n    add(num) {\n        this.result += num;\n        return this;\n    }\n}"
+            }
+          },
+          "correct_guesses": {
+            "1": {
+              "correct_analysis": "Calculator class implementation with fluent interface pattern",
+              "timestamp": "2024-01-16T09:16:22.445Z",
+              "next_line_suggestion": "    constructor() {",
+              "full_code_suggestion": "class Calculator {\n    constructor() {\n        this.result = 0;\n    }\n    \n    add(num) {\n        this.result += num;\n        return this;\n    }\n}"
+            },
+            "2": {
+              "correct_analysis": "Calculator with chainable methods for mathematical operations",
+              "timestamp": "2024-01-16T09:18:45.667Z",
+              "next_line_suggestion": "        this.result = 0;",
+              "full_code_suggestion": "class Calculator {\n    constructor() {\n        this.result = 0;\n    }\n    \n    add(num) {\n        this.result += num;\n        return this;\n    }\n}"
+            }
+          }
+        }
+      }
+    },
+    "Condition1_research": {
+      "eve": {
+        "summary": {
+          "starting_time": "2024-01-17T11:20:45.667Z",
+          "submitted_code": "def find_max(numbers):\n    if not numbers:\n        return None\n    \n    max_num = numbers[0]\n    for num in numbers[1:]:\n        if num > max_num:\n            max_num = num\n    return max_num\n\ntest_list = [3, 7, 2, 9, 1, 8, 4]\nresult = find_max(test_list)\nprint(f'Maximum number: {result}')",
+          "suggestion_clicked": 4,
+          "compiler_clicked": 2,
+          "end_time": "2024-01-17T11:55:12.334Z"
+        },
+        "logs": {
+          "ai_guesses": {
+            "1": {
+              "ai_analysis": "Creating a function to find the maximum value in a list",
+              "timestamp": "2024-01-17T11:22:18.445Z",
+              "next_line_suggestion": "    if not numbers:",
+              "full_code_suggestion": "def find_max(numbers):\n    if not numbers:\n        return None\n    max_num = numbers[0]\n    for num in numbers[1:]:\n        if num > max_num:\n            max_num = num\n    return max_num"
+            },
+            "2": {
+              "ai_analysis": "Implementing maximum finder with edge case handling",
+              "timestamp": "2024-01-17T11:25:33.778Z",
+              "next_line_suggestion": "        return None",
+              "full_code_suggestion": "def find_max(numbers):\n    if not numbers:\n        return None\n    max_num = numbers[0]\n    for num in numbers[1:]:\n        if num > max_num:\n            max_num = num\n    return max_num"
+            }
+          },
+          "correct_guesses": {
+            "1": {
+              "correct_analysis": "Function to find maximum number with proper null check",
+              "timestamp": "2024-01-17T11:22:18.445Z",
+              "next_line_suggestion": "    if not numbers:",
+              "full_code_suggestion": "def find_max(numbers):\n    if not numbers:\n        return None\n    max_num = numbers[0]\n    for num in numbers[1:]:\n        if num > max_num:\n            max_num = num\n    return max_num"
+            },
+            "2": {
+              "correct_analysis": "Maximum value finder with iterative comparison approach",
+              "timestamp": "2024-01-17T11:25:33.778Z",
+              "next_line_suggestion": "        return None",
+              "full_code_suggestion": "def find_max(numbers):\n    if not numbers:\n        return None\n    max_num = numbers[0]\n    for num in numbers[1:]:\n        if num > max_num:\n            max_num = num\n    return max_num"
+            }
+          }
+        }
+      }
+    }
+  },
+  "condition_2": {
+    "Condition2_partial": {
+      "bob": {
+        "summary": {
+          "starting_time": "2024-01-15T16:22:11.445Z",
+          "submitted_code": "def bubble_sort(arr):\n    n = len(arr)\n    for i in range(n):\n        for j in range(0, n - i - 1):\n            if arr[j] > arr[j + 1]:\n                arr[j], arr[j + 1] = arr[j + 1], arr[j]\n    return arr\n\ntest_array = [64, 34, 25, 12, 22, 11, 90]\nprint('Sorted array:', bubble_sort(test_array))",
+          "suggestion_clicked": 15,
+          "compiler_clicked": 7,
+          "end_time": "2024-01-15T16:58:29.773Z"
+        },
+        "logs": {
+          "ai_guesses": {
+            "1": {
+              "ai_analysis": "Implementation of bubble sort algorithm for array sorting",
+              "timestamp": "2024-01-15T16:23:05.678Z",
+              "next_line_suggestion": "(arr):",
+              "full_code_suggestion": "def bubble_sort(arr):\n    n = len(arr)\n    for i in range(n):\n        for j in range(0, n - i - 1):\n            if arr[j] > arr[j + 1]:\n                arr[j], arr[j + 1] = arr[j + 1], arr[j]\n    return arr"
+            },
+            "2": {
+              "ai_analysis": "Bubble sort with nested loops for element comparison",
+              "timestamp": "2024-01-15T16:25:33.892Z",
+              "next_line_suggestion": "    n = len(arr)",
+              "full_code_suggestion": "def bubble_sort(arr):\n    n = len(arr)\n    for i in range(n):\n        for j in range(0, n - i - 1):\n            if arr[j] > arr[j + 1]:\n                arr[j], arr[j + 1] = arr[j + 1], arr[j]\n    return arr"
+            },
+            "3": {
+              "ai_analysis": "Sorting algorithm using adjacent element swapping",
+              "timestamp": "2024-01-15T16:28:17.445Z",
+              "next_line_suggestion": "    for i in range(n):",
+              "full_code_suggestion": "def bubble_sort(arr):\n    n = len(arr)\n    for i in range(n):\n        for j in range(0, n - i - 1):\n            if arr[j] > arr[j + 1]:\n                arr[j], arr[j + 1] = arr[j + 1], arr[j]\n    return arr"
+            }
+          }
+        }
+      }
+    },
+    "Condition2_study": {
+      "diana": {
+        "summary": {
+          "starting_time": "2024-01-16T13:45:17.889Z",
+          "submitted_code": "<!DOCTYPE html>\n<html>\n<head>\n    <title>Simple Form</title>\n    <style>\n        .form-container {\n            max-width: 400px;\n            margin: 50px auto;\n            padding: 20px;\n            border: 1px solid #ccc;\n        }\n        .form-group {\n            margin-bottom: 15px;\n        }\n        label {\n            display: block;\n            margin-bottom: 5px;\n        }\n        input[type=\"text\"], input[type=\"email\"] {\n            width: 100%;\n            padding: 8px;\n            border: 1px solid #ddd;\n        }\n    </style>\n</head>\n<body>\n    <div class=\"form-container\">\n        <form>\n            <div class=\"form-group\">\n                <label for=\"name\">Name:</label>\n                <input type=\"text\" id=\"name\" name=\"name\">\n            </div>\n            <div class=\"form-group\">\n                <label for=\"email\">Email:</label>\n                <input type=\"email\" id=\"email\" name=\"email\">\n            </div>\n            <button type=\"submit\">Submit</button>\n        </form>\n    </div>\n</body>\n</html>",
+          "suggestion_clicked": 22,
+          "compiler_clicked": 4,
+          "end_time": "2024-01-16T14:23:44.112Z"
+        },
+        "logs": {
+          "ai_guesses": {
+            "1": {
+              "ai_analysis": "Building an HTML form with styling and input validation",
+              "timestamp": "2024-01-16T13:46:33.221Z",
+              "next_line_suggestion": "    <title>Simple Form</title>",
+              "full_code_suggestion": "<!DOCTYPE html>\n<html>\n<head>\n    <title>Simple Form</title>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n</head>\n<body>\n    <form>\n        <input type=\"text\" placeholder=\"Name\">\n        <input type=\"email\" placeholder=\"Email\">\n        <button type=\"submit\">Submit</button>\n    </form>\n</body>\n</html>"
+            },
+            "2": {
+              "ai_analysis": "Creating a web form with CSS styling for better presentation",
+              "timestamp": "2024-01-16T13:48:55.667Z",
+              "next_line_suggestion": "    <style>",
+              "full_code_suggestion": "<!DOCTYPE html>\n<html>\n<head>\n    <title>Simple Form</title>\n    <style>\n        .form-container {\n            max-width: 400px;\n            margin: 50px auto;\n            padding: 20px;\n        }\n    </style>\n</head>"
+            },
+            "3": {
+              "ai_analysis": "HTML form with structured layout and user input fields",
+              "timestamp": "2024-01-16T13:52:12.334Z",
+              "next_line_suggestion": "        .form-container {",
+              "full_code_suggestion": "<!DOCTYPE html>\n<html>\n<head>\n    <title>Simple Form</title>\n    <style>\n        .form-container {\n            max-width: 400px;\n            margin: 50px auto;\n            padding: 20px;\n            border: 1px solid #ccc;\n        }\n    </style>\n</head>"
+            }
+          }
+        }
+      }
+    }
+  }
+}
