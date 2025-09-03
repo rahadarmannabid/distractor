@@ -18,6 +18,8 @@ from datetime import datetime
 from typing import List, Dict, Optional
 import firebase_admin
 from firebase_admin import credentials, db
+from fastapi.responses import HTMLResponse, RedirectResponse
+
 
 # Load environment variables
 load_dotenv()
@@ -901,8 +903,36 @@ templates = Jinja2Templates(directory="templates")
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
-    """Serve the main HTML page"""
-    return templates.TemplateResponse("index.html", {"request": request})
+    """Redirect to home page for consent and authentication"""
+    return RedirectResponse(url="/home.html", status_code=302)
+
+@app.get("/home.html", response_class=HTMLResponse)
+@app.get("/home", response_class=HTMLResponse)
+async def serve_home(request: Request):
+    """Serve the home login page with consent form"""
+    return templates.TemplateResponse("home.html", {"request": request})
+
+@app.get("/index.html", response_class=HTMLResponse)
+async def serve_ide(request: Request):
+    """
+    Serve the IDE page - this handles the unique URLs
+    Users should only access this with proper session parameters
+    """
+    # Check if there are session parameters in the URL
+    session_token = request.query_params.get("session")
+    user_id = request.query_params.get("user")
+    
+    if not session_token or not user_id:
+        # Redirect to home page if no session parameters
+        logger.warning("Direct access to IDE without session parameters - redirecting to home")
+        return RedirectResponse(url="/home.html", status_code=302)
+    
+    # Serve the IDE page - authentication will be handled by JavaScript
+    return templates.TemplateResponse("index.html", {
+        "request": request,
+        "session_token": session_token,
+        "user_id": user_id
+    })
 
 @app.get("/health")
 async def health_check():
