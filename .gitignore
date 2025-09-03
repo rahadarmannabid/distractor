@@ -35,3 +35,6 @@ Thumbs.db
 # Testing
 .pytest_cache/
 .coveragefirebase-service-account.json
+firebase-service-account.json
+*.json # Or be more specific
+.env # Also ignore environment files
