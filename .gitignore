@@ -38,3 +38,7 @@ Thumbs.db
 firebase-service-account.json
 *.json # Or be more specific
 .env # Also ignore environment files
+
+# Custom text files
+backend.txt
+frontend.txt
