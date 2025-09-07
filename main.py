@@ -102,17 +102,19 @@ def initialize_firebase():
 # Initialize Firebase client
 firebase_db = initialize_firebase()
 
-# Assignment Key Conditions - Load from environment variables
 def get_condition_keys():
     """Get condition keys from environment variables"""
     condition_1_keys = os.getenv("CONDITION_1_PREFIXES", "Condition1_all").split(",")
     condition_2_keys = os.getenv("CONDITION_2_PREFIXES", "Condition2_partial,fdasdfsa").split(",")
+    condition_3_keys = os.getenv("CONDITION_3_PREFIXES", "Condition3_suggestions").split(",")
     
     # Clean up the keys (remove spaces and empty strings)
     condition_1_keys = [key.strip() for key in condition_1_keys if key.strip()]
     condition_2_keys = [key.strip() for key in condition_2_keys if key.strip()]
+    condition_3_keys = [key.strip() for key in condition_3_keys if key.strip()]
     
-    return condition_1_keys, condition_2_keys
+    return condition_1_keys, condition_2_keys, condition_3_keys
+
 
 def get_assignment_base_key(assignment_key):
     """
@@ -122,8 +124,8 @@ def get_assignment_base_key(assignment_key):
     if not assignment_key:
         return None
     
-    condition_1_keys, condition_2_keys = get_condition_keys()
-    all_keys = condition_1_keys + condition_2_keys
+    condition_1_keys, condition_2_keys, condition_3_keys = get_condition_keys()
+    all_keys = condition_1_keys + condition_2_keys + condition_3_keys
     assignment_key = assignment_key.strip()
     
     # Check for exact match first
@@ -140,12 +142,12 @@ def get_assignment_base_key(assignment_key):
 def get_assignment_condition(assignment_key):
     """
     Determine which condition the assignment key belongs to
-    Returns: 1 for full UI, 2 for partial UI (guess only), None for invalid
+    Returns: 1 for full UI, 2 for partial UI (guess only), 3 for suggestions only, None for invalid
     """
     if not assignment_key:
         return None
     
-    condition_1_keys, condition_2_keys = get_condition_keys()
+    condition_1_keys, condition_2_keys, condition_3_keys = get_condition_keys()
     assignment_key = assignment_key.strip()
     
     # Check for exact match in condition 1 keys
@@ -155,6 +157,10 @@ def get_assignment_condition(assignment_key):
     # Check for exact match in condition 2 keys
     if assignment_key in condition_2_keys:
         return 2
+        
+    # Check for exact match in condition 3 keys
+    if assignment_key in condition_3_keys:
+        return 3
     
     # Check for prefix match in condition 1
     for prefix in condition_1_keys:
@@ -165,6 +171,11 @@ def get_assignment_condition(assignment_key):
     for prefix in condition_2_keys:
         if assignment_key.startswith(prefix):
             return 2
+            
+    # Check for prefix match in condition 3
+    for prefix in condition_3_keys:
+        if assignment_key.startswith(prefix):
+            return 3
     
     # STRICT VALIDATION: Return None for unrecognized keys
     return None
@@ -279,6 +290,7 @@ class SessionLog(BaseModel):
     submitted_full_code: Optional[str] = None
     ai_guess_history: List[AIGuessEntry] = []
     correct_description_history: Optional[List[AIGuessEntry]] = None  # Only for condition 1
+    suggestions_only_history: Optional[List[AIGuessEntry]] = None  # For condition 3
     problem_description: Optional[str] = None
 
 # Global session storage (in-memory, will be sent to Firebase on submit)
@@ -345,7 +357,7 @@ async def authenticate_user(request: AuthRequest):
                 logger.error(f"Error reading assignment file for {assignment_key}: {e}")
                 problem_description = f"Error loading assignment description: {str(e)}"
         
-        # Initialize session log
+# Initialize session log
         session_log = SessionLog(
             user_id=user_id,
             assignment_id=assignment_key,
@@ -354,6 +366,7 @@ async def authenticate_user(request: AuthRequest):
             code_start_timestamp=datetime.now().isoformat(),
             ai_guess_history=[],
             correct_description_history=[] if condition == 1 else None,
+            suggestions_only_history=[] if condition == 3 else None,
             problem_description=problem_description
         )
         
@@ -420,7 +433,7 @@ async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: 
                 'full_code_suggestion': entry.full_code_suggestion
             }
         
-        # Create logs structure
+# Create logs structure
         logs_data = {
             'ai_guesses': ai_guesses
         }
@@ -436,6 +449,17 @@ async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: 
                     'full_code_suggestion': entry.full_code_suggestion
                 }
             logs_data['correct_guesses'] = correct_guesses
+        
+        # For condition 3, add suggestions-only data
+        elif session_log.condition == 3 and session_log.suggestions_only_history:
+            suggestions_only = {}
+            for i, entry in enumerate(session_log.suggestions_only_history, 1):
+                suggestions_only[str(i)] = {
+                    'suggestion_only': entry.next_line_suggestion,
+                    'timestamp': entry.timestamp,
+                    'full_code_suggestion': entry.full_code_suggestion
+                }
+            logs_data['suggestions_only'] = suggestions_only
         
         # Prepare the complete user data
         user_data = {
@@ -729,7 +753,7 @@ async def analyze_code(request: CodeRequest):
             )
             session_log.ai_guess_history.append(ai_guess_entry)
             
-            # For condition 1, also add to correct description history
+# For condition 1, also add to correct description history
             if session_log.condition == 1:
                 if session_log.correct_description_history is None:
                     session_log.correct_description_history = []
@@ -751,6 +775,21 @@ async def analyze_code(request: CodeRequest):
                     analysis_type="correct_description"
                 )
                 session_log.correct_description_history.append(correct_desc_entry)
+            
+            # For condition 3, also add to suggestions-only history
+            elif session_log.condition == 3:
+                if session_log.suggestions_only_history is None:
+                    session_log.suggestions_only_history = []
+                
+                # For condition 3, create a simplified entry with just the suggestion
+                suggestions_entry = AIGuessEntry(
+                    problem_analysis="Suggestions only mode",  # Placeholder text
+                    next_line_suggestion=ai_next_line,
+                    full_code_suggestion=ai_full_code_suggestion,
+                    timestamp=datetime.now().isoformat(),
+                    analysis_type="suggestions_only"
+                )
+                session_log.suggestions_only_history.append(suggestions_entry)
             
             # Update local backup only
             save_session_to_local(session_log)
@@ -985,6 +1024,7 @@ async def get_stats():
             "api_port": int(os.getenv("API_PORT", "8000")),
             "condition_1_prefixes": os.getenv("CONDITION_1_PREFIXES", "Condition1_all"),
             "condition_2_prefixes": os.getenv("CONDITION_2_PREFIXES", "Condition2_partial,fdasdfsa"),
+            "condition_3_prefixes": os.getenv("CONDITION_3_PREFIXES", "Condition3_suggestions"),
             "submissions_dir": os.getenv("SUBMISSIONS_DIR", "submissions")
         }
     }
