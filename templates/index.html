@@ -30,6 +30,7 @@
         #editor {
             min-height: 0;
             flex:1;
+            position: relative;
         }
         #terminal {
             height: 30vh;
@@ -617,6 +618,139 @@
             font-size: 14px;
             opacity: 0.8;
         }
+
+/* AI Thinking Overlay - Editor Only */
+.ai-thinking-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    backdrop-filter: blur(3px);
+}
+
+.ai-thinking-container {
+    text-align: center;
+    color: white;
+}
+
+.ai-loader {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    position: relative;
+    box-shadow: 0 0 40px #9333ea, inset 0 0 20px #9333ea;
+    animation: ai-pulse 2s ease-in-out infinite;
+    margin: 0 auto 20px;
+}
+
+.ai-loader::before,
+.ai-loader::after {
+    content: "";
+    position: absolute;
+    border: 4px solid #a855f7;
+    border-radius: 50%;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    margin: auto;
+    animation: ai-ripple 2s ease-out infinite;
+}
+
+.ai-loader::after {
+    animation-delay: 1s;
+}
+
+@keyframes ai-pulse {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 0 40px #9333ea, inset 0 0 20px #9333ea;
+    }
+    50% {
+        transform: scale(1.05);
+        box-shadow: 0 0 60px #a855f7, inset 0 0 30px #a855f7;
+    }
+}
+
+@keyframes ai-ripple {
+    0% {
+        transform: scale(1);
+        opacity: 0.7;
+    }
+    100% {
+        transform: scale(1.8);
+        opacity: 0;
+    }
+}
+
+.ai-thinking-text {
+    font-size: 18px;
+    font-weight: 600;
+    color: #a855f7;
+    margin-bottom: 8px;
+    animation: ai-text-pulse 1.5s ease-in-out infinite;
+}
+
+.ai-thinking-detail {
+    font-size: 14px;
+    color: #cccccc;
+    opacity: 0.8;
+}
+
+@keyframes ai-text-pulse {
+    0%, 100% {
+        opacity: 0.8;
+    }
+    50% {
+        opacity: 1;
+        text-shadow: 0 0 10px #a855f7;
+    }
+}
+
+/* Box Shake Animation */
+@keyframes shake-attention {
+    0%, 100% { transform: translateX(0); }
+    10%, 30%, 50%, 70%, 90% { transform: translateX(-3px); }
+    20%, 40%, 60%, 80% { transform: translateX(3px); }
+}
+
+.shake-attention {
+    animation: shake-attention 0.6s ease-in-out 3;
+}
+
+/* Typing Animation */
+.typing-animation {
+    overflow: hidden;
+    white-space: nowrap;
+    border-right: 2px solid;
+    animation: typing-cursor 1s infinite;
+}
+
+@keyframes typing-cursor {
+    0%, 50% { border-color: transparent; }
+    51%, 100% { border-color: currentColor; }
+}
+
+/* Box Glow Effect */
+@keyframes attention-glow {
+    0%, 100% { box-shadow: 0 4px 8px rgba(0,0,0,0.3); }
+    50% { 
+        box-shadow: 0 4px 20px rgba(147, 51, 234, 0.6), 
+                    0 0 30px rgba(147, 51, 234, 0.4),
+                    inset 0 0 10px rgba(147, 51, 234, 0.2); 
+    }
+}
+
+.attention-glow {
+    animation: attention-glow 2s ease-in-out 4;
+}
+
     </style>
 </head>
 <body>
@@ -729,7 +863,8 @@
         
         <!-- AI Suggestions Only Section (Condition 3 only) -->
         <div class="sidebar-section hidden" id="suggestionsOnlySection">
-            <div style="background: linear-gradient(135deg, #1e1b3a, #2d2749); border: 2px solid #7c3aed; border-radius: 8px; padding: 20px; line-height: 2; color: #a78bfa; box-shadow: 0 4px 8px rgba(0,0,0,0.3);">
+        <div class="violet-box" style="background: linear-gradient(135deg, #1e1b3a, #2d2749); border: 2px solid #7c3aed; border-radius: 8px; padding: 20px; line-height: 2; color: #a78bfa; box-shadow: 0 4px 8px rgba(0,0,0,0.3);">
+
                 <div class="sidebar-header">
                     <h3>AI Code Suggestions</h3>
                     <div id="history-suggestions" class="history-button">View History</div>
@@ -1027,17 +1162,20 @@ window.editor = monaco.editor.create(editorContainer, {
                     let analysisTimeout;
                     let lastAnalyzedContent = '';
                     
-                    window.editor.onDidChangeModelContent(() => {
-                        clearTimeout(analysisTimeout);
-                        
-                        analysisTimeout = setTimeout(() => {
-                            const currentContent = window.editor.getValue().trim();
-                            
-                            if (currentContent !== lastAnalyzedContent && currentContent.length > 0) {
-                                analyzeCurrentCode();
-                                lastAnalyzedContent = currentContent;
+                    window.editor.onDidChangeModelContent((e) => {
+                        // Check if user pressed Enter (new line)
+                        const changes = e.changes;
+                        for (const change of changes) {
+                            if (change.text.includes('\n')) {
+                                const currentContent = window.editor.getValue().trim();
+                                
+                                if (currentContent !== lastAnalyzedContent && currentContent.length > 0) {
+                                    analyzeCurrentCode();
+                                    lastAnalyzedContent = currentContent;
+                                    break;
+                                }
                             }
-                        }, 2000);
+                        }
                     });
                     
                     updateFontSize(currentFontSize);
@@ -1054,112 +1192,235 @@ window.editor = monaco.editor.create(editorContainer, {
     }
 
     // Analyze current code
-    async function analyzeCurrentCode() {
-        if (!currentSession.sessionId) {
-            console.warn('No active session for code analysis');
-            return;
+async function analyzeCurrentCode() {
+    if (!currentSession.sessionId) {
+        console.warn('No active session for code analysis');
+        return;
+    }
+    
+    const code = window.editor.getValue().trim();
+    if (!code || code === '// Start coding here...' || code === '# Start coding here...') return;
+
+    // Show AI thinking animation and disable editor
+    showAIThinking();
+
+    try {
+        const response = await fetch('/analyze', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                code: code,
+                user_id: currentSession.userId,
+                assignment_key: currentSession.assignmentKey,
+                session_id: currentSession.sessionId
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Analysis failed: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        const problemDescription = data.analysis || "Problem description not available";
+        let nextLineCode = data.next_line || "// No suggestions available";
+        
+        let correctNextLineCode = nextLineCode;
+        if (currentSession.condition === 1 && data.correct_next_line) {
+            correctNextLineCode = data.correct_next_line;
+        }
+
+        // Clean and format suggested code
+        nextLineCode = nextLineCode.replace(/^```\w*\n?|```$/g, '').trim();
+        const lines = nextLineCode.split('\n');
+        if (lines.length > 2) {
+            nextLineCode = lines.slice(0, 2).join('\n');
         }
         
-        const code = window.editor.getValue().trim();
-        if (!code || code === '// Start coding here...') return;
-
-        try {
-            const response = await fetch('/analyze', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    code: code,
-                    user_id: currentSession.userId,
-                    assignment_key: currentSession.assignmentKey,
-                    session_id: currentSession.sessionId
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error(`Analysis failed: ${response.statusText}`);
+        // Clean correct suggestion too
+        if (correctNextLineCode !== nextLineCode) {
+            correctNextLineCode = correctNextLineCode.replace(/^```\w*\n?|```$/g, '').trim();
+            const correctLines = correctNextLineCode.split('\n');
+            if (correctLines.length > 2) {
+                correctNextLineCode = correctLines.slice(0, 2).join('\n');
             }
+        }
 
-            const data = await response.json();
-            const problemDescription = data.analysis || "Problem description not available";
-            let nextLineCode = data.next_line || "// No suggestions available";
-            
-            let correctNextLineCode = nextLineCode;
-            if (currentSession.condition === 1 && data.correct_next_line) {
-                correctNextLineCode = data.correct_next_line;
-            }
+// Store in guess history
+        currentSession.guessHistory.push({
+            timestamp: new Date().toISOString(),
+            problemAnalysis: problemDescription,
+            nextLine: nextLineCode
+        });
 
-            // Clean and format suggested code
-            nextLineCode = nextLineCode.replace(/^```\w*\n?|```$/g, '').trim();
-            const lines = nextLineCode.split('\n');
-            if (lines.length > 2) {
-                nextLineCode = lines.slice(0, 2).join('\n');
-            }
-            
-            // Clean correct suggestion too
-            if (correctNextLineCode !== nextLineCode) {
-                correctNextLineCode = correctNextLineCode.replace(/^```\w*\n?|```$/g, '').trim();
-                const correctLines = correctNextLineCode.split('\n');
-                if (correctLines.length > 2) {
-                    correctNextLineCode = correctLines.slice(0, 2).join('\n');
-                }
-            }
+        // Update log counts
+        currentSession.guessLogCount++;
+        guessLogCount.textContent = currentSession.guessLogCount;
 
-            // Display AI guess suggestion (red box)
-            analysis.textContent = problemDescription;
-            document.getElementById('suggestionGuess').textContent = nextLineCode;
-
-            // Store in guess history
-            currentSession.guessHistory.push({
+        // For condition 1, also store correct description data
+        if (currentSession.condition === 1) {
+            currentSession.descHistory.push({
                 timestamp: new Date().toISOString(),
-                problemAnalysis: problemDescription,
+                problemAnalysis: currentSession.problemDescription || problemDescription,
+                nextLine: correctNextLineCode
+            });
+            
+            currentSession.descLogCount++;
+            descLogCount.textContent = currentSession.descLogCount;
+        }
+
+        // For condition 3, store suggestions data
+        if (currentSession.condition === 3) {
+            currentSession.suggestionsHistory.push({
+                timestamp: new Date().toISOString(),
                 nextLine: nextLineCode
             });
-
-            // Update log counts
-            currentSession.guessLogCount++;
-            guessLogCount.textContent = currentSession.guessLogCount;
-
-            // For condition 1, display separate correct description suggestion (green box)
-if (currentSession.condition === 1) {
-    document.getElementById('suggestionDesc').textContent = correctNextLineCode;
-    
-    // Store in description history with correct problem description
-    currentSession.descHistory.push({
-        timestamp: new Date().toISOString(),
-        problemAnalysis: currentSession.problemDescription || problemDescription,
-        nextLine: correctNextLineCode
-    });
-    
-    currentSession.descLogCount++;
-    descLogCount.textContent = currentSession.descLogCount;
-}
-
-// For condition 3, only show suggestions without problem analysis
-if (currentSession.condition === 3) {
-    document.getElementById('suggestionOnly').textContent = nextLineCode;
-    
-    currentSession.suggestionsHistory.push({
-        timestamp: new Date().toISOString(),
-        nextLine: nextLineCode
-    });
-    
-    currentSession.suggestionsLogCount++;
-    document.getElementById('suggestionsLogCount').textContent = currentSession.suggestionsLogCount;
-}
-
-        } catch (error) {
-            console.error('Analysis error:', error);
-            analysis.innerHTML = `
-                <div style="color: #ff6b6b;">
-                    <strong>Connection Issue:</strong> ${error.message}<br>
-                    Local logging continues...
-                </div>
-            `;
+            
+            currentSession.suggestionsLogCount++;
+            document.getElementById('suggestionsLogCount').textContent = currentSession.suggestionsLogCount;
         }
-    }
 
+        // ANIMATE THE RESULTS with typing effect and box shaking
+        await animateAnalysisResults(problemDescription, nextLineCode, correctNextLineCode);
+
+    } catch (error) {
+        console.error('Analysis error:', error);
+        analysis.innerHTML = `
+            <div style="color: #ff6b6b;">
+                <strong>Connection Issue:</strong> ${error.message}<br>
+                Local logging continues...
+            </div>
+        `;
+        addTerminalOutput('AI analysis failed - check connection', 'error');
+    } finally {
+        // Always hide thinking animation and re-enable editor
+        setTimeout(() => {
+            hideAIThinking();
+        }, 500); // Small delay to show completion
+    }
+}
+
+function showAIThinking() {
+    // Get editor container
+    const editorContainer = document.getElementById('editor');
+    if (!editorContainer) return;
+    
+    // Make editor container position relative if not already
+    editorContainer.style.position = 'relative';
+    
+    // Create overlay if it doesn't exist
+    let overlay = document.getElementById('aiThinkingOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'aiThinkingOverlay';
+        overlay.className = 'ai-thinking-overlay';
+        overlay.innerHTML = `
+            <div class="ai-thinking-container">
+                <div class="ai-loader"></div>
+                <div class="ai-thinking-text">AI is analyzing your code...</div>
+                <div class="ai-thinking-detail">Please wait while AI generates suggestions</div>
+            </div>
+        `;
+        editorContainer.appendChild(overlay);
+    }
+    
+    // Disable editor
+    if (window.editor) {
+        window.editor.updateOptions({ readOnly: true });
+    }
+    
+    // Show overlay
+    overlay.style.display = 'flex';
+}
+
+function hideAIThinking() {
+    // Hide overlay
+    const overlay = document.getElementById('aiThinkingOverlay');
+    if (overlay) {
+        overlay.style.display = 'none';
+    }
+    
+    // Re-enable editor
+    if (window.editor) {
+        window.editor.updateOptions({ readOnly: false });
+        window.editor.focus();
+    }
+}
+
+function typeTextAnimation(element, text, speed = 50) {
+    return new Promise((resolve) => {
+        element.textContent = '';
+        element.classList.add('typing-animation');
+        
+        let i = 0;
+        const typeInterval = setInterval(() => {
+            if (i < text.length) {
+                element.textContent += text.charAt(i);
+                i++;
+            } else {
+                clearInterval(typeInterval);
+                element.classList.remove('typing-animation');
+                resolve();
+            }
+        }, speed);
+    });
+}
+
+function shakeAndGlowBox(boxElement) {
+    boxElement.classList.add('shake-attention', 'attention-glow');
+    
+    setTimeout(() => {
+        boxElement.classList.remove('shake-attention', 'attention-glow');
+    }, 3000);
+}
+
+async function animateAnalysisResults(problemDescription, nextLineCode, correctNextLineCode = null) {
+    // Add attention effects to boxes
+    const redBox = document.querySelector('.red-box');
+    const greenBox = document.querySelector('.green-box');
+    const violetBox = document.querySelector('.violet-box');
+    
+if (currentSession.condition === 1) {
+        // Shake both red and green boxes
+        shakeAndGlowBox(redBox);
+        shakeAndGlowBox(greenBox);
+        
+        // Type problem description in green box
+        if (currentSession.problemDescription) {
+            await typeTextAnimation(document.getElementById('problemDescriptionDisplay'), currentSession.problemDescription, 25);
+        }
+        
+        // Type analysis in red box
+        await typeTextAnimation(analysis, problemDescription, 30);
+        
+        // Type suggestion in red box
+        await typeTextAnimation(document.getElementById('suggestionGuess'), nextLineCode, 40);
+        
+        // Type suggestion in green box
+        if (correctNextLineCode) {
+            await typeTextAnimation(document.getElementById('suggestionDesc'), correctNextLineCode, 40);
+        }
+        
+    } else if (currentSession.condition === 2) {
+        // Shake red box only
+        shakeAndGlowBox(redBox);
+        
+        // Type analysis and suggestion
+        await typeTextAnimation(analysis, problemDescription, 30);
+        await typeTextAnimation(document.getElementById('suggestionGuess'), nextLineCode, 40);
+        
+    } else if (currentSession.condition === 3) {
+        // Shake violet box only
+        shakeAndGlowBox(violetBox);
+        
+        // Type suggestion only
+        await typeTextAnimation(document.getElementById('suggestionOnly'), nextLineCode, 40);
+    }
+    
+    // Add terminal notification after animations
+    addTerminalOutput('AI analysis completed - check the highlighted suggestions!', 'success');
+}
     function showHistoryInline(type) {
     const isGuessHistory = type === 'guess';
     const isDescHistory = type === 'desc';
@@ -1586,30 +1847,34 @@ async function executePythonOnBackend(code) {
     }
 }
    async function submitToDatabase() {
-       if (!currentSession.sessionId) {
-           addTerminalOutput('No active session to submit', 'error');
-           return;
-       }
+    if (!currentSession.sessionId) {
+        addTerminalOutput('No active session to submit', 'error');
+        return;
+    }
 
-       const code = window.editor.getValue();
-       if (!code.trim()) {
-           addTerminalOutput('No code to submit. Please write some code first.', 'warning');
-           return;
-       }
+    const code = window.editor.getValue();
+    if (!code.trim()) {
+        addTerminalOutput('No code to submit. Please write some code first.', 'warning');
+        return;
+    }
 
-       const confirmSubmit = confirm(
-           'IMPORTANT: Submitting your code will automatically log you out of this session.\n\n' +
-           'You will need to start a new session with your credentials to continue coding.\n\n' +
-           'Are you sure you want to submit and logout?'
-       );
+    const confirmSubmit = confirm(
+        'IMPORTANT: Submitting your code will automatically log you out of this session.\n\n' +
+        'You will need to start a new session with your credentials to continue coding.\n\n' +
+        'Are you sure you want to submit and logout?'
+    );
 
-       if (!confirmSubmit) {
-           addTerminalOutput('Submission cancelled by user', 'warning');
-           return;
-       }
+    if (!confirmSubmit) {
+        addTerminalOutput('Submission cancelled by user', 'warning');
+        return;
+    }
 
-       submitButton.disabled = true;
-       submitButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Submitting & Logging out...</div>';
+    // FINAL AI ANALYSIS BEFORE SUBMISSION
+    addTerminalOutput('Performing final AI analysis before submission...', 'info');
+    await analyzeCurrentCode();
+    
+    submitButton.disabled = true;
+    submitButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Submitting & Logging out...</div>';
 
        try {
            const response = await fetch('/submit', {
