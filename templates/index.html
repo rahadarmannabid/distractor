@@ -749,7 +749,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs/loader.min.js"></script>
 <script>
-    // Global session management
+// Global session management
 let currentSession = {
     userId: null,
     assignmentKey: null,
@@ -757,6 +757,7 @@ let currentSession = {
     sessionToken: null,
     condition: null,
     problemDescription: null,
+    programmingLanguage: 'javascript',
     startTime: null,
     guessLogCount: 0,
     descLogCount: 0,
@@ -902,6 +903,7 @@ async function initializeFromURL() {
                 sessionToken: authData.sessionToken,
                 condition: authData.condition,
                 problemDescription: authData.problemDescription,
+                programmingLanguage: authData.programmingLanguage || 'javascript',
                 startTime: authData.timestamp,
                 guessLogCount: 0,
                 descLogCount: 0,
@@ -998,21 +1000,29 @@ async function initializeFromURL() {
             require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs' }});
             require(['vs/editor/editor.main'], function () {
                 try {
-                    window.editor = monaco.editor.create(editorContainer, {
-                        value: '// Start coding here...\n',
-                        language: 'javascript',
-                        theme: 'vs-dark',
-                        automaticLayout: true,
-                        minimap: { enabled: true },
-                        scrollBeyondLastLine: false,
-                        wordWrap: 'on',
-                        lineNumbers: 'on',
-                        folding: true,
-                        selectOnLineNumbers: true,
-                        matchBrackets: 'always',
-                        fontSize: currentFontSize
-                    });
+                    // Set language-specific defaults
+const languageDefaults = {
+    javascript: '// Start coding here...\n',
+    python: '# Start coding here...\n'
+};
 
+const selectedLanguage = currentSession.programmingLanguage || 'javascript';
+const defaultCode = languageDefaults[selectedLanguage] || '// Start coding here...\n';
+
+window.editor = monaco.editor.create(editorContainer, {
+    value: defaultCode,
+    language: selectedLanguage,
+    theme: 'vs-dark',
+    automaticLayout: true,
+    minimap: { enabled: true },
+    scrollBeyondLastLine: false,
+    wordWrap: 'on',
+    lineNumbers: 'on',
+    folding: true,
+    selectOnLineNumbers: true,
+    matchBrackets: 'always',
+    fontSize: currentFontSize
+});
                     // AI analysis triggers on meaningful content changes with debouncing
                     let analysisTimeout;
                     let lastAnalyzedContent = '';
@@ -1439,66 +1449,142 @@ if (type === 'guess') {
    
    let isRunning = false;
 
-   async function executeCode() {
-       if (isRunning) return;
-       
-       currentSession.compilerClickCount++;
-       
-       const code = window.editor.getValue();
-       if (!code) {
-           addTerminalOutput('No code to execute. Please write some code first.', 'warning');
-           return;
-       }
-       
-       isRunning = true;
-       runButton.disabled = true;
-       runButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Running...</div>';
+async function executeCode() {
+    if (isRunning) return;
+    
+    currentSession.compilerClickCount++;
+    
+    const code = window.editor.getValue();
+    if (!code) {
+        addTerminalOutput('No code to execute. Please write some code first.', 'warning');
+        return;
+    }
+    
+    isRunning = true;
+    runButton.disabled = true;
+    runButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Running...</div>';
 
-       const originalLog = console.log;
-       const originalError = console.error;
-       const originalWarn = console.warn;
-       
-       console.log = function(...args) {
-           originalLog.apply(this, args);
-           addTerminalOutput(args.join(' '));
-       };
-       
-       console.error = function(...args) {
-           originalError.apply(this, args);
-           addTerminalOutput(args.join(' '), 'error');
-       };
-       
-       console.warn = function(...args) {
-           originalWarn.apply(this, args);
-           addTerminalOutput(args.join(' '), 'warning');
-       };
+    try {
+        if (currentSession.programmingLanguage === 'javascript') {
+            // Execute JavaScript in browser (existing functionality)
+            await executeJavaScriptInBrowser(code);
+        } else if (currentSession.programmingLanguage === 'python') {
+            // Execute Python on backend
+            await executePythonOnBackend(code);
+        } else {
+            addTerminalOutput(`${currentSession.programmingLanguage} execution not supported yet`, 'warning');
+        }
+    } catch (error) {
+        console.error('Execution error:', error);
+        addTerminalOutput('Execution failed:', 'error');
+        addTerminalOutput(error.message, 'error');
+    } finally {
+        isRunning = false;
+        runButton.disabled = false;
+        runButton.innerHTML = 'Run';
+    }
+}
 
-       try {
-           const canvas = document.createElement("canvas");
-           addTerminalOutput(`Running code...`, 'prompt');
-           const startTime = Date.now();
 
-           const run = new Function(["canvas"], code);
-           run(canvas);
+async function executeJavaScriptInBrowser(code) {
+    const originalLog = console.log;
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    
+    console.log = function(...args) {
+        originalLog.apply(this, args);
+        addTerminalOutput(args.join(' '));
+    };
+    
+    console.error = function(...args) {
+        originalError.apply(this, args);
+        addTerminalOutput(args.join(' '), 'error');
+    };
+    
+    console.warn = function(...args) {
+        originalWarn.apply(this, args);
+        addTerminalOutput(args.join(' '), 'warning');
+    };
 
-           const finishTime = Date.now();
-           addTerminalOutput(`Process finished (${finishTime-startTime}ms)`, 'execution-time');
-           addTerminalOutput(`Ready for more code!`, 'prompt');
-       } catch (error) {
-           console.error('Execution error:', error);
-           addTerminalOutput('Execution error:', 'error');
-           addTerminalOutput(error.message, 'error');
-       } finally {
-           console.log = originalLog;
-           console.error = originalError;
-           console.warn = originalWarn;
-           
-           isRunning = false;
-           runButton.disabled = false;
-           runButton.innerHTML = 'Run';
-       }
-   }
+    try {
+        const canvas = document.createElement("canvas");
+        addTerminalOutput(`Running JavaScript...`, 'prompt');
+        const startTime = Date.now();
 
+        const run = new Function(["canvas"], code);
+        run(canvas);
+
+        const finishTime = Date.now();
+        addTerminalOutput(`Process finished (${finishTime-startTime}ms)`, 'execution-time');
+        addTerminalOutput(`Ready for more code!`, 'prompt');
+    } catch (error) {
+        addTerminalOutput('JavaScript error:', 'error');
+        addTerminalOutput(error.message, 'error');
+    } finally {
+        console.log = originalLog;
+        console.error = originalError;
+        console.warn = originalWarn;
+    }
+}
+
+
+
+async function executePythonOnBackend(code) {
+    try {
+        addTerminalOutput(`Running Python on server...`, 'prompt');
+        const startTime = Date.now();
+        
+        const response = await fetch('/execute', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                code: code,
+                language: 'python',
+                user_id: currentSession.userId,
+                session_id: currentSession.sessionId
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Server error: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        const finishTime = Date.now();
+        
+        if (result.success) {
+            if (result.output) {
+                addTerminalOutput('Output:', 'success');
+                // Split output into lines and display each
+                result.output.split('\n').forEach(line => {
+                    if (line.trim()) {
+                        addTerminalOutput(line, 'normal');
+                    }
+                });
+            }
+            if (result.error) {
+                addTerminalOutput('Warnings:', 'warning');
+                addTerminalOutput(result.error, 'warning');
+            }
+            addTerminalOutput(`Python execution completed (${finishTime-startTime}ms)`, 'execution-time');
+        } else {
+            addTerminalOutput('Python error:', 'error');
+            addTerminalOutput(result.error, 'error');
+            if (result.output) {
+                addTerminalOutput('Output before error:', 'info');
+                addTerminalOutput(result.output, 'normal');
+            }
+        }
+        
+        addTerminalOutput(`Ready for more code!`, 'prompt');
+        
+    } catch (error) {
+        addTerminalOutput('Network/Server error:', 'error');
+        addTerminalOutput(error.message, 'error');
+    }
+}
    async function submitToDatabase() {
        if (!currentSession.sessionId) {
            addTerminalOutput('No active session to submit', 'error');
@@ -1532,14 +1618,15 @@ if (type === 'guess') {
                    'Content-Type': 'application/json',
                },
                body: JSON.stringify({
-                   code: code,
-                   user_id: currentSession.userId,
-                   assignment_key: currentSession.assignmentKey,
-                   session_id: currentSession.sessionId,
-                   timestamp: new Date().toISOString(),
-                   suggestion_clicked: currentSession.suggestionClickCount,
-                   compiler_clicked: currentSession.compilerClickCount
-               })
+                code: code,
+                user_id: currentSession.userId,
+                assignment_key: currentSession.assignmentKey,
+                session_id: currentSession.sessionId,
+                programming_language: currentSession.programmingLanguage,
+                timestamp: new Date().toISOString(),
+                suggestion_clicked: currentSession.suggestionClickCount,
+                compiler_clicked: currentSession.compilerClickCount
+            })
            });
 
            if (!response.ok) {

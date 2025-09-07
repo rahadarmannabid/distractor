@@ -19,6 +19,8 @@ from typing import List, Dict, Optional
 import firebase_admin
 from firebase_admin import credentials, db
 from fastapi.responses import HTMLResponse, RedirectResponse
+import asyncio
+import shlex
 
 
 # Load environment variables
@@ -261,6 +263,111 @@ def detect_programming_language(code):
     # Default to generic programming language
     return "code"
 
+async def execute_code_safely(code: str, language: str, timeout: int = 10):
+    """
+    Execute code safely in a subprocess with timeout and security restrictions
+    """
+    if not code.strip():
+        return {"success": False, "output": "", "error": "No code provided"}
+    
+    try:
+        if language == "python":
+            return await execute_python_code(code, timeout)
+        elif language == "javascript":
+            return {"success": False, "output": "", "error": "JavaScript should be executed in frontend"}
+        else:
+            return {"success": False, "output": "", "error": f"Language '{language}' not supported for backend execution"}
+    except Exception as e:
+        logger.error(f"Code execution error: {e}")
+        return {"success": False, "output": "", "error": f"Execution failed: {str(e)}"}
+
+async def execute_python_code(code: str, timeout: int = 10):
+    """
+    Execute Python code safely with restrictions
+    """
+    # Security restrictions - block dangerous imports and operations
+    dangerous_patterns = [
+        'import os', 'import sys', 'import subprocess', 'import shutil',
+        'import socket', 'import urllib', 'import requests', 'import http',
+        'open(', 'file(', '__import__', 'eval(', 'exec(',
+        'compile(', 'globals()', 'locals()', 'vars()', 'dir(',
+        'getattr(', 'setattr(', 'delattr(', 'hasattr(',
+        'input(', 'raw_input('
+    ]
+    
+    code_lower = code.lower()
+    for pattern in dangerous_patterns:
+        if pattern in code_lower:
+            return {
+                "success": False, 
+                "output": "", 
+                "error": f"Security restriction: '{pattern}' is not allowed for safety reasons"
+            }
+    
+    # Create a temporary file
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as temp_file:
+            temp_file.write(code)
+            temp_file_path = temp_file.name
+        
+        # Execute with timeout and restricted environment
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, temp_file_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env={'PYTHONPATH': '', 'PATH': '/usr/bin:/bin'}  # Restricted environment
+        )
+        
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            
+            stdout_str = stdout.decode('utf-8', errors='replace')
+            stderr_str = stderr.decode('utf-8', errors='replace')
+            
+            # Clean up temp file
+            try:
+                os.unlink(temp_file_path)
+            except:
+                pass
+            
+            if process.returncode == 0:
+                return {
+                    "success": True,
+                    "output": stdout_str,
+                    "error": stderr_str if stderr_str else ""
+                }
+            else:
+                return {
+                    "success": False,
+                    "output": stdout_str,
+                    "error": stderr_str or f"Process exited with code {process.returncode}"
+                }
+                
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            try:
+                os.unlink(temp_file_path)
+            except:
+                pass
+            return {
+                "success": False,
+                "output": "",
+                "error": f"Code execution timed out after {timeout} seconds"
+            }
+            
+    except Exception as e:
+        try:
+            os.unlink(temp_file_path)
+        except:
+            pass
+        return {
+            "success": False,
+            "output": "",
+            "error": f"Execution error: {str(e)}"
+        }
+
+
 # Data Models
 class AuthRequest(BaseModel):
     user_id: str
@@ -404,7 +511,7 @@ def save_session_to_local(session_log: SessionLog):
     except Exception as e:
         logger.error(f"Failed to save session log locally: {e}")
 
-async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: int, compiler_clicked: int):
+async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: int, compiler_clicked: int, programming_language: str = "unknown"):
     """Save complete session data to Firebase using the new hierarchical structure"""
     if not firebase_db:
         logger.warning("Firebase not available for saving session data")
@@ -418,6 +525,7 @@ async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: 
         summary_data = {
             'starting_time': session_log.code_start_timestamp,
             'submitted_code': session_log.submitted_full_code,
+            'programming_language': programming_language,
             'suggestion_clicked': suggestion_clicked,
             'compiler_clicked': compiler_clicked,
             'end_time': session_log.code_submit_timestamp
@@ -646,6 +754,19 @@ class CodeResponse(BaseModel):
     next_line: str
     correct_next_line: Optional[str] = None
 
+
+class ExecuteRequest(BaseModel):
+    code: str
+    language: str
+    user_id: str = None
+    session_id: str = None
+
+class ExecuteResponse(BaseModel):
+    success: bool
+    output: str
+    error: str
+    execution_time: float
+
 @app.post("/analyze", response_model=CodeResponse)
 async def analyze_code(request: CodeRequest):
     """
@@ -818,12 +939,60 @@ async def analyze_code(request: CodeRequest):
             analysis=fallback_analysis,
             next_line="// Analysis temporarily unavailable - continue coding"
         )
+    
+
+@app.post("/execute", response_model=ExecuteResponse)
+async def execute_code(request: ExecuteRequest):
+    """
+    Execute code safely on the backend
+    """
+    try:
+        code = request.code.strip()
+        language = request.language.lower()
+        
+        if not code:
+            return ExecuteResponse(
+                success=False,
+                output="",
+                error="No code provided for execution",
+                execution_time=0.0
+            )
+        
+        max_code_length = int(os.getenv("MAX_CODE_LENGTH", "10000"))
+        if len(code) > max_code_length:
+            return ExecuteResponse(
+                success=False,
+                output="",
+                error=f"Code too long - please keep under {max_code_length} characters",
+                execution_time=0.0
+            )
+        
+        start_time = time.time()
+        result = await execute_code_safely(code, language, timeout=10)
+        execution_time = time.time() - start_time
+        
+        return ExecuteResponse(
+            success=result["success"],
+            output=result["output"],
+            error=result["error"],
+            execution_time=execution_time
+        )
+        
+    except Exception as e:
+        logger.error(f"Execute endpoint error: {str(e)}")
+        return ExecuteResponse(
+            success=False,
+            output="",
+            error=f"Server error: {str(e)}",
+            execution_time=0.0
+        )
 
 class SubmitRequest(BaseModel):
     code: str
     user_id: str = None
     assignment_key: str = None
     session_id: str = None
+    programming_language: str = None
     timestamp: str = None
     suggestion_clicked: int = 0
     compiler_clicked: int = 0
@@ -847,6 +1016,7 @@ async def submit_code(request: SubmitRequest):
         session_id = request.session_id
         user_id = request.user_id or "anonymous"
         assignment_key = request.assignment_key or "unknown"
+        programming_language = request.programming_language or "unknown"
         timestamp = request.timestamp or datetime.now().isoformat()
         suggestion_clicked = request.suggestion_clicked
         compiler_clicked = request.compiler_clicked
@@ -877,7 +1047,7 @@ async def submit_code(request: SubmitRequest):
         if session_log:
             try:
                 # Save complete session data to Firebase
-                success = await save_session_to_firebase(session_log, suggestion_clicked, compiler_clicked)
+                success = await save_session_to_firebase(session_log, suggestion_clicked, compiler_clicked, programming_language)
                 firebase_status = "success" if success else "failed"
                 
                 # Update local backup with final data

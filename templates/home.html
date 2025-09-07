@@ -697,23 +697,43 @@
                 </div>
                 
                 <div class="form-group">
-                    <label class="form-label" for="assignmentKey">
-                        🔑 Assignment Key
-                    </label>
-                    <input 
-                        type="text" 
-                        id="assignmentKey" 
-                        name="assignmentKey" 
-                        class="form-input" 
-                        placeholder="Enter your assignment access key"
-                        required
-                        minlength="5"
-                        autocomplete="off"
-                    >
-                    <small class="info-text">
-                        Only valid assignment keys are accepted. Invalid keys will be rejected for security.
-                    </small>
-                </div>
+    <label class="form-label" for="assignmentKey">
+        🔑 Assignment Key
+    </label>
+    <input 
+        type="text" 
+        id="assignmentKey" 
+        name="assignmentKey" 
+        class="form-input" 
+        placeholder="Enter your assignment access key"
+        required
+        minlength="5"
+        autocomplete="off"
+    >
+    <small class="info-text">
+        Only valid assignment keys are accepted. Invalid keys will be rejected for security.
+    </small>
+</div>
+
+<div class="form-group">
+    <label class="form-label" for="programmingLanguage">
+        💻 Programming Language
+    </label>
+    <select 
+        id="programmingLanguage" 
+        name="programmingLanguage" 
+        class="form-input" 
+        required
+        style="cursor: pointer;"
+    >
+        <option value="">Select your preferred language</option>
+        <option value="javascript">JavaScript</option>
+        <option value="python">Python</option>
+    </select>
+    <small class="info-text">
+        Choose the programming language you'll be working with in the IDE.
+    </small>
+</div>
                 
                 <button type="submit" class="login-button" id="loginButton">
                     Enter Coding Environment
@@ -750,6 +770,7 @@
         const errorText = document.getElementById('errorText');
         const userIdInput = document.getElementById('userId');
         const assignmentKeyInput = document.getElementById('assignmentKey');
+        const programmingLanguageSelect = document.getElementById('programmingLanguage');
 
         let consentGiven = false;
 
@@ -817,10 +838,11 @@
             
             const userId = userIdInput.value.trim();
             const assignmentKey = assignmentKeyInput.value.trim();
-            
+            const selectedLanguage = programmingLanguageSelect.value;
+
             // Basic validation
-            if (!userId || !assignmentKey) {
-                showError('Please fill in both User ID and Assignment Key');
+            if (!userId || !assignmentKey || !selectedLanguage) {
+                showError('Please fill in User ID, Assignment Key, and select a Programming Language');
                 return;
             }
 
@@ -864,16 +886,17 @@
                 
                 // Store credentials and consent status in sessionStorage for the IDE page
                 sessionStorage.setItem('authData', JSON.stringify({
-                    userId: userId,
-                    assignmentKey: assignmentKey,
-                    sessionToken: sessionToken,
-                    condition: data.condition,
-                    problemDescription: data.problem_description,
-                    sessionId: data.session_id,
-                    timestamp: new Date().toISOString(),
-                    consentGiven: true,
-                    consentTimestamp: new Date().toISOString()
-                }));
+                userId: userId,
+                assignmentKey: assignmentKey,
+                sessionToken: sessionToken,
+                condition: data.condition,
+                problemDescription: data.problem_description,
+                sessionId: data.session_id,
+                programmingLanguage: selectedLanguage,
+                timestamp: new Date().toISOString(),
+                consentGiven: true,
+                consentTimestamp: new Date().toISOString()
+            }));
                 
                 // Redirect to unique IDE URL
                 const ideUrl = `index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
@@ -913,6 +936,7 @@
             
             userIdInput.value = '';
             assignmentKeyInput.value = '';
+            programmingLanguageSelect.value = '';
             hideError();
             
             // Clear any existing session data
@@ -924,7 +948,7 @@
         });
 
         // Add interactive effects
-        [userIdInput, assignmentKeyInput].forEach(input => {
+            [userIdInput, assignmentKeyInput, programmingLanguageSelect].forEach(input => {
             input.addEventListener('focus', () => {
                 hideError();
             });
