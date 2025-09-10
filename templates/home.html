@@ -891,7 +891,10 @@
                 programmingLanguage: selectedLanguage,
                 timestamp: new Date().toISOString(),
                 consentGiven: true,
-                consentTimestamp: new Date().toISOString()
+                consentTimestamp: new Date().toISOString(),
+                pasteAllowed: data.paste_allowed !== undefined ? data.paste_allowed : 1
+
+
             }));
                 
                 // Redirect to unique IDE URL

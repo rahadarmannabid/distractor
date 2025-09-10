@@ -379,6 +379,7 @@ class AuthResponse(BaseModel):
     condition: int
     problem_description: str | None = None
     session_id: str
+    paste_allowed: int = 1  # ADD THIS LINE
 
 class AIGuessEntry(BaseModel):
     problem_analysis: str  # FIXED: Renamed from existing_code for clarity
@@ -485,12 +486,17 @@ async def authenticate_user(request: AuthRequest):
         
         logger.info(f"Authentication successful: {user_id} -> Condition {condition}, Session: {session_id}")
         
+        # Get paste control setting
+        paste_allowed = int(os.getenv("PASTE_CONTROL", "1"))
+        print(f"Paste control setting: {paste_allowed}")
+
         return AuthResponse(
             status="success",
             message="Authentication successful",
             condition=condition,
             problem_description=problem_description,
-            session_id=session_id
+            session_id=session_id,
+            paste_allowed=paste_allowed
         )
         
     except HTTPException:

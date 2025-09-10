@@ -620,96 +620,101 @@
         }
 
 /* AI Thinking Overlay - Editor Only */
-.ai-thinking-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.85);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 1000;
-    backdrop-filter: blur(3px);
-}
-
-.ai-thinking-container {
+/* ADD this new CSS for mini AI thinking animation in sidebar */
+.mini-ai-thinking {
     text-align: center;
-    color: white;
+    padding: 20px;
 }
 
-.ai-loader {
-    width: 120px;
-    height: 120px;
+.mini-ai-loader {
+    width: 50px;
+    height: 50px;
     border-radius: 50%;
     position: relative;
-    box-shadow: 0 0 40px #9333ea, inset 0 0 20px #9333ea;
-    animation: ai-pulse 2s ease-in-out infinite;
-    margin: 0 auto 20px;
+    margin: 0 auto 15px;
+    background: linear-gradient(45deg, #9333ea, #a855f7, #c084fc);
+    animation: ai-spin-zoom 3s ease-in-out infinite;
+    box-shadow: 0 0 30px rgba(147, 51, 234, 0.6);
 }
 
-.ai-loader::before,
-.ai-loader::after {
+.mini-ai-loader::before,
+.mini-ai-loader::after {
     content: "";
     position: absolute;
-    border: 4px solid #a855f7;
+    border: 3px solid transparent;
+    border-top: 3px solid #a855f7;
+    border-right: 3px solid #c084fc;
     border-radius: 50%;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    margin: auto;
-    animation: ai-ripple 2s ease-out infinite;
+    top: -3px;
+    left: -3px;
+    right: -3px;
+    bottom: -3px;
+    animation: ai-spin-fast 1.5s linear infinite;
 }
 
-.ai-loader::after {
-    animation-delay: 1s;
+.mini-ai-loader::after {
+    border-top: 3px solid #c084fc;
+    border-right: 3px solid #e879f9;
+    animation: ai-spin-slow 2.5s linear infinite reverse;
+    top: -6px;
+    left: -6px;
+    right: -6px;
+    bottom: -6px;
 }
 
-@keyframes ai-pulse {
+@keyframes ai-spin-zoom {
     0%, 100% {
-        transform: scale(1);
-        box-shadow: 0 0 40px #9333ea, inset 0 0 20px #9333ea;
+        transform: scale(0.8) rotate(0deg);
+        box-shadow: 0 0 20px rgba(147, 51, 234, 0.4);
+        background: linear-gradient(45deg, #9333ea, #a855f7);
+    }
+    25% {
+        transform: scale(1.2) rotate(90deg);
+        box-shadow: 0 0 40px rgba(168, 85, 247, 0.8);
+        background: linear-gradient(45deg, #a855f7, #c084fc);
     }
     50% {
-        transform: scale(1.05);
-        box-shadow: 0 0 60px #a855f7, inset 0 0 30px #a855f7;
+        transform: scale(1.0) rotate(180deg);
+        box-shadow: 0 0 50px rgba(192, 132, 252, 0.9);
+        background: linear-gradient(45deg, #c084fc, #e879f9);
+    }
+    75% {
+        transform: scale(1.3) rotate(270deg);
+        box-shadow: 0 0 35px rgba(168, 85, 247, 0.7);
+        background: linear-gradient(45deg, #a855f7, #c084fc);
     }
 }
 
-@keyframes ai-ripple {
-    0% {
-        transform: scale(1);
-        opacity: 0.7;
-    }
-    100% {
-        transform: scale(1.8);
-        opacity: 0;
-    }
+@keyframes ai-spin-fast {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }
 
-.ai-thinking-text {
-    font-size: 18px;
+@keyframes ai-spin-slow {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(-360deg); }
+}
+
+.mini-ai-text {
+    font-size: 14px;
     font-weight: 600;
     color: #a855f7;
-    margin-bottom: 8px;
-    animation: ai-text-pulse 1.5s ease-in-out infinite;
+    animation: ai-text-glow 2s ease-in-out infinite;
+    text-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
 }
 
-.ai-thinking-detail {
-    font-size: 14px;
-    color: #cccccc;
-    opacity: 0.8;
+.ai-thinking-glow {
+    animation: box-thinking-glow 2s ease-in-out infinite;
 }
 
-@keyframes ai-text-pulse {
-    0%, 100% {
-        opacity: 0.8;
+@keyframes box-thinking-glow {
+    0%, 100% { 
+        box-shadow: 0 4px 8px rgba(0,0,0,0.3); 
     }
-    50% {
-        opacity: 1;
-        text-shadow: 0 0 10px #a855f7;
+    50% { 
+        box-shadow: 0 4px 20px rgba(147, 51, 234, 0.6), 
+                    0 0 30px rgba(147, 51, 234, 0.4),
+                    inset 0 0 10px rgba(147, 51, 234, 0.2); 
     }
 }
 
@@ -718,6 +723,21 @@
     0%, 100% { transform: translateX(0); }
     10%, 30%, 50%, 70%, 90% { transform: translateX(-3px); }
     20%, 40%, 60%, 80% { transform: translateX(3px); }
+}
+
+@keyframes ai-text-glow {
+    0%, 100% {
+        opacity: 0.7;
+        transform: scale(1);
+        color: #a855f7;
+        text-shadow: 0 0 5px rgba(168, 85, 247, 0.3);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.05);
+        color: #c084fc;
+        text-shadow: 0 0 20px rgba(192, 132, 252, 0.8);
+    }
 }
 
 .shake-attention {
@@ -759,7 +779,7 @@
         <div class="loading-container">
             <div class="loading-spinner"></div>
             <div class="loading-text">Initializing AI Code Assistant</div>
-            <div class="loading-detail">Validating session and loading IDE...</div>
+            <div class="loading-detail" id="loadingDetail">Validating session and loading IDE...</div>
         </div>
     </div>
 
@@ -894,6 +914,7 @@ let currentSession = {
     problemDescription: null,
     programmingLanguage: 'javascript',
     startTime: null,
+    pasteAllowed: 1,  // ADD THIS LINE
     guessLogCount: 0,
     descLogCount: 0,
     suggestionsLogCount: 0,
@@ -901,13 +922,15 @@ let currentSession = {
     compilerClickCount: 0,
     guessHistory: [],
     descHistory: [],
-    suggestionsHistory: []
+    suggestionsHistory: [],
+
 };
 
     // Font size management
     let currentFontSize = 14;
     const minFontSize = 10;
     const maxFontSize = 24;
+    let isAnalyzing = false;
 
     // UI Elements
     const loadingScreen = document.getElementById('loadingScreen');
@@ -923,6 +946,13 @@ let currentSession = {
     const analysis = document.getElementById('analysis');
     const suggestionGuess = document.getElementById('suggestionGuess');
     const suggestionDesc = document.getElementById('suggestionDesc');
+
+    function updateLoadingMessage(message) {
+    const loadingDetail = document.getElementById('loadingDetail');
+    if (loadingDetail) {
+        loadingDetail.textContent = message;
+    }
+}
 
     // Authentication and Session Validation
     function validateSessionFromURL() {
@@ -1014,8 +1044,10 @@ let currentSession = {
     }
 
     // Initialize application from URL parameters
+// Initialize application from URL parameters
 async function initializeFromURL() {
     console.log('Starting initialization...');
+    updateLoadingMessage('Validating session parameters...');
     console.log('Current URL:', window.location.href);
     console.log('SessionStorage data:', sessionStorage.getItem('authData'));
     
@@ -1023,173 +1055,312 @@ async function initializeFromURL() {
         const validation = validateSessionFromURL();
         console.log('Validation result:', validation);
             
-            if (!validation.success) {
-                showAccessDenied(validation.error);
-                return;
-            }
-            
-            const authData = validation.data;
-            
-            // Initialize session with stored data
-            currentSession = {
-                userId: authData.userId,
-                assignmentKey: authData.assignmentKey,
-                sessionId: authData.sessionId,
-                sessionToken: authData.sessionToken,
-                condition: authData.condition,
-                problemDescription: authData.problemDescription,
-                programmingLanguage: authData.programmingLanguage || 'javascript',
-                startTime: authData.timestamp,
-                guessLogCount: 0,
-                descLogCount: 0,
-                suggestionsLogCount: 0,
-                suggestionClickCount: 0,
-                compilerClickCount: 0,
-                guessHistory: [],
-                descHistory: [],
-                suggestionsHistory: []
-            };
-            
-            // Update UI
-            userDisplay.textContent = `User: ${authData.userId}`;
-            sessionIndicator.textContent = `Session: ${authData.sessionId.substring(0, 16)}...`;
-            conditionIndicator.textContent = `Condition ${authData.condition}`;
-            
-            // Update URL display
-            const urlDisplay = document.getElementById('urlDisplay');
-            const currentURL = window.location.href;
-            urlDisplay.textContent = `URL: ${currentURL.substring(0, 50)}${currentURL.length > 50 ? '...' : ''}`;
-            
-            // Handle condition-specific UI
-            if (authData.condition === 1) {
-                problemDescSection.classList.remove('hidden');
-                document.getElementById('aiGuessSection').classList.remove('hidden');
-                document.getElementById('suggestionsOnlySection').classList.add('hidden');
-                if (authData.problemDescription) {
-                    try {
-                        const parsedMarkdown = marked.parse(authData.problemDescription);
-                        problemDescriptionDisplay.innerHTML = parsedMarkdown;
-                    } catch (e) {
-                        console.error('Markdown parsing error:', e);
-                        problemDescriptionDisplay.innerHTML = authData.problemDescription;
-                    }
-                }
-                document.body.classList.add('condition-1');
-                document.body.classList.remove('condition-2', 'condition-3');
-            } else if (authData.condition === 2) {
-                problemDescSection.classList.add('hidden');
-                document.getElementById('aiGuessSection').classList.remove('hidden');
-                document.getElementById('suggestionsOnlySection').classList.add('hidden');
-                document.body.classList.add('condition-2');
-                document.body.classList.remove('condition-1', 'condition-3');
-            } else if (authData.condition === 3) {
-                problemDescSection.classList.add('hidden');
-                document.getElementById('aiGuessSection').classList.add('hidden');
-                document.getElementById('suggestionsOnlySection').classList.remove('hidden');
-                document.body.classList.add('condition-3');
-                document.body.classList.remove('condition-1', 'condition-2');
-            }
-
-            // Initialize editor
-            await initializeEditor();
-            showMainApp();
-            
-            // Add welcome messages
-            setTimeout(() => {
-                addTerminalOutput(`Secure session restored successfully!`, 'success');
-                addTerminalOutput(`User ID: ${authData.userId}`, 'info');
-                addTerminalOutput(`Assignment: ${authData.assignmentKey}`, 'info');
-                addTerminalOutput(`Condition: ${authData.condition}`, 'info');
-                addTerminalOutput(`Session ID: ${authData.sessionId}`, 'info');
-                addTerminalOutput(`Database: Ready for logging`, 'info');
-                addTerminalOutput(`IMPORTANT: Submitting code will automatically log you out`, 'warning');
-                addTerminalOutput(`TIP: Use A+/A- buttons to adjust font size (Current: ${currentFontSize}px)`, 'info');
-            }, 100);
-            
-        } catch (error) {
-            console.error('Initialization failed:', error);
-            showAccessDenied('Failed to initialize IDE. Please refresh and try again.');
+        if (!validation.success) {
+            showAccessDenied(validation.error);
+            return;
         }
-    }
+        
+        updateLoadingMessage('Loading user session data...');
+        const authData = validation.data;
+        
+        // Initialize session with stored data
+        currentSession = {
+            userId: authData.userId,
+            assignmentKey: authData.assignmentKey,
+            sessionId: authData.sessionId,
+            sessionToken: authData.sessionToken,
+            condition: authData.condition,
+            problemDescription: authData.problemDescription,
+            programmingLanguage: authData.programmingLanguage || 'javascript',
+            startTime: authData.timestamp,
+            pasteAllowed: authData.pasteAllowed !== undefined ? authData.pasteAllowed : 1,
+            guessLogCount: 0,
+            descLogCount: 0,
+            suggestionsLogCount: 0,
+            suggestionClickCount: 0,
+            compilerClickCount: 0,
+            guessHistory: [],
+            descHistory: [],
+            suggestionsHistory: []
+        };
+        
+        // Update UI
+        userDisplay.textContent = `User: ${authData.userId}`;
+        sessionIndicator.textContent = `Session: ${authData.sessionId.substring(0, 16)}...`;
+        conditionIndicator.textContent = `Condition ${authData.condition}`;
+        
+        // Update URL display
+        const urlDisplay = document.getElementById('urlDisplay');
+        const currentURL = window.location.href;
+        urlDisplay.textContent = `URL: ${currentURL.substring(0, 50)}${currentURL.length > 50 ? '...' : ''}`;
+        
+        // Add paste status indicator
+        const pasteStatus = authData.pasteAllowed === 1 ? 'Enabled' : 'Disabled';
+        const pasteIndicator = document.createElement('span');
+        pasteIndicator.className = authData.pasteAllowed === 1 ? 'session-indicator' : 'condition-indicator';
+        pasteIndicator.textContent = `Paste: ${pasteStatus}`;
+        pasteIndicator.style.marginRight = '10px';
+        
+        const conditionIndicatorElement = document.getElementById('conditionIndicator');
+        conditionIndicatorElement.parentNode.insertBefore(pasteIndicator, conditionIndicatorElement);
 
-    // Initialize Monaco Editor
-    async function initializeEditor() {
-        return new Promise((resolve, reject) => {
-            if (window.editor) {
+        // Handle condition-specific UI
+        if (authData.condition === 1) {
+            problemDescSection.classList.remove('hidden');
+            document.getElementById('aiGuessSection').classList.remove('hidden');
+            document.getElementById('suggestionsOnlySection').classList.add('hidden');
+            if (authData.problemDescription) {
                 try {
-                    window.editor.dispose();
-                    window.editor = null;
+                    const parsedMarkdown = marked.parse(authData.problemDescription);
+                    problemDescriptionDisplay.innerHTML = parsedMarkdown;
                 } catch (e) {
-                    console.log('Previous editor cleanup:', e);
+                    console.error('Markdown parsing error:', e);
+                    problemDescriptionDisplay.innerHTML = authData.problemDescription;
                 }
             }
+            document.body.classList.add('condition-1');
+            document.body.classList.remove('condition-2', 'condition-3');
+        } else if (authData.condition === 2) {
+            problemDescSection.classList.add('hidden');
+            document.getElementById('aiGuessSection').classList.remove('hidden');
+            document.getElementById('suggestionsOnlySection').classList.add('hidden');
+            document.body.classList.add('condition-2');
+            document.body.classList.remove('condition-1', 'condition-3');
+        } else if (authData.condition === 3) {
+            problemDescSection.classList.add('hidden');
+            document.getElementById('aiGuessSection').classList.add('hidden');
+            document.getElementById('suggestionsOnlySection').classList.remove('hidden');
+            document.body.classList.add('condition-3');
+            document.body.classList.remove('condition-1', 'condition-2');
+        }
+
+        // Initialize editor with timeout protection
+        console.log('Initializing Monaco Editor...');
+        updateLoadingMessage('Loading code editor (this may take a few seconds)...');
+        await initializeEditor();
+        console.log('Monaco Editor initialized successfully');
+        
+        updateLoadingMessage('Finalizing setup...');
+        showMainApp();
+        
+        // Add welcome messages
+        setTimeout(() => {
+            addTerminalOutput(`Secure session restored successfully!`, 'success');
+            addTerminalOutput(`User ID: ${authData.userId}`, 'info');
+            addTerminalOutput(`Assignment: ${authData.assignmentKey}`, 'info');
+            addTerminalOutput(`Condition: ${authData.condition}`, 'info');
+            addTerminalOutput(`Session ID: ${authData.sessionId}`, 'info');
+            addTerminalOutput(`Database: Ready for logging`, 'info');
             
-            const editorContainer = document.getElementById('editor');
-            if (!editorContainer) {
-                reject(new Error('Editor container not found'));
-                return;
+            if (authData.pasteAllowed === 0 || authData.pasteAllowed === "0") {
+                addTerminalOutput(`⚠️  COPY/PASTE DISABLED: All code must be typed manually`, 'warning');
+                addTerminalOutput(`   This restriction is part of the research study`, 'info');
+            } else {
+                addTerminalOutput(`✅ Copy/paste functionality is enabled`, 'info');
             }
             
-            editorContainer.innerHTML = '';
-            
-            require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs' }});
-            require(['vs/editor/editor.main'], function () {
-                try {
-                    // Set language-specific defaults
-const languageDefaults = {
-    javascript: '// Start coding here...\n',
-    python: '# Start coding here...\n'
-};
+            addTerminalOutput(`IMPORTANT: Submitting code will automatically log you out`, 'warning');
+            addTerminalOutput(`TIP: Use A+/A- buttons to adjust font size (Current: ${currentFontSize}px)`, 'info');
+        }, 100);
+        
+    } catch (error) {
+        console.error('Initialization failed:', error);
+        showAccessDenied('Failed to initialize IDE. Please refresh and try again. Error: ' + error.message);
+    }
+}
 
-const selectedLanguage = currentSession.programmingLanguage || 'javascript';
-const defaultCode = languageDefaults[selectedLanguage] || '// Start coding here...\n';
+// Initialize Monaco Editor with timeout and error handling
+async function initializeEditor() {
+    return new Promise((resolve, reject) => {
+        // Set a timeout for Monaco loading
+        const loadingTimeout = setTimeout(() => {
+            reject(new Error('Monaco Editor loading timed out after 15 seconds'));
+        }, 15000);
 
-window.editor = monaco.editor.create(editorContainer, {
-    value: defaultCode,
-    language: selectedLanguage,
-    theme: 'vs-dark',
-    automaticLayout: true,
-    minimap: { enabled: true },
-    scrollBeyondLastLine: false,
-    wordWrap: 'on',
-    lineNumbers: 'on',
-    folding: true,
-    selectOnLineNumbers: true,
-    matchBrackets: 'always',
-    fontSize: currentFontSize
-});
-                    // AI analysis triggers on meaningful content changes with debouncing
-                    let analysisTimeout;
-                    let lastAnalyzedContent = '';
-                    
-                    window.editor.onDidChangeModelContent((e) => {
-                        // Check if user pressed Enter (new line)
-                        const changes = e.changes;
-                        for (const change of changes) {
-                            if (change.text.includes('\n')) {
-                                const currentContent = window.editor.getValue().trim();
-                                
-                                if (currentContent !== lastAnalyzedContent && currentContent.length > 0) {
-                                    analyzeCurrentCode();
-                                    lastAnalyzedContent = currentContent;
-                                    break;
-                                }
-                            }
-                        }
+        if (window.editor) {
+            try {
+                window.editor.dispose();
+                window.editor = null;
+            } catch (e) {
+                console.log('Previous editor cleanup:', e);
+            }
+        }
+        
+        const editorContainer = document.getElementById('editor');
+        if (!editorContainer) {
+            clearTimeout(loadingTimeout);
+            reject(new Error('Editor container not found'));
+            return;
+        }
+        
+        editorContainer.innerHTML = '';
+        
+        // Configure RequireJS with timeout
+        require.config({ 
+            paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs' },
+            waitSeconds: 15
+        });
+        
+        require(['vs/editor/editor.main'], function () {
+            try {
+                clearTimeout(loadingTimeout);
+                
+                // Set language-specific defaults
+                const languageDefaults = {
+                    javascript: '// Start coding here...\n',
+                    python: '# Start coding here...\n'
+                };
+
+                const selectedLanguage = currentSession.programmingLanguage || 'javascript';
+                const defaultCode = languageDefaults[selectedLanguage] || '// Start coding here...\n';
+
+                window.editor = monaco.editor.create(editorContainer, {
+                    value: defaultCode,
+                    language: selectedLanguage,
+                    theme: 'vs-dark',
+                    automaticLayout: true,
+                    minimap: { enabled: true },
+                    scrollBeyondLastLine: false,
+                    wordWrap: 'on',
+                    lineNumbers: 'on',
+                    folding: true,
+                    selectOnLineNumbers: true,
+                    matchBrackets: 'always',
+                    fontSize: currentFontSize
+                });
+
+                // Paste control implementation
+                console.log('DEBUG: pasteAllowed value:', currentSession.pasteAllowed);
+                console.log('DEBUG: pasteAllowed type:', typeof currentSession.pasteAllowed);
+                console.log('DEBUG: Will block paste:', (currentSession.pasteAllowed === 0 || currentSession.pasteAllowed === "0"));
+
+                if (currentSession.pasteAllowed === 0 || currentSession.pasteAllowed === "0") {
+                    console.log('DEBUG: Applying paste blocking...');
+                    window.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV, function() {
+                        addTerminalOutput('❌ Copy/paste is disabled - please type your code manually', 'warning');
+                        return null;
                     });
                     
-                    updateFontSize(currentFontSize);
-                    resolve();
-                } catch (error) {
-                    console.error('Monaco Editor initialization failed:', error);
-                    reject(error);
+                    const domNode = window.editor.getDomNode();
+                    
+                    if (domNode) {
+                        domNode.addEventListener('keydown', function(e) {
+                            if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                                addTerminalOutput('❌ Ctrl+V blocked - copy/paste is disabled for this study', 'warning');
+                                return false;
+                            }
+                            if (e.shiftKey && e.key === 'Insert') {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                                addTerminalOutput('Keyboard paste blocked (Shift+Insert)', 'warning');
+                                return false;
+                            }
+                        }, true);
+                        
+                        domNode.addEventListener('paste', function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                            addTerminalOutput('Paste event blocked', 'warning');
+                            return false;
+                        }, true);
+                        
+                        domNode.addEventListener('contextmenu', function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            addTerminalOutput('❌ Right-click paste blocked - please type manually', 'warning');
+                            return false;
+                        }, true);
+                        
+                        // Add visual indicator
+                        const pasteIndicator = document.createElement('div');
+                        pasteIndicator.style.cssText = `
+                            position: absolute;
+                            top: 5px;
+                            right: 5px;
+                            background: #ef4444;
+                            color: white;
+                            padding: 2px 6px;
+                            border-radius: 3px;
+                            font-size: 10px;
+                            z-index: 100;
+                            pointer-events: none;
+                            font-family: monospace;
+                            font-weight: bold;
+                        `;
+                        pasteIndicator.textContent = 'COPY/PASTE DISABLED';
+                        editorContainer.appendChild(pasteIndicator);
+                        
+                        const notificationBanner = document.createElement('div');
+                        notificationBanner.style.cssText = `
+                            position: fixed;
+                            top: 0;
+                            left: 0;
+                            right: 0;
+                            background: linear-gradient(135deg, #dc2626, #ef4444);
+                            color: white;
+                            padding: 8px 20px;
+                            text-align: center;
+                            font-size: 14px;
+                            font-weight: bold;
+                            z-index: 10000;
+                            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                            font-family: 'Segoe UI', sans-serif;
+                        `;
+                        notificationBanner.innerHTML = `
+                            ⚠️ NOTICE: Copy and paste functionality is disabled in this IDE. All code must be typed manually.
+                        `;
+                        document.body.appendChild(notificationBanner);
+                        
+                        const mainApp = document.getElementById('application');
+                        if (mainApp) {
+                            mainApp.style.marginTop = '40px';
+                        }
+                    }
+                    
+                    addTerminalOutput('Paste functionality completely disabled for this session', 'warning');
+                } else {
+                    addTerminalOutput('Paste functionality enabled', 'info');
                 }
-            }, function (err) {
-                console.error('Monaco Editor loading failed:', err);
-                reject(new Error('Failed to load Monaco Editor'));
-            });
+
+                // AI analysis triggers
+                let analysisTimeout;
+                let lastAnalyzedContent = '';
+                
+                window.editor.onDidChangeModelContent((e) => {
+                    const changes = e.changes;
+                    for (const change of changes) {
+                        if (change.text.includes('\n')) {
+                            const currentContent = window.editor.getValue().trim();
+                            
+                            if (currentContent !== lastAnalyzedContent && currentContent.length > 0) {
+                                analyzeCurrentCode();
+                                lastAnalyzedContent = currentContent;
+                                break;
+                            }
+                        }
+                    }
+                });
+                
+                updateFontSize(currentFontSize);
+                resolve();
+                
+            } catch (error) {
+                clearTimeout(loadingTimeout);
+                console.error('Monaco Editor initialization failed:', error);
+                reject(error);
+            }
+        }, function (err) {
+            clearTimeout(loadingTimeout);
+            console.error('Monaco Editor loading failed:', err);
+            reject(new Error('Failed to load Monaco Editor: ' + (err.message || err)));
         });
-    }
+    });
+}
 
     // Analyze current code
 async function analyzeCurrentCode() {
@@ -1198,8 +1369,17 @@ async function analyzeCurrentCode() {
         return;
     }
     
+    // Prevent race conditions - don't start new analysis if one is in progress
+    if (isAnalyzing) {
+        console.log('Analysis already in progress, skipping...');
+        return;
+    }
+    
     const code = window.editor.getValue().trim();
     if (!code || code === '// Start coding here...' || code === '# Start coding here...') return;
+
+    // Set analyzing flag
+    isAnalyzing = true;
 
     // Show AI thinking animation and disable editor
     showAIThinking();
@@ -1297,56 +1477,58 @@ async function analyzeCurrentCode() {
         // Always hide thinking animation and re-enable editor
         setTimeout(() => {
             hideAIThinking();
+            // Reset analyzing flag after animation completes
+            isAnalyzing = false;
         }, 500); // Small delay to show completion
     }
 }
 
-function showAIThinking() {
-    // Get editor container
-    const editorContainer = document.getElementById('editor');
-    if (!editorContainer) return;
+
+// ADD these new functions:
+function showAIThinkingInBox(type) {
+    let targetElement, boxElement;
     
-    // Make editor container position relative if not already
-    editorContainer.style.position = 'relative';
+    if (type === 'guess') {
+        targetElement = document.getElementById('analysis');
+        boxElement = document.querySelector('.red-box');
+    } else if (type === 'desc') {
+        targetElement = document.getElementById('suggestionDesc');
+        boxElement = document.querySelector('.green-box');
+    } else if (type === 'suggestions') {
+        targetElement = document.getElementById('suggestionOnly');
+        boxElement = document.querySelector('.violet-box');
+    }
     
-    // Create overlay if it doesn't exist
-    let overlay = document.getElementById('aiThinkingOverlay');
-    if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'aiThinkingOverlay';
-        overlay.className = 'ai-thinking-overlay';
-        overlay.innerHTML = `
-            <div class="ai-thinking-container">
-                <div class="ai-loader"></div>
-                <div class="ai-thinking-text">AI is analyzing your code...</div>
-                <div class="ai-thinking-detail">Please wait while AI generates suggestions</div>
+    if (targetElement && boxElement) {
+        // Create mini AI thinking animation
+        targetElement.innerHTML = `
+            <div class="mini-ai-thinking">
+                <div class="mini-ai-loader"></div>
+                <div class="mini-ai-text">AI is analyzing...</div>
             </div>
         `;
-        editorContainer.appendChild(overlay);
+        
+        // Add glow effect to the box
+        boxElement.classList.add('ai-thinking-glow');
     }
-    
-    // Disable editor
-    if (window.editor) {
-        window.editor.updateOptions({ readOnly: true });
-    }
-    
-    // Show overlay
-    overlay.style.display = 'flex';
 }
 
-function hideAIThinking() {
-    // Hide overlay
-    const overlay = document.getElementById('aiThinkingOverlay');
-    if (overlay) {
-        overlay.style.display = 'none';
+function hideAIThinkingInBox(type) {
+    let boxElement;
+    
+    if (type === 'guess') {
+        boxElement = document.querySelector('.red-box');
+    } else if (type === 'desc') {
+        boxElement = document.querySelector('.green-box');
+    } else if (type === 'suggestions') {
+        boxElement = document.querySelector('.violet-box');
     }
     
-    // Re-enable editor
-    if (window.editor) {
-        window.editor.updateOptions({ readOnly: false });
-        window.editor.focus();
+    if (boxElement) {
+        boxElement.classList.remove('ai-thinking-glow');
     }
 }
+
 
 function typeTextAnimation(element, text, speed = 50) {
     return new Promise((resolve) => {
@@ -1382,27 +1564,32 @@ async function animateAnalysisResults(problemDescription, nextLineCode, correctN
     const violetBox = document.querySelector('.violet-box');
     
 if (currentSession.condition === 1) {
-        // Shake both red and green boxes
-        shakeAndGlowBox(redBox);
-        shakeAndGlowBox(greenBox);
-        
-        // Type problem description in green box
-        if (currentSession.problemDescription) {
-            await typeTextAnimation(document.getElementById('problemDescriptionDisplay'), currentSession.problemDescription, 25);
+    // Shake both red and green boxes
+    shakeAndGlowBox(redBox);
+    shakeAndGlowBox(greenBox);
+    
+    // Show problem description instantly (no typing animation)
+    if (currentSession.problemDescription) {
+        try {
+            const parsedMarkdown = marked.parse(currentSession.problemDescription);
+            document.getElementById('problemDescriptionDisplay').innerHTML = parsedMarkdown;
+        } catch (e) {
+            document.getElementById('problemDescriptionDisplay').innerHTML = currentSession.problemDescription;
         }
-        
-        // Type analysis in red box
-        await typeTextAnimation(analysis, problemDescription, 30);
-        
-        // Type suggestion in red box
-        await typeTextAnimation(document.getElementById('suggestionGuess'), nextLineCode, 40);
-        
-        // Type suggestion in green box
-        if (correctNextLineCode) {
-            await typeTextAnimation(document.getElementById('suggestionDesc'), correctNextLineCode, 40);
-        }
-        
-    } else if (currentSession.condition === 2) {
+    }
+    
+    // Type analysis in red box
+    await typeTextAnimation(analysis, problemDescription, 30);
+    
+    // Type suggestion in red box
+    await typeTextAnimation(document.getElementById('suggestionGuess'), nextLineCode, 40);
+    
+    // Type suggestion in green box
+    if (correctNextLineCode) {
+        await typeTextAnimation(document.getElementById('suggestionDesc'), correctNextLineCode, 40);
+    }
+    
+} else if (currentSession.condition === 2) {
         // Shake red box only
         shakeAndGlowBox(redBox);
         
@@ -1419,8 +1606,8 @@ if (currentSession.condition === 1) {
     }
     
     // Add terminal notification after animations
-    addTerminalOutput('AI analysis completed - check the highlighted suggestions!', 'success');
-}
+    addTerminalOutput('AI analysis completed - new suggestions available in sidebar!', 'success');
+    }
     function showHistoryInline(type) {
     const isGuessHistory = type === 'guess';
     const isDescHistory = type === 'desc';
@@ -1626,7 +1813,30 @@ if (type === 'guess') {
         const match = lineContent.match(/^(\s*)/);
         return match ? match[1] : '';
     }
+// ADD this function after the hideAIThinkingInBox function:
+function showAIThinking() {
+    // Show AI thinking animation in sidebar boxes only
+    if (currentSession.condition === 1) {
+        showAIThinkingInBox('guess');
+        showAIThinkingInBox('desc');
+    } else if (currentSession.condition === 2) {
+        showAIThinkingInBox('guess');
+    } else if (currentSession.condition === 3) {
+        showAIThinkingInBox('suggestions');
+    }
+    
+    // DON'T disable editor - let user continue typing
+}
 
+// ADD this function after the showAIThinking function:
+function hideAIThinking() {
+    // Hide AI thinking in sidebar boxes
+    hideAIThinkingInBox('guess');
+    hideAIThinkingInBox('desc'); 
+    hideAIThinkingInBox('suggestions');
+    
+    // DON'T re-enable editor since we never disabled it
+}
     function processSuggestionWithIndentation(suggestion, baseIndentation) {
         const lines = suggestion.split('\n');
         if (lines.length === 1) {
@@ -2090,17 +2300,39 @@ if (historySuggestionsButton) {
            return e.returnValue;
        }
    });
-// Initialize on page load with better error handling
-   document.addEventListener('DOMContentLoaded', function() {
-       console.log('DOM loaded, starting initialization...');
-       initializeFromURL();
-   });
+// Prevent double initialization
+let isInitializing = false;
+let isInitialized = false;
 
-   // Backup initialization if DOM already loaded
-   if (document.readyState === 'complete' || document.readyState === 'interactive') {
-       console.log('DOM already ready, initializing immediately...');
-       initializeFromURL();
-   }
+async function safeInitialize() {
+    if (isInitializing || isInitialized) {
+        console.log('Initialization already in progress or completed');
+        return;
+    }
+    
+    isInitializing = true;
+    try {
+        await initializeFromURL();
+        isInitialized = true;
+    } catch (error) {
+        console.error('Initialization failed:', error);
+        showAccessDenied('Failed to initialize IDE: ' + error.message);
+    } finally {
+        isInitializing = false;
+    }
+}
+
+// Initialize on page load with better error handling
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM loaded, starting initialization...');
+    safeInitialize();
+});
+
+// Backup initialization if DOM already loaded
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    console.log('DOM already ready, initializing immediately...');
+    safeInitialize();
+}
 </script>
 
 </body>

@@ -18,6 +18,10 @@ from datetime import datetime
 from typing import List, Dict, Optional
 import firebase_admin
 from firebase_admin import credentials, db
+from fastapi.responses import HTMLResponse, RedirectResponse
+import asyncio
+import shlex
+
 
 # Load environment variables
 load_dotenv()
@@ -100,17 +104,19 @@ def initialize_firebase():
 # Initialize Firebase client
 firebase_db = initialize_firebase()
 
-# Assignment Key Conditions - Load from environment variables
 def get_condition_keys():
     """Get condition keys from environment variables"""
     condition_1_keys = os.getenv("CONDITION_1_PREFIXES", "Condition1_all").split(",")
     condition_2_keys = os.getenv("CONDITION_2_PREFIXES", "Condition2_partial,fdasdfsa").split(",")
+    condition_3_keys = os.getenv("CONDITION_3_PREFIXES", "Condition3_suggestions").split(",")
     
     # Clean up the keys (remove spaces and empty strings)
     condition_1_keys = [key.strip() for key in condition_1_keys if key.strip()]
     condition_2_keys = [key.strip() for key in condition_2_keys if key.strip()]
+    condition_3_keys = [key.strip() for key in condition_3_keys if key.strip()]
     
-    return condition_1_keys, condition_2_keys
+    return condition_1_keys, condition_2_keys, condition_3_keys
+
 
 def get_assignment_base_key(assignment_key):
     """
@@ -120,8 +126,8 @@ def get_assignment_base_key(assignment_key):
     if not assignment_key:
         return None
     
-    condition_1_keys, condition_2_keys = get_condition_keys()
-    all_keys = condition_1_keys + condition_2_keys
+    condition_1_keys, condition_2_keys, condition_3_keys = get_condition_keys()
+    all_keys = condition_1_keys + condition_2_keys + condition_3_keys
     assignment_key = assignment_key.strip()
     
     # Check for exact match first
@@ -138,12 +144,12 @@ def get_assignment_base_key(assignment_key):
 def get_assignment_condition(assignment_key):
     """
     Determine which condition the assignment key belongs to
-    Returns: 1 for full UI, 2 for partial UI (guess only), None for invalid
+    Returns: 1 for full UI, 2 for partial UI (guess only), 3 for suggestions only, None for invalid
     """
     if not assignment_key:
         return None
     
-    condition_1_keys, condition_2_keys = get_condition_keys()
+    condition_1_keys, condition_2_keys, condition_3_keys = get_condition_keys()
     assignment_key = assignment_key.strip()
     
     # Check for exact match in condition 1 keys
@@ -153,6 +159,10 @@ def get_assignment_condition(assignment_key):
     # Check for exact match in condition 2 keys
     if assignment_key in condition_2_keys:
         return 2
+        
+    # Check for exact match in condition 3 keys
+    if assignment_key in condition_3_keys:
+        return 3
     
     # Check for prefix match in condition 1
     for prefix in condition_1_keys:
@@ -163,6 +173,11 @@ def get_assignment_condition(assignment_key):
     for prefix in condition_2_keys:
         if assignment_key.startswith(prefix):
             return 2
+            
+    # Check for prefix match in condition 3
+    for prefix in condition_3_keys:
+        if assignment_key.startswith(prefix):
+            return 3
     
     # STRICT VALIDATION: Return None for unrecognized keys
     return None
@@ -248,6 +263,111 @@ def detect_programming_language(code):
     # Default to generic programming language
     return "code"
 
+async def execute_code_safely(code: str, language: str, timeout: int = 10):
+    """
+    Execute code safely in a subprocess with timeout and security restrictions
+    """
+    if not code.strip():
+        return {"success": False, "output": "", "error": "No code provided"}
+    
+    try:
+        if language == "python":
+            return await execute_python_code(code, timeout)
+        elif language == "javascript":
+            return {"success": False, "output": "", "error": "JavaScript should be executed in frontend"}
+        else:
+            return {"success": False, "output": "", "error": f"Language '{language}' not supported for backend execution"}
+    except Exception as e:
+        logger.error(f"Code execution error: {e}")
+        return {"success": False, "output": "", "error": f"Execution failed: {str(e)}"}
+
+async def execute_python_code(code: str, timeout: int = 10):
+    """
+    Execute Python code safely with restrictions
+    """
+    # Security restrictions - block dangerous imports and operations
+    dangerous_patterns = [
+        'import os', 'import sys', 'import subprocess', 'import shutil',
+        'import socket', 'import urllib', 'import requests', 'import http',
+        'open(', 'file(', '__import__', 'eval(', 'exec(',
+        'compile(', 'globals()', 'locals()', 'vars()', 'dir(',
+        'getattr(', 'setattr(', 'delattr(', 'hasattr(',
+        'input(', 'raw_input('
+    ]
+    
+    code_lower = code.lower()
+    for pattern in dangerous_patterns:
+        if pattern in code_lower:
+            return {
+                "success": False, 
+                "output": "", 
+                "error": f"Security restriction: '{pattern}' is not allowed for safety reasons"
+            }
+    
+    # Create a temporary file
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as temp_file:
+            temp_file.write(code)
+            temp_file_path = temp_file.name
+        
+        # Execute with timeout and restricted environment
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, temp_file_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env={'PYTHONPATH': '', 'PATH': '/usr/bin:/bin'}  # Restricted environment
+        )
+        
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            
+            stdout_str = stdout.decode('utf-8', errors='replace')
+            stderr_str = stderr.decode('utf-8', errors='replace')
+            
+            # Clean up temp file
+            try:
+                os.unlink(temp_file_path)
+            except:
+                pass
+            
+            if process.returncode == 0:
+                return {
+                    "success": True,
+                    "output": stdout_str,
+                    "error": stderr_str if stderr_str else ""
+                }
+            else:
+                return {
+                    "success": False,
+                    "output": stdout_str,
+                    "error": stderr_str or f"Process exited with code {process.returncode}"
+                }
+                
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            try:
+                os.unlink(temp_file_path)
+            except:
+                pass
+            return {
+                "success": False,
+                "output": "",
+                "error": f"Code execution timed out after {timeout} seconds"
+            }
+            
+    except Exception as e:
+        try:
+            os.unlink(temp_file_path)
+        except:
+            pass
+        return {
+            "success": False,
+            "output": "",
+            "error": f"Execution error: {str(e)}"
+        }
+
+
 # Data Models
 class AuthRequest(BaseModel):
     user_id: str
@@ -259,6 +379,7 @@ class AuthResponse(BaseModel):
     condition: int
     problem_description: str | None = None
     session_id: str
+    paste_allowed: int = 1  # ADD THIS LINE
 
 class AIGuessEntry(BaseModel):
     problem_analysis: str  # FIXED: Renamed from existing_code for clarity
@@ -277,6 +398,7 @@ class SessionLog(BaseModel):
     submitted_full_code: Optional[str] = None
     ai_guess_history: List[AIGuessEntry] = []
     correct_description_history: Optional[List[AIGuessEntry]] = None  # Only for condition 1
+    suggestions_only_history: Optional[List[AIGuessEntry]] = None  # For condition 3
     problem_description: Optional[str] = None
 
 # Global session storage (in-memory, will be sent to Firebase on submit)
@@ -343,7 +465,7 @@ async def authenticate_user(request: AuthRequest):
                 logger.error(f"Error reading assignment file for {assignment_key}: {e}")
                 problem_description = f"Error loading assignment description: {str(e)}"
         
-        # Initialize session log
+# Initialize session log
         session_log = SessionLog(
             user_id=user_id,
             assignment_id=assignment_key,
@@ -352,6 +474,7 @@ async def authenticate_user(request: AuthRequest):
             code_start_timestamp=datetime.now().isoformat(),
             ai_guess_history=[],
             correct_description_history=[] if condition == 1 else None,
+            suggestions_only_history=[] if condition == 3 else None,
             problem_description=problem_description
         )
         
@@ -363,12 +486,17 @@ async def authenticate_user(request: AuthRequest):
         
         logger.info(f"Authentication successful: {user_id} -> Condition {condition}, Session: {session_id}")
         
+        # Get paste control setting
+        paste_allowed = int(os.getenv("PASTE_CONTROL", "1"))
+        print(f"Paste control setting: {paste_allowed}")
+
         return AuthResponse(
             status="success",
             message="Authentication successful",
             condition=condition,
             problem_description=problem_description,
-            session_id=session_id
+            session_id=session_id,
+            paste_allowed=paste_allowed
         )
         
     except HTTPException:
@@ -389,7 +517,7 @@ def save_session_to_local(session_log: SessionLog):
     except Exception as e:
         logger.error(f"Failed to save session log locally: {e}")
 
-async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: int, compiler_clicked: int):
+async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: int, compiler_clicked: int, programming_language: str = "unknown"):
     """Save complete session data to Firebase using the new hierarchical structure"""
     if not firebase_db:
         logger.warning("Firebase not available for saving session data")
@@ -403,6 +531,7 @@ async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: 
         summary_data = {
             'starting_time': session_log.code_start_timestamp,
             'submitted_code': session_log.submitted_full_code,
+            'programming_language': programming_language,
             'suggestion_clicked': suggestion_clicked,
             'compiler_clicked': compiler_clicked,
             'end_time': session_log.code_submit_timestamp
@@ -418,7 +547,7 @@ async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: 
                 'full_code_suggestion': entry.full_code_suggestion
             }
         
-        # Create logs structure
+# Create logs structure
         logs_data = {
             'ai_guesses': ai_guesses
         }
@@ -434,6 +563,17 @@ async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: 
                     'full_code_suggestion': entry.full_code_suggestion
                 }
             logs_data['correct_guesses'] = correct_guesses
+        
+        # For condition 3, add suggestions-only data
+        elif session_log.condition == 3 and session_log.suggestions_only_history:
+            suggestions_only = {}
+            for i, entry in enumerate(session_log.suggestions_only_history, 1):
+                suggestions_only[str(i)] = {
+                    'suggestion_only': entry.next_line_suggestion,
+                    'timestamp': entry.timestamp,
+                    'full_code_suggestion': entry.full_code_suggestion
+                }
+            logs_data['suggestions_only'] = suggestions_only
         
         # Prepare the complete user data
         user_data = {
@@ -487,7 +627,7 @@ def analyze_problem_statement(existing_code):
     {existing_code}
     ```
 
-    Provide ONLY a brief description of what problem this code is trying to solve. Keep it concise (1-3 sentences max).
+    Provide ONLY a brief description of what problem this code is trying to solve. Keep it concise.
     
     Examples of good responses:
     - "This code implements a factorial function using recursion"
@@ -618,12 +758,26 @@ class CodeRequest(BaseModel):
 class CodeResponse(BaseModel):
     analysis: str
     next_line: str
+    correct_next_line: Optional[str] = None
+
+
+class ExecuteRequest(BaseModel):
+    code: str
+    language: str
+    user_id: str = None
+    session_id: str = None
+
+class ExecuteResponse(BaseModel):
+    success: bool
+    output: str
+    error: str
+    execution_time: float
 
 @app.post("/analyze", response_model=CodeResponse)
 async def analyze_code(request: CodeRequest):
     """
     Continuously analyze the provided code using OpenAI and return analysis + next line suggestion
-    Logs all analysis to session for later Firebase upload on submission only
+    FIXED: Generate separate suggestions for AI guess and correct description
     """
     try:
         code = request.code.strip()
@@ -655,84 +809,123 @@ async def analyze_code(request: CodeRequest):
         problem_description = re.sub(r'^Problem.*?:\s*', '', problem_description, flags=re.IGNORECASE)
         problem_description = problem_description.strip()
         
-        # Step 2: Predict the next line
-        next_line = predict_next_line(problem_description, code)
+        # Step 2: Predict the next line based on AI analysis
+        ai_next_line = predict_next_line(problem_description, code)
         
         # Enhanced cleaning for single line output
-        next_line = re.sub(r'```\w*\n?', '', next_line)
-        next_line = re.sub(r'```\n?', '', next_line)
-        next_line = re.sub(r'^Next line[s]?:\s*', '', next_line, flags=re.IGNORECASE)
-        next_line = re.sub(r'^Here[\'s\s]+.*?:\s*', '', next_line, flags=re.IGNORECASE)
+        ai_next_line = re.sub(r'```\w*\n?', '', ai_next_line)
+        ai_next_line = re.sub(r'```\n?', '', ai_next_line)
+        ai_next_line = re.sub(r'^Next line[s]?:\s*', '', ai_next_line, flags=re.IGNORECASE)
+        ai_next_line = re.sub(r'^Here[\'s\s]+.*?:\s*', '', ai_next_line, flags=re.IGNORECASE)
         
         # Ensure only 1-2 lines maximum
-        lines = next_line.strip().split('\n')
+        lines = ai_next_line.strip().split('\n')
         if len(lines) > 2:
-            next_line = '\n'.join(lines[:2])
+            ai_next_line = '\n'.join(lines[:2])
         else:
-            next_line = next_line.strip()
+            ai_next_line = ai_next_line.strip()
         
         # Ensure we have something useful
-        if not next_line or len(next_line.strip()) < 2:
+        if not ai_next_line or len(ai_next_line.strip()) < 2:
             language = detect_programming_language(code)
             if language == "python":
-                next_line = "# Continue your implementation here"
+                ai_next_line = "# Continue your implementation here"
             elif language in ["javascript", "java", "cpp", "csharp"]:
-                next_line = "// Continue your implementation here"
+                ai_next_line = "// Continue your implementation here"
             elif language == "html":
-                next_line = "<!-- Continue your markup here -->"
+                ai_next_line = "<!-- Continue your markup here -->"
             elif language == "css":
-                next_line = "/* Continue your styles here */"
+                ai_next_line = "/* Continue your styles here */"
             else:
-                next_line = "// Continue your implementation here"
+                ai_next_line = "// Continue your implementation here"
         
-        # Step 3: Generate full code suggestion based on AI analysis
+        # FIXED: Step 3 - For condition 1, generate separate next line based on correct description
+        correct_next_line = ai_next_line  # Default fallback
+        session_log = None
+        if session_id and session_id in active_sessions:
+            session_log = active_sessions[session_id]
+            if session_log.condition == 1 and session_log.problem_description:
+                # Generate next line based on correct problem description
+                correct_next_line = predict_next_line(session_log.problem_description, code)
+                
+                # Clean the correct suggestion too
+                correct_next_line = re.sub(r'```\w*\n?', '', correct_next_line)
+                correct_next_line = re.sub(r'```\n?', '', correct_next_line)
+                correct_next_line = re.sub(r'^Next line[s]?:\s*', '', correct_next_line, flags=re.IGNORECASE)
+                correct_next_line = re.sub(r'^Here[\'s\s]+.*?:\s*', '', correct_next_line, flags=re.IGNORECASE)
+                
+                # Ensure only 1-2 lines maximum
+                correct_lines = correct_next_line.strip().split('\n')
+                if len(correct_lines) > 2:
+                    correct_next_line = '\n'.join(correct_lines[:2])
+                else:
+                    correct_next_line = correct_next_line.strip()
+                
+                # Ensure we have something useful
+                if not correct_next_line or len(correct_next_line.strip()) < 2:
+                    correct_next_line = ai_next_line  # Fallback to AI suggestion
+        
+        # Step 4: Generate full code suggestions
         ai_full_code_suggestion = generate_full_code_suggestion(problem_description, code, is_correct_description=False)
         
         # Log this analysis to session if session_id provided
-        if session_id and session_id in active_sessions:
-            session_log = active_sessions[session_id]
-            
-            # Create AI guess entry for problem guessing - FIXED field names
+        if session_log:
+            # Create AI guess entry for problem guessing
             ai_guess_entry = AIGuessEntry(
-                problem_analysis=problem_description,  # FIXED: Use correct field name
-                next_line_suggestion=next_line,
+                problem_analysis=problem_description,
+                next_line_suggestion=ai_next_line,
                 full_code_suggestion=ai_full_code_suggestion,
                 timestamp=datetime.now().isoformat(),
                 analysis_type="ai_problem_guess"
             )
             session_log.ai_guess_history.append(ai_guess_entry)
             
-            # For condition 1, also add to correct description history
+# For condition 1, also add to correct description history
             if session_log.condition == 1:
                 if session_log.correct_description_history is None:
                     session_log.correct_description_history = []
                 
-                # FIXED: Use the stored problem description from session
                 correct_problem_description = session_log.problem_description
-                
                 if not correct_problem_description:
                     logger.warning(f"No problem description available for session {session_id}")
                     correct_problem_description = problem_description  # Fallback to AI analysis
                 
-                # Step 4: Generate full code suggestion based on correct description
+                # Generate full code suggestion based on correct description
                 correct_full_code_suggestion = generate_full_code_suggestion(correct_problem_description, code, is_correct_description=True)
                 
                 # Generate suggestion based on correct problem description
                 correct_desc_entry = AIGuessEntry(
-                    problem_analysis=correct_problem_description,  # FIXED: Use correct field name
-                    next_line_suggestion=next_line,  # Same next line, different context
+                    problem_analysis=correct_problem_description,
+                    next_line_suggestion=correct_next_line,  # FIXED: Use correct next line
                     full_code_suggestion=correct_full_code_suggestion,
                     timestamp=datetime.now().isoformat(),
                     analysis_type="correct_description"
                 )
                 session_log.correct_description_history.append(correct_desc_entry)
             
+            # For condition 3, also add to suggestions-only history
+            elif session_log.condition == 3:
+                if session_log.suggestions_only_history is None:
+                    session_log.suggestions_only_history = []
+                
+                # For condition 3, create a simplified entry with just the suggestion
+                suggestions_entry = AIGuessEntry(
+                    problem_analysis="Suggestions only mode",  # Placeholder text
+                    next_line_suggestion=ai_next_line,
+                    full_code_suggestion=ai_full_code_suggestion,
+                    timestamp=datetime.now().isoformat(),
+                    analysis_type="suggestions_only"
+                )
+                session_log.suggestions_only_history.append(suggestions_entry)
+            
             # Update local backup only
             save_session_to_local(session_log)
         
+        # FIXED: Return both suggestions
         return CodeResponse(
             analysis=problem_description,
-            next_line=next_line
+            next_line=ai_next_line,
+            correct_next_line=correct_next_line if session_log and session_log.condition == 1 else None
         )
         
     except HTTPException:
@@ -752,12 +945,60 @@ async def analyze_code(request: CodeRequest):
             analysis=fallback_analysis,
             next_line="// Analysis temporarily unavailable - continue coding"
         )
+    
+
+@app.post("/execute", response_model=ExecuteResponse)
+async def execute_code(request: ExecuteRequest):
+    """
+    Execute code safely on the backend
+    """
+    try:
+        code = request.code.strip()
+        language = request.language.lower()
+        
+        if not code:
+            return ExecuteResponse(
+                success=False,
+                output="",
+                error="No code provided for execution",
+                execution_time=0.0
+            )
+        
+        max_code_length = int(os.getenv("MAX_CODE_LENGTH", "10000"))
+        if len(code) > max_code_length:
+            return ExecuteResponse(
+                success=False,
+                output="",
+                error=f"Code too long - please keep under {max_code_length} characters",
+                execution_time=0.0
+            )
+        
+        start_time = time.time()
+        result = await execute_code_safely(code, language, timeout=10)
+        execution_time = time.time() - start_time
+        
+        return ExecuteResponse(
+            success=result["success"],
+            output=result["output"],
+            error=result["error"],
+            execution_time=execution_time
+        )
+        
+    except Exception as e:
+        logger.error(f"Execute endpoint error: {str(e)}")
+        return ExecuteResponse(
+            success=False,
+            output="",
+            error=f"Server error: {str(e)}",
+            execution_time=0.0
+        )
 
 class SubmitRequest(BaseModel):
     code: str
     user_id: str = None
     assignment_key: str = None
     session_id: str = None
+    programming_language: str = None
     timestamp: str = None
     suggestion_clicked: int = 0
     compiler_clicked: int = 0
@@ -781,6 +1022,7 @@ async def submit_code(request: SubmitRequest):
         session_id = request.session_id
         user_id = request.user_id or "anonymous"
         assignment_key = request.assignment_key or "unknown"
+        programming_language = request.programming_language or "unknown"
         timestamp = request.timestamp or datetime.now().isoformat()
         suggestion_clicked = request.suggestion_clicked
         compiler_clicked = request.compiler_clicked
@@ -811,7 +1053,7 @@ async def submit_code(request: SubmitRequest):
         if session_log:
             try:
                 # Save complete session data to Firebase
-                success = await save_session_to_firebase(session_log, suggestion_clicked, compiler_clicked)
+                success = await save_session_to_firebase(session_log, suggestion_clicked, compiler_clicked, programming_language)
                 firebase_status = "success" if success else "failed"
                 
                 # Update local backup with final data
@@ -876,8 +1118,36 @@ templates = Jinja2Templates(directory="templates")
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
-    """Serve the main HTML page"""
-    return templates.TemplateResponse("index.html", {"request": request})
+    """Redirect to home page for consent and authentication"""
+    return RedirectResponse(url="/home.html", status_code=302)
+
+@app.get("/home.html", response_class=HTMLResponse)
+@app.get("/home", response_class=HTMLResponse)
+async def serve_home(request: Request):
+    """Serve the home login page with consent form"""
+    return templates.TemplateResponse("home.html", {"request": request})
+
+@app.get("/index.html", response_class=HTMLResponse)
+async def serve_ide(request: Request):
+    """
+    Serve the IDE page - this handles the unique URLs
+    Users should only access this with proper session parameters
+    """
+    # Check if there are session parameters in the URL
+    session_token = request.query_params.get("session")
+    user_id = request.query_params.get("user")
+    
+    if not session_token or not user_id:
+        # Redirect to home page if no session parameters
+        logger.warning("Direct access to IDE without session parameters - redirecting to home")
+        return RedirectResponse(url="/home.html", status_code=302)
+    
+    # Serve the IDE page - authentication will be handled by JavaScript
+    return templates.TemplateResponse("index.html", {
+        "request": request,
+        "session_token": session_token,
+        "user_id": user_id
+    })
 
 @app.get("/health")
 async def health_check():
@@ -930,6 +1200,7 @@ async def get_stats():
             "api_port": int(os.getenv("API_PORT", "8000")),
             "condition_1_prefixes": os.getenv("CONDITION_1_PREFIXES", "Condition1_all"),
             "condition_2_prefixes": os.getenv("CONDITION_2_PREFIXES", "Condition2_partial,fdasdfsa"),
+            "condition_3_prefixes": os.getenv("CONDITION_3_PREFIXES", "Condition3_suggestions"),
             "submissions_dir": os.getenv("SUBMISSIONS_DIR", "submissions")
         }
     }
