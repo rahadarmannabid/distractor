@@ -21,6 +21,8 @@ from firebase_admin import credentials, db
 from fastapi.responses import HTMLResponse, RedirectResponse
 import asyncio
 import shlex
+from typing import Dict, Any
+
 
 
 # Load environment variables
@@ -401,6 +403,24 @@ class SessionLog(BaseModel):
     suggestions_only_history: Optional[List[AIGuessEntry]] = None  # For condition 3
     problem_description: Optional[str] = None
 
+
+class SurveyResponse(BaseModel):
+    question: str
+    response: int  # 1-5 Likert scale
+
+class SurveySubmission(BaseModel):
+    user_id: str
+    session_id: str
+    assignment_key: str
+    survey_type: str  # 'periodic' or 'final'
+    responses: List[SurveyResponse]
+    analysis_count: int
+    timestamp: str
+
+class SurveyConfig(BaseModel):
+    questions: List[str]
+    feedback_interval: int
+
 # Global session storage (in-memory, will be sent to Firebase on submit)
 active_sessions: Dict[str, SessionLog] = {}
 
@@ -517,7 +537,7 @@ def save_session_to_local(session_log: SessionLog):
     except Exception as e:
         logger.error(f"Failed to save session log locally: {e}")
 
-async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: int, compiler_clicked: int, programming_language: str = "unknown"):
+async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: int, compiler_clicked: int, programming_language: str = "unknown", survey_data: Dict[str, Any] = None):
     """Save complete session data to Firebase using the new hierarchical structure"""
     if not firebase_db:
         logger.warning("Firebase not available for saving session data")
@@ -534,7 +554,8 @@ async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: 
             'programming_language': programming_language,
             'suggestion_clicked': suggestion_clicked,
             'compiler_clicked': compiler_clicked,
-            'end_time': session_log.code_submit_timestamp
+            'end_time': session_log.code_submit_timestamp,
+            'survey_data': survey_data
         }
         
         # Create AI guesses log data - FIXED field mapping
@@ -749,6 +770,22 @@ def generate_full_code_suggestion(problem_description, existing_code, is_correct
     
     return full_suggestion
 
+
+async def get_ai_next_line_async(problem_description, code):
+    """Async wrapper for AI next line prediction"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, predict_next_line, problem_description, code)
+
+async def get_correct_next_line_async(correct_description, code):
+    """Async wrapper for correct description next line prediction"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, predict_next_line, correct_description, code)
+
+async def get_full_code_suggestion_async(problem_description, code, is_correct_description=False):
+    """Async wrapper for full code suggestion"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, generate_full_code_suggestion, problem_description, code, is_correct_description)
+
 class CodeRequest(BaseModel):
     code: str
     user_id: str = None
@@ -809,10 +846,38 @@ async def analyze_code(request: CodeRequest):
         problem_description = re.sub(r'^Problem.*?:\s*', '', problem_description, flags=re.IGNORECASE)
         problem_description = problem_description.strip()
         
-        # Step 2: Predict the next line based on AI analysis
-        ai_next_line = predict_next_line(problem_description, code)
+        # Step 2 & 3: Concurrent API calls for better performance
+        session_log = None
+        if session_id and session_id in active_sessions:
+            session_log = active_sessions[session_id]
         
-        # Enhanced cleaning for single line output
+        # Prepare concurrent tasks
+        tasks = []
+        
+        # Always get AI next line and full suggestion
+        ai_next_line_task = get_ai_next_line_async(problem_description, code)
+        ai_full_code_task = get_full_code_suggestion_async(problem_description, code, is_correct_description=False)
+        tasks.extend([ai_next_line_task, ai_full_code_task])
+        
+        # For condition 1, also get correct description suggestions concurrently
+        correct_next_line_task = None
+        correct_full_code_task = None
+        if session_log and session_log.condition == 1 and session_log.problem_description:
+            correct_next_line_task = get_correct_next_line_async(session_log.problem_description, code)
+            correct_full_code_task = get_full_code_suggestion_async(session_log.problem_description, code, is_correct_description=True)
+            tasks.extend([correct_next_line_task, correct_full_code_task])
+        
+        # Execute all tasks concurrently
+        if session_log and session_log.condition == 1 and session_log.problem_description:
+            # Condition 1: 4 concurrent calls
+            ai_next_line, ai_full_code_suggestion, correct_next_line, correct_full_code_suggestion = await asyncio.gather(*tasks)
+        else:
+            # Conditions 2 & 3: 2 concurrent calls
+            ai_next_line, ai_full_code_suggestion = await asyncio.gather(*tasks)
+            correct_next_line = ai_next_line  # Default fallback
+            correct_full_code_suggestion = ai_full_code_suggestion
+        
+        # Clean AI next line suggestion
         ai_next_line = re.sub(r'```\w*\n?', '', ai_next_line)
         ai_next_line = re.sub(r'```\n?', '', ai_next_line)
         ai_next_line = re.sub(r'^Next line[s]?:\s*', '', ai_next_line, flags=re.IGNORECASE)
@@ -839,34 +904,23 @@ async def analyze_code(request: CodeRequest):
             else:
                 ai_next_line = "// Continue your implementation here"
         
-        # FIXED: Step 3 - For condition 1, generate separate next line based on correct description
-        correct_next_line = ai_next_line  # Default fallback
-        session_log = None
-        if session_id and session_id in active_sessions:
-            session_log = active_sessions[session_id]
-            if session_log.condition == 1 and session_log.problem_description:
-                # Generate next line based on correct problem description
-                correct_next_line = predict_next_line(session_log.problem_description, code)
-                
-                # Clean the correct suggestion too
-                correct_next_line = re.sub(r'```\w*\n?', '', correct_next_line)
-                correct_next_line = re.sub(r'```\n?', '', correct_next_line)
-                correct_next_line = re.sub(r'^Next line[s]?:\s*', '', correct_next_line, flags=re.IGNORECASE)
-                correct_next_line = re.sub(r'^Here[\'s\s]+.*?:\s*', '', correct_next_line, flags=re.IGNORECASE)
-                
-                # Ensure only 1-2 lines maximum
-                correct_lines = correct_next_line.strip().split('\n')
-                if len(correct_lines) > 2:
-                    correct_next_line = '\n'.join(correct_lines[:2])
-                else:
-                    correct_next_line = correct_next_line.strip()
-                
-                # Ensure we have something useful
-                if not correct_next_line or len(correct_next_line.strip()) < 2:
-                    correct_next_line = ai_next_line  # Fallback to AI suggestion
-        
-        # Step 4: Generate full code suggestions
-        ai_full_code_suggestion = generate_full_code_suggestion(problem_description, code, is_correct_description=False)
+        # Clean correct next line suggestion (for condition 1)
+        if session_log and session_log.condition == 1 and correct_next_line != ai_next_line:
+            correct_next_line = re.sub(r'```\w*\n?', '', correct_next_line)
+            correct_next_line = re.sub(r'```\n?', '', correct_next_line)
+            correct_next_line = re.sub(r'^Next line[s]?:\s*', '', correct_next_line, flags=re.IGNORECASE)
+            correct_next_line = re.sub(r'^Here[\'s\s]+.*?:\s*', '', correct_next_line, flags=re.IGNORECASE)
+            
+            # Ensure only 1-2 lines maximum
+            correct_lines = correct_next_line.strip().split('\n')
+            if len(correct_lines) > 2:
+                correct_next_line = '\n'.join(correct_lines[:2])
+            else:
+                correct_next_line = correct_next_line.strip()
+            
+            # Ensure we have something useful
+            if not correct_next_line or len(correct_next_line.strip()) < 2:
+                correct_next_line = ai_next_line  # Fallback to AI suggestion
         
         # Log this analysis to session if session_id provided
         if session_log:
@@ -890,8 +944,8 @@ async def analyze_code(request: CodeRequest):
                     logger.warning(f"No problem description available for session {session_id}")
                     correct_problem_description = problem_description  # Fallback to AI analysis
                 
-                # Generate full code suggestion based on correct description
-                correct_full_code_suggestion = generate_full_code_suggestion(correct_problem_description, code, is_correct_description=True)
+                # Use the already generated correct full code suggestion
+                # (generated concurrently above)
                 
                 # Generate suggestion based on correct problem description
                 correct_desc_entry = AIGuessEntry(
@@ -1002,6 +1056,7 @@ class SubmitRequest(BaseModel):
     timestamp: str = None
     suggestion_clicked: int = 0
     compiler_clicked: int = 0
+    survey_data: Optional[Dict[str, Any]] = None  # ADD THIS LINE
 
 class SubmitResponse(BaseModel):
     status: str
@@ -1053,9 +1108,9 @@ async def submit_code(request: SubmitRequest):
         if session_log:
             try:
                 # Save complete session data to Firebase
-                success = await save_session_to_firebase(session_log, suggestion_clicked, compiler_clicked, programming_language)
+                success = await save_session_to_firebase(session_log, suggestion_clicked, compiler_clicked, programming_language, request.survey_data)
                 firebase_status = "success" if success else "failed"
-                
+
                 # Update local backup with final data
                 save_session_to_local(session_log)
                 
@@ -1248,6 +1303,82 @@ async def test_firebase_write():
             "error_type": type(e).__name__,
             "firebase_db_type": str(type(firebase_db))
         }
+    
+
+@app.get("/survey-config", response_model=SurveyConfig)
+async def get_survey_config():
+    """Get survey configuration from environment variables"""
+    try:
+        # Get questions from environment variables
+        questions = []
+        question_num = 1
+        while True:
+            question = os.getenv(f"Q{question_num}")
+            if question:
+                questions.append(question.strip())
+                question_num += 1
+            else:
+                break
+        
+        # Default questions if none found in env
+        if not questions:
+            questions = [
+                "I trust the AI's responses.",
+                "I am confident in the AI's responses.",
+                "I am suspicious of the AI's intentions.",
+                "The AI's responses are consistent."
+            ]
+        
+        feedback_interval = int(os.getenv("FEEDBACK_INTERVAL", "4"))
+        
+        logger.info(f"Survey config: {len(questions)} questions, interval: {feedback_interval}")
+        
+        return SurveyConfig(
+            questions=questions,
+            feedback_interval=feedback_interval
+        )
+        
+    except Exception as e:
+        logger.error(f"Error getting survey config: {e}")
+        # Return defaults
+        return SurveyConfig(
+            questions=[
+                "I trust the AI's responses.",
+                "I am confident in the AI's responses.",
+                "I am suspicious of the AI's intentions.",
+                "The AI's responses are consistent."
+            ],
+            feedback_interval=4
+        )
+
+@app.post("/submit-survey")
+async def submit_survey(request: SurveySubmission):
+    """Submit survey responses"""
+    try:
+        # Get session log
+        session_log = None
+        if request.session_id in active_sessions:
+            session_log = active_sessions[request.session_id]
+        
+        # Save survey data locally
+        surveys_dir = Path(os.getenv("SUBMISSIONS_DIR", "submissions")) / "surveys"
+        surveys_dir.mkdir(exist_ok=True)
+        
+        survey_file = surveys_dir / f"{request.session_id}_{request.survey_type}_{request.analysis_count}.json"
+        with open(survey_file, 'w', encoding='utf-8') as f:
+            json.dump(request.dict(), f, indent=2, default=str)
+        
+        logger.info(f"Survey saved: {request.user_id} - {request.survey_type} survey at analysis {request.analysis_count}")
+        
+        return {
+            "status": "success",
+            "message": f"{request.survey_type.title()} survey saved successfully",
+            "timestamp": request.timestamp
+        }
+        
+    except Exception as e:
+        logger.error(f"Survey submission error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Survey submission failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

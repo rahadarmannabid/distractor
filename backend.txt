@@ -21,6 +21,8 @@ from firebase_admin import credentials, db
 from fastapi.responses import HTMLResponse, RedirectResponse
 import asyncio
 import shlex
+from typing import Dict, Any
+
 
 
 # Load environment variables
@@ -401,6 +403,24 @@ class SessionLog(BaseModel):
     suggestions_only_history: Optional[List[AIGuessEntry]] = None  # For condition 3
     problem_description: Optional[str] = None
 
+
+class SurveyResponse(BaseModel):
+    question: str
+    response: int  # 1-5 Likert scale
+
+class SurveySubmission(BaseModel):
+    user_id: str
+    session_id: str
+    assignment_key: str
+    survey_type: str  # 'periodic' or 'final'
+    responses: List[SurveyResponse]
+    analysis_count: int
+    timestamp: str
+
+class SurveyConfig(BaseModel):
+    questions: List[str]
+    feedback_interval: int
+
 # Global session storage (in-memory, will be sent to Firebase on submit)
 active_sessions: Dict[str, SessionLog] = {}
 
@@ -517,7 +537,7 @@ def save_session_to_local(session_log: SessionLog):
     except Exception as e:
         logger.error(f"Failed to save session log locally: {e}")
 
-async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: int, compiler_clicked: int, programming_language: str = "unknown"):
+async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: int, compiler_clicked: int, programming_language: str = "unknown", survey_data: Dict[str, Any] = None):
     """Save complete session data to Firebase using the new hierarchical structure"""
     if not firebase_db:
         logger.warning("Firebase not available for saving session data")
@@ -534,7 +554,8 @@ async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: 
             'programming_language': programming_language,
             'suggestion_clicked': suggestion_clicked,
             'compiler_clicked': compiler_clicked,
-            'end_time': session_log.code_submit_timestamp
+            'end_time': session_log.code_submit_timestamp,
+            'survey_data': survey_data
         }
         
         # Create AI guesses log data - FIXED field mapping
@@ -1002,6 +1023,7 @@ class SubmitRequest(BaseModel):
     timestamp: str = None
     suggestion_clicked: int = 0
     compiler_clicked: int = 0
+    survey_data: Optional[Dict[str, Any]] = None  # ADD THIS LINE
 
 class SubmitResponse(BaseModel):
     status: str
@@ -1053,9 +1075,9 @@ async def submit_code(request: SubmitRequest):
         if session_log:
             try:
                 # Save complete session data to Firebase
-                success = await save_session_to_firebase(session_log, suggestion_clicked, compiler_clicked, programming_language)
+                success = await save_session_to_firebase(session_log, suggestion_clicked, compiler_clicked, programming_language, request.survey_data)
                 firebase_status = "success" if success else "failed"
-                
+
                 # Update local backup with final data
                 save_session_to_local(session_log)
                 
@@ -1248,6 +1270,82 @@ async def test_firebase_write():
             "error_type": type(e).__name__,
             "firebase_db_type": str(type(firebase_db))
         }
+    
+
+@app.get("/survey-config", response_model=SurveyConfig)
+async def get_survey_config():
+    """Get survey configuration from environment variables"""
+    try:
+        # Get questions from environment variables
+        questions = []
+        question_num = 1
+        while True:
+            question = os.getenv(f"Q{question_num}")
+            if question:
+                questions.append(question.strip())
+                question_num += 1
+            else:
+                break
+        
+        # Default questions if none found in env
+        if not questions:
+            questions = [
+                "I trust the AI's responses.",
+                "I am confident in the AI's responses.",
+                "I am suspicious of the AI's intentions.",
+                "The AI's responses are consistent."
+            ]
+        
+        feedback_interval = int(os.getenv("FEEDBACK_INTERVAL", "4"))
+        
+        logger.info(f"Survey config: {len(questions)} questions, interval: {feedback_interval}")
+        
+        return SurveyConfig(
+            questions=questions,
+            feedback_interval=feedback_interval
+        )
+        
+    except Exception as e:
+        logger.error(f"Error getting survey config: {e}")
+        # Return defaults
+        return SurveyConfig(
+            questions=[
+                "I trust the AI's responses.",
+                "I am confident in the AI's responses.",
+                "I am suspicious of the AI's intentions.",
+                "The AI's responses are consistent."
+            ],
+            feedback_interval=4
+        )
+
+@app.post("/submit-survey")
+async def submit_survey(request: SurveySubmission):
+    """Submit survey responses"""
+    try:
+        # Get session log
+        session_log = None
+        if request.session_id in active_sessions:
+            session_log = active_sessions[request.session_id]
+        
+        # Save survey data locally
+        surveys_dir = Path(os.getenv("SUBMISSIONS_DIR", "submissions")) / "surveys"
+        surveys_dir.mkdir(exist_ok=True)
+        
+        survey_file = surveys_dir / f"{request.session_id}_{request.survey_type}_{request.analysis_count}.json"
+        with open(survey_file, 'w', encoding='utf-8') as f:
+            json.dump(request.dict(), f, indent=2, default=str)
+        
+        logger.info(f"Survey saved: {request.user_id} - {request.survey_type} survey at analysis {request.analysis_count}")
+        
+        return {
+            "status": "success",
+            "message": f"{request.survey_type.title()} survey saved successfully",
+            "timestamp": request.timestamp
+        }
+        
+    except Exception as e:
+        logger.error(f"Survey submission error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Survey submission failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

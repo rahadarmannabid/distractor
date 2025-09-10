@@ -7,10 +7,18 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
     <style>
         * {
-            margin: 0px;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
+        
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+        
         body {
-            font-family: 'Consolas', 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-family: 'Consolas', 'Menlo', 'Ubuntu Mono', monospace;
             background: #1e1e1e;
             color: #d4d4d4;
         }
@@ -19,24 +27,31 @@
         #application {
             display: flex;
             width: 100vw;
+            height: 100vh;
+            overflow: hidden;
         }
         #content {
-            flex:1;
+            flex: 1;
             min-width: 0;
             display: flex;
             flex-direction: column;
             height: 100vh;
+            overflow: hidden;
         }
         #editor {
+            flex: 1;
             min-height: 0;
-            flex:1;
             position: relative;
         }
         #terminal {
-            height: 30vh;
+            height: 35vh;
+            min-height: 200px;
+            max-height: 50vh;
         }
         #sidebar {
             width: 30vw;
+            min-width: 250px;
+            max-width: 60vw;
         }
 
         /* Resizing */
@@ -71,12 +86,14 @@
             display: flex;
             align-items: center;
             background: linear-gradient(135deg, #2d2d30, #3e3e42);
-            padding: 12px 15px;
+            padding: 8px 15px;
             border-bottom: 1px solid #333;
             gap: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.3);
             white-space: nowrap;
-            overflow-x: clip;
+            overflow: hidden;
+            height: 40px;
+            flex-shrink: 0;
         }
 
         /* Header Button Styling */
@@ -93,7 +110,7 @@
             border-radius: 4px;
             padding: 4px 8px;
             color: white;
-            font-size: 11px;
+            font-size: 12px;
             cursor: pointer;
             transition: background 0.3s ease;
         }
@@ -112,7 +129,7 @@
             border-radius: 4px;
             padding: 6px 12px;
             color: white;
-            font-size: 11px;
+            font-size: 12px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s ease;
@@ -139,7 +156,7 @@
             border-radius: 4px;
             padding: 6px 12px;
             color: #cccccc;
-            font-size: 11px;
+            font-size: 12px;
             cursor: pointer;
             transition: all 0.3s ease;
             text-transform: uppercase;
@@ -151,7 +168,7 @@
             border-radius: 4px;
             padding: 6px 12px;
             color: white;
-            font-size: 11px;
+            font-size: 12px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s ease;
@@ -218,13 +235,18 @@
         .terminal {
             display: flex;
             flex-direction: column;
+            background: #1e1e1e;
+            border-top: 1px solid #333;
         }
         .terminal-output {
-            font-size: 14px;
-            line-height: 1.5;
-            padding: 15px;
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            padding: 12px 16px;
             overflow-y: auto;
             word-break: break-word;
+            background: #1e1e1e;
+            flex: 1;
         }
         .output-line {
             margin: 2px 0;
@@ -272,32 +294,36 @@
             display: flex;
             flex-direction: column;
             height: 100vh;
+            background: #252526;
+            border-left: 1px solid #333;
         }
         .sidebar-content {
             overflow-y: auto;
+            flex: 1;
+            min-height: 0;
         }
         .sidebar-section {
-            padding: 20px;
+            padding: 16px;
             border-bottom: 1px solid #333;
-            font-family: 'Segoe UI', sans-serif;
+            font-family: 'Consolas', 'Menlo', 'Ubuntu Mono', monospace;
         }
         .sidebar-section .green-box {
             background: linear-gradient(135deg, #0e2f1e, #1a4d2e);
-            border: 2px solid #14532d;
+            border: 2px solid #22c55e;
             border-radius: 8px;
             padding: 20px;
             line-height: 2;
             color: #4ade80;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            box-shadow: 0 4px 15px rgba(34, 197, 94, 0.2);
         }
         .sidebar-section .red-box {
             background: linear-gradient(135deg, #2d1b0e, #3d2616);
-            border: 2px solid #ea580c;
+            border: 2px solid #f97316;
             border-radius: 8px;
             padding: 20px;
             line-height: 2;
             color: #f97316;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            box-shadow: 0 4px 15px rgba(249, 115, 22, 0.2);
         }
         .sidebar-section code {
             white-space: pre-wrap;
@@ -306,28 +332,30 @@
             border-radius: 4px;
             color: #f8f8f2;
             font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 14px;
+            font-size: 12px;
             border: 1px solid #404040;
             display: block;
         }
         .suggestion-button {
             background: linear-gradient(135deg, #1e1e1e, #2d2d2d);
             border: 1px solid #404040;
-            border-radius: 6px;
-            padding: 2px 12px;
+            border-radius: 4px;
+            padding: 12px 16px;
             color: #d4d4d4;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 13px;
+            font-family: 'Consolas', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
             cursor: pointer;
             display: block;
             width: 100%;
             text-align: left;
             white-space: pre-wrap;
             transition: all 0.2s ease;
-            margin-top: 2px;
+            margin-top: 8px;
             position: relative;
             overflow: hidden;
-            line-height: 1.4;
+            line-height: 1.5;
+            min-height: 40px;
+            word-break: break-word;
         }
         .suggestion-button:hover {
             background: linear-gradient(135deg, #2d2d2d, #3d3d3d);
@@ -391,7 +419,8 @@
             padding-right: 80px;
         }
         .sidebar-section p {
-            line-height: 1.5;
+            line-height: 1.4;
+            font-size: 12px;
         }
         .sidebar-header {
             display: flex;
@@ -399,6 +428,23 @@
         }
         h2, h3 {
             flex: 1;
+        }
+        
+        /* Different colors for different sections */
+        #aiGuessSection h3 {
+            color: #f97316;
+            text-shadow: 0 0 5px rgba(249, 115, 22, 0.3);
+        }
+        
+        #problemDescSection h3 {
+            color: #22c55e;
+            text-shadow: 0 0 5px rgba(34, 197, 94, 0.3);
+        }
+        
+        #suggestionsOnlySection h3 {
+            color: #e9d5ff;
+            text-shadow: 0 0 8px rgba(139, 92, 246, 0.5);
+            font-weight: 600;
         }
         .history-button {
             text-decoration: underline;
@@ -533,7 +579,8 @@
         /* Markdown formatting styles for problem description */
         #problemDescriptionDisplay {
             white-space: normal;
-            line-height: 1.6;
+            line-height: 1.4;
+            font-size: 12px;
         }
 
         #problemDescriptionDisplay h1, 
@@ -541,10 +588,12 @@
         #problemDescriptionDisplay h3 {
             color: #4ade80;
             margin: 10px 0 5px 0;
+            font-size: 13px;
         }
 
         #problemDescriptionDisplay p {
             margin: 8px 0;
+            font-size: 12px;
         }
 
         #problemDescriptionDisplay code {
@@ -552,7 +601,7 @@
             padding: 2px 6px;
             border-radius: 3px;
             font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 13px;
+            font-size: 12px;
         }
 
         #problemDescriptionDisplay pre {
@@ -561,16 +610,19 @@
             border-radius: 6px;
             overflow-x: auto;
             margin: 10px 0;
+            font-size: 12px;
         }
 
         #problemDescriptionDisplay ul, 
         #problemDescriptionDisplay ol {
             padding-left: 20px;
             margin: 8px 0;
+            font-size: 12px;
         }
 
         #problemDescriptionDisplay li {
             margin: 4px 0;
+            font-size: 12px;
         }
 
         /* URL display in header */
@@ -623,7 +675,12 @@
 /* ADD this new CSS for mini AI thinking animation in sidebar */
 .mini-ai-thinking {
     text-align: center;
-    padding: 20px;
+    padding: 15px 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    box-sizing: border-box;
 }
 
 .mini-ai-loader {
@@ -696,7 +753,7 @@
 }
 
 .mini-ai-text {
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 600;
     color: #a855f7;
     animation: ai-text-glow 2s ease-in-out infinite;
@@ -767,9 +824,309 @@
     }
 }
 
-.attention-glow {
-    animation: attention-glow 2s ease-in-out 4;
+/* AI Analysis and History Text Font Size */
+        #analysis {
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        
+        /* History display font size */
+        .sidebar-section [data-showing-history="true"] {
+            font-size: 12px;
+        }
+        
+        .sidebar-section [data-showing-history="true"] div {
+            font-size: 12px;
+        }
+        
+        .sidebar-section [data-showing-history="true"] span {
+            font-size: 12px;
+        }
+
+        /* Enhanced Problem Description Visibility */
+        #problemDescriptionDisplay {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0.05));
+            border: 1px solid rgba(34, 197, 94, 0.2);
+            border-radius: 6px;
+            padding: 16px;
+            margin: 10px 0;
+        }
+        
+        #problemDescriptionDisplay h1,
+        #problemDescriptionDisplay h2, 
+        #problemDescriptionDisplay h3 {
+            color: #22c55e !important;
+            font-weight: 600;
+        }
+        
+        /* AI Analysis Text Color */
+        #analysis {
+            color: #fbbf24;
+            font-weight: 500;
+        }
+        
+        /* Make suggestion text more visible */
+        .suggestion-content {
+            color: #e5e7eb;
+            font-weight: 500;
+        }
+        
+        #suggestionGuess {
+            color: #fbbf24 !important;
+        }
+        
+        #suggestionDesc {
+            color: #22c55e !important;
+        }
+        
+        #suggestionOnly {
+            color: #f3f4f6 !important;
+            font-weight: 600 !important;
+        }
+
+/* Survey Modal Styles */
+.survey-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    backdrop-filter: blur(8px);
+    animation: modalFadeIn 0.3s ease-out;
 }
+
+@keyframes modalFadeIn {
+    from { opacity: 0; backdrop-filter: blur(0); }
+    to { opacity: 1; backdrop-filter: blur(8px); }
+}
+
+.survey-container {
+    background: #1e1e1e;
+    border: 1px solid #3c3c3c;
+    border-radius: 8px;
+    padding: 32px;
+    max-width: 700px;
+    width: 95%;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 
+        0 25px 50px rgba(0,0,0,0.9),
+        0 0 0 1px rgba(255,255,255,0.05),
+        inset 0 1px 0 rgba(255,255,255,0.1);
+    animation: modalSlideIn 0.4s ease-out;
+}
+
+@keyframes modalSlideIn {
+    from { transform: translateY(-50px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+.survey-header {
+    text-align: center;
+    margin-bottom: 25px;
+}
+
+.survey-header h2 {
+    color: #569cd6;
+    margin-bottom: 10px;
+    font-size: 24px;
+}
+
+.survey-header p {
+    color: #cccccc;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.survey-question {
+    margin-bottom: 24px;
+    padding: 24px;
+    background: linear-gradient(135deg, #252526, #2d2d30);
+    border: 1px solid #3c3c3c;
+    border-radius: 6px;
+    border-left: 3px solid #007acc;
+    transition: all 0.2s ease;
+}
+
+.survey-question:hover {
+    border-left-color: #1177bb;
+    background: linear-gradient(135deg, #2a2a2b, #323234);
+}
+
+.survey-question-text {
+    color: #cccccc;
+    font-size: 12px;
+    font-weight: 500;
+    margin-bottom: 15px;
+    line-height: 1.4;
+}
+
+.likert-scale {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.likert-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    min-width: 100px;
+}
+
+.likert-option input[type="radio"] {
+    appearance: none;
+    width: 25px;
+    height: 25px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.likert-option:nth-child(1) input[type="radio"] {
+    background: linear-gradient(135deg, #dc2626, #ef4444);
+}
+
+.likert-option:nth-child(2) input[type="radio"] {
+    background: linear-gradient(135deg, #ea580c, #f97316);
+}
+
+.likert-option:nth-child(3) input[type="radio"] {
+    background: linear-gradient(135deg, #d97706, #f59e0b);
+}
+
+.likert-option:nth-child(4) input[type="radio"] {
+    background: linear-gradient(135deg, #65a30d, #84cc16);
+}
+
+.likert-option:nth-child(5) input[type="radio"] {
+    background: linear-gradient(135deg, #16a34a, #22c55e);
+}
+
+.likert-option input[type="radio"]:checked {
+    border-color: #ffffff;
+    box-shadow: 0 0 10px rgba(255,255,255,0.5);
+    transform: scale(1.1);
+}
+
+.likert-option input[type="radio"]:hover {
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+.likert-option input[type="radio"]:checked::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 12px;
+    height: 12px;
+    background: white;
+    border-radius: 50%;
+}
+
+.likert-option label {
+    color: #cccccc;
+    font-size: 9px;
+    text-align: center;
+    line-height: 1.2;
+    cursor: pointer;
+}
+
+.survey-controls {
+    text-align: center;
+    margin-top: 30px;
+}
+
+.survey-submit-btn {
+    background: linear-gradient(135deg, #569cd6, #4a86c7);
+    border: none;
+    border-radius: 6px;
+    padding: 12px 30px;
+    color: white;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-bottom: 10px;
+}
+
+.survey-submit-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, #4a86c7, #3a76b7);
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(86, 156, 214, 0.4);
+}
+
+.survey-submit-btn:disabled {
+    background: #404040;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.survey-note {
+    color: #ffd43b;
+    font-size: 12px;
+    margin: 0;
+    font-style: italic;
+}
+
+/* Editor blocking overlay */
+.editor-blocked {
+    pointer-events: none;
+    opacity: 0.5;
+}
+
+.editor-block-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    color: #ffd43b;
+    font-size: 18px;
+    font-weight: bold;
+    text-align: center;
+}
+
+/* Fix for Condition 3 suggestions */
+        #suggestionsOnlySection .suggestion-button {
+            background: linear-gradient(135deg, #2d1b69, #3d2777);
+            border: 1px solid #8b5cf6;
+            color: #f3f4f6;
+            font-weight: 600;
+        }
+        
+        #suggestionsOnlySection .suggestion-button:hover {
+            background: linear-gradient(135deg, #3d2777, #4d3587);
+            border-color: #a855f7;
+            color: #ffffff;
+        }
+        
+        /* Ensure consistent heights across all conditions */
+        .suggestion-content {
+            display: block;
+            padding-right: 60px;
+            min-height: 20px;
+            overflow-wrap: break-word;
+        }
 
     </style>
 </head>
@@ -883,7 +1240,7 @@
         
         <!-- AI Suggestions Only Section (Condition 3 only) -->
         <div class="sidebar-section hidden" id="suggestionsOnlySection">
-        <div class="violet-box" style="background: linear-gradient(135deg, #1e1b3a, #2d2749); border: 2px solid #7c3aed; border-radius: 8px; padding: 20px; line-height: 2; color: #a78bfa; box-shadow: 0 4px 8px rgba(0,0,0,0.3);">
+        <div class="violet-box" style="background: linear-gradient(135deg, #2d1b69, #3d2777); border: 2px solid #8b5cf6; border-radius: 8px; padding: 20px; line-height: 2; color: #e9d5ff; box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);">
 
                 <div class="sidebar-header">
                     <h3>AI Code Suggestions</h3>
@@ -901,6 +1258,44 @@
     </div>
 </div>
     </div>
+
+    <!-- Survey Modal -->
+<div id="surveyModal" class="survey-modal hidden">
+    <div class="survey-container">
+        <div class="survey-header">
+            <h2>Quick Survey</h2>
+            <p>Please rate your agreement with the following statements:</p>
+        </div>
+        
+        <div class="survey-content">
+            <div id="surveyQuestions"></div>
+            
+            <div class="survey-controls">
+                <button id="submitSurvey" class="survey-submit-btn" disabled>Submit Survey</button>
+                <p class="survey-note">You must answer all questions to continue coding.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Final Survey Modal -->
+<div id="finalSurveyModal" class="survey-modal hidden">
+    <div class="survey-container">
+        <div class="survey-header">
+            <h2>Final Survey</h2>
+            <p>Before submitting your code, please complete this final survey:</p>
+        </div>
+        
+        <div class="survey-content">
+            <div id="finalSurveyQuestions"></div>
+            
+            <div class="survey-controls">
+                <button id="submitFinalSurvey" class="survey-submit-btn" disabled>Complete Survey & Submit Code</button>
+                <p class="survey-note">You must complete this survey before submitting your code.</p>
+            </div>
+        </div>
+    </div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs/loader.min.js"></script>
 <script>
@@ -927,10 +1322,19 @@ let currentSession = {
 };
 
     // Font size management
-    let currentFontSize = 14;
+    let currentFontSize = 12;    
     const minFontSize = 10;
     const maxFontSize = 24;
     let isAnalyzing = false;
+
+    let surveyData = {
+    analysisCount: 0,
+    surveyInterval: 4, // Will be loaded from backend
+    surveyResponses: [],
+    finalSurveyResponse: null,
+    pendingSurvey: false,
+    questions: []
+};
 
     // UI Elements
     const loadingScreen = document.getElementById('loadingScreen');
@@ -1160,7 +1564,12 @@ async function initializeFromURL() {
             }
             
             addTerminalOutput(`IMPORTANT: Submitting code will automatically log you out`, 'warning');
-            addTerminalOutput(`TIP: Use A+/A- buttons to adjust font size (Current: ${currentFontSize}px)`, 'info');
+            addTerminalOutput(`TIP: Use A+/A- buttons to adjust font size (Current: 12px)`, 'info');
+            
+            // Load survey configuration
+            loadSurveyConfig();
+            // Fetch survey questions from backend
+            loadSurveyQuestions();
         }, 100);
         
     } catch (error) {
@@ -1226,7 +1635,7 @@ async function initializeEditor() {
                     folding: true,
                     selectOnLineNumbers: true,
                     matchBrackets: 'always',
-                    fontSize: currentFontSize
+                    fontSize: 12
                 });
 
                 // Paste control implementation
@@ -1463,6 +1872,8 @@ async function analyzeCurrentCode() {
 
         // ANIMATE THE RESULTS with typing effect and box shaking
         await animateAnalysisResults(problemDescription, nextLineCode, correctNextLineCode);
+        incrementAnalysisCount();
+
 
     } catch (error) {
         console.error('Analysis error:', error);
@@ -1486,47 +1897,68 @@ async function analyzeCurrentCode() {
 
 // ADD these new functions:
 function showAIThinkingInBox(type) {
-    let targetElement, boxElement;
+    let targetElements = [];
+    let boxElement;
     
     if (type === 'guess') {
-        targetElement = document.getElementById('analysis');
+        targetElements = [
+            document.getElementById('analysis'),
+            document.getElementById('suggestionGuess')
+        ];
         boxElement = document.querySelector('.red-box');
     } else if (type === 'desc') {
-        targetElement = document.getElementById('suggestionDesc');
+        targetElements = [document.getElementById('suggestionDesc')];
         boxElement = document.querySelector('.green-box');
     } else if (type === 'suggestions') {
-        targetElement = document.getElementById('suggestionOnly');
+        targetElements = [document.getElementById('suggestionOnly')];
         boxElement = document.querySelector('.violet-box');
     }
     
-    if (targetElement && boxElement) {
-        // Create mini AI thinking animation
-        targetElement.innerHTML = `
-            <div class="mini-ai-thinking">
-                <div class="mini-ai-loader"></div>
-                <div class="mini-ai-text">AI is analyzing...</div>
-            </div>
-        `;
-        
+    targetElements.forEach(targetElement => {
+        if (targetElement && boxElement) {
+            // Store original height to maintain box size
+            const originalHeight = targetElement.offsetHeight;
+            
+            // Create mini AI thinking animation with fixed height
+            targetElement.innerHTML = `
+                <div class="mini-ai-thinking" style="min-height: ${Math.max(originalHeight, 60)}px; display: flex; flex-direction: column; justify-content: center;">
+                    <div class="mini-ai-loader"></div>
+                    <div class="mini-ai-text">AI is analyzing...</div>
+                </div>
+            `;
+        }
+    });
+    
+    if (boxElement) {
         // Add glow effect to the box
         boxElement.classList.add('ai-thinking-glow');
     }
 }
 
 function hideAIThinkingInBox(type) {
+    let targetElements = [];
     let boxElement;
     
     if (type === 'guess') {
+        targetElements = [
+            document.getElementById('analysis'),
+            document.getElementById('suggestionGuess')
+        ];
         boxElement = document.querySelector('.red-box');
     } else if (type === 'desc') {
+        targetElements = [document.getElementById('suggestionDesc')];
         boxElement = document.querySelector('.green-box');
     } else if (type === 'suggestions') {
+        targetElements = [document.getElementById('suggestionOnly')];
         boxElement = document.querySelector('.violet-box');
     }
     
+    // Remove glow effect from the box
     if (boxElement) {
         boxElement.classList.remove('ai-thinking-glow');
     }
+    
+    // Note: We don't restore content here since animateAnalysisResults will handle that
 }
 
 
@@ -1564,11 +1996,11 @@ async function animateAnalysisResults(problemDescription, nextLineCode, correctN
     const violetBox = document.querySelector('.violet-box');
     
 if (currentSession.condition === 1) {
-    // Shake both red and green boxes
+    // Shake both red and green boxes simultaneously
     shakeAndGlowBox(redBox);
     shakeAndGlowBox(greenBox);
     
-    // Show problem description instantly (no typing animation)
+    // Show problem description instantly
     if (currentSession.problemDescription) {
         try {
             const parsedMarkdown = marked.parse(currentSession.problemDescription);
@@ -1578,34 +2010,30 @@ if (currentSession.condition === 1) {
         }
     }
     
-    // Type analysis in red box
-    await typeTextAnimation(analysis, problemDescription, 30);
-    
-    // Type suggestion in red box
-    await typeTextAnimation(document.getElementById('suggestionGuess'), nextLineCode, 40);
-    
-    // Type suggestion in green box
+    // Display all content instantly and simultaneously
+    analysis.textContent = problemDescription;
+    document.getElementById('suggestionGuess').textContent = nextLineCode;
     if (correctNextLineCode) {
-        await typeTextAnimation(document.getElementById('suggestionDesc'), correctNextLineCode, 40);
+        document.getElementById('suggestionDesc').textContent = correctNextLineCode;
     }
     
 } else if (currentSession.condition === 2) {
-        // Shake red box only
+        // Shake red box
         shakeAndGlowBox(redBox);
         
-        // Type analysis and suggestion
-        await typeTextAnimation(analysis, problemDescription, 30);
-        await typeTextAnimation(document.getElementById('suggestionGuess'), nextLineCode, 40);
+        // Display instantly
+        analysis.textContent = problemDescription;
+        document.getElementById('suggestionGuess').textContent = nextLineCode;
         
     } else if (currentSession.condition === 3) {
-        // Shake violet box only
+        // Shake violet box
         shakeAndGlowBox(violetBox);
         
-        // Type suggestion only
-        await typeTextAnimation(document.getElementById('suggestionOnly'), nextLineCode, 40);
+        // Display instantly
+        document.getElementById('suggestionOnly').textContent = nextLineCode;
     }
     
-    // Add terminal notification after animations
+    // Add terminal notification
     addTerminalOutput('AI analysis completed - new suggestions available in sidebar!', 'success');
     }
     function showHistoryInline(type) {
@@ -1685,11 +2113,11 @@ if (history.length === 0) {
             historyHTML += `
                 <div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 8px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                        <span style="color: #569cd6; font-weight: bold;">Suggestion #${i + 1}</span>
-                        <span style="color: #888; font-size: 10px;">${timeStr}</span>
+                        <span style="color: #8b5cf6; font-weight: bold;">Suggestion #${i + 1}</span>
+                        <span style="color: #d1d5db; font-size: 10px; font-weight: 500;">${timeStr}</span>
                     </div>
-                    <div style="background: #2d2d2d; padding: 4px 6px; border-radius: 3px; font-family: 'Consolas', monospace; font-size: 11px; color: #a78bfa;">
-                        <strong>Code:</strong> ${entry.nextLine}
+                    <div style="background: #374151; padding: 6px 8px; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 12px; color: #f9fafb; border: 1px solid #8b5cf6;">
+                        <strong style="color: #a855f7;">Code:</strong> ${entry.nextLine}
                     </div>
                 </div>
             `;
@@ -1705,7 +2133,7 @@ if (history.length === 0) {
                         <strong style="color: #4ade80;">Analysis:</strong><br>
                         <span style="color: #d4d4d4; line-height: 1.3;">${entry.problemAnalysis}</span>
                     </div>
-                    <div style="background: #2d2d2d; padding: 4px 6px; border-radius: 3px; font-family: 'Consolas', monospace; font-size: 11px; color: #4ade80;">
+                    <div style="background: #2d2d2d; padding: 4px 6px; border-radius: 3px; font-family: 'Consolas', monospace; font-size: 12px; color: #4ade80;">
                         <strong>Suggestion:</strong> ${entry.nextLine}
                     </div>
                 </div>
@@ -1836,6 +2264,316 @@ function hideAIThinking() {
     hideAIThinkingInBox('suggestions');
     
     // DON'T re-enable editor since we never disabled it
+}
+
+// Survey Functions
+function loadSurveyConfig() {
+    // This will be loaded when the session is initialized
+    // For now, set default interval
+    surveyData.surveyInterval = 4;
+}
+
+function incrementAnalysisCount() {
+    surveyData.analysisCount++;
+    console.log(`Analysis count: ${surveyData.analysisCount}`);
+    
+    // Check if survey should be shown
+    if (surveyData.analysisCount % surveyData.surveyInterval === 0 && !surveyData.pendingSurvey) {
+        showPeriodicSurvey();
+    }
+}
+
+function showPeriodicSurvey() {
+    if (surveyData.questions.length === 0) {
+        console.warn('No survey questions loaded');
+        return;
+    }
+    
+    surveyData.pendingSurvey = true;
+    blockEditor(true);
+    
+    // Generate survey HTML
+    const questionsHTML = generateSurveyHTML(surveyData.questions);
+    document.getElementById('surveyQuestions').innerHTML = questionsHTML;
+    
+    // Show modal
+    document.getElementById('surveyModal').classList.remove('hidden');
+    
+    // Add event listeners
+    setupSurveyEventListeners('surveyModal', 'submitSurvey', submitPeriodicSurvey);
+    
+    addTerminalOutput(`Survey ${Math.floor(surveyData.analysisCount / surveyData.surveyInterval)} appeared - please complete to continue coding`, 'info');
+}
+
+function showFinalSurvey() {
+    if (surveyData.questions.length === 0) {
+        console.warn('No survey questions loaded for final survey');
+        // If no questions, proceed with submission
+        proceedWithSubmission();
+        return;
+    }
+    
+    blockEditor(true);
+    
+    // Generate survey HTML
+    const questionsHTML = generateSurveyHTML(surveyData.questions);
+    document.getElementById('finalSurveyQuestions').innerHTML = questionsHTML;
+    
+    // Show final survey modal
+    document.getElementById('finalSurveyModal').classList.remove('hidden');
+    
+    // Add event listeners
+    setupSurveyEventListeners('finalSurveyModal', 'submitFinalSurvey', submitFinalSurvey);
+    
+    addTerminalOutput('Please complete the final survey before submitting your code', 'info');
+}
+
+function generateSurveyHTML(questions) {
+    return questions.map((question, index) => `
+        <div class="survey-question">
+            <div class="survey-question-text">Q${index + 1}: ${question}</div>
+            <div class="likert-scale">
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_1" name="question_${index}" value="1">
+                    <label for="q${index}_1">Strongly<br>Disagree</label>
+                </div>
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_2" name="question_${index}" value="2">
+                    <label for="q${index}_2">Disagree</label>
+                </div>
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_3" name="question_${index}" value="3">
+                    <label for="q${index}_3">Neutral</label>
+                </div>
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_4" name="question_${index}" value="4">
+                    <label for="q${index}_4">Agree</label>
+                </div>
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_5" name="question_${index}" value="5">
+                    <label for="q${index}_5">Strongly<br>Agree</label>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function setupSurveyEventListeners(modalId, submitButtonId, submitFunction) {
+    const modal = document.getElementById(modalId);
+    const submitButton = document.getElementById(submitButtonId);
+    
+    // Check if all questions are answered
+    function checkSurveyCompletion() {
+        const totalQuestions = surveyData.questions.length;
+        const answeredQuestions = modal.querySelectorAll('input[type="radio"]:checked').length;
+        
+        submitButton.disabled = answeredQuestions < totalQuestions;
+    }
+    
+    // Add change listeners to all radio buttons
+    modal.querySelectorAll('input[type="radio"]').forEach(radio => {
+        radio.addEventListener('change', checkSurveyCompletion);
+    });
+    
+    // Submit button listener
+    submitButton.onclick = submitFunction;
+    
+    // Initial check
+    checkSurveyCompletion();
+}
+
+async function submitPeriodicSurvey() {
+    const responses = collectSurveyResponses('surveyModal');
+    
+    if (responses.length !== surveyData.questions.length) {
+        alert('Please answer all questions before submitting.');
+        return;
+    }
+    
+    try {
+        // Save to backend
+        await saveSurveyResponses(responses, 'periodic');
+        
+        // Store locally
+        surveyData.surveyResponses.push({
+            timestamp: new Date().toISOString(),
+            analysisCount: surveyData.analysisCount,
+            responses: responses
+        });
+        
+        // Hide modal and unblock editor
+        document.getElementById('surveyModal').classList.add('hidden');
+        blockEditor(false);
+        surveyData.pendingSurvey = false;
+        
+        addTerminalOutput('Survey completed successfully - you can continue coding!', 'success');
+        
+    } catch (error) {
+        console.error('Survey submission error:', error);
+        addTerminalOutput('Survey submission failed - please try again', 'error');
+    }
+}
+
+async function submitFinalSurvey() {
+    const responses = collectSurveyResponses('finalSurveyModal');
+    
+    if (responses.length !== surveyData.questions.length) {
+        alert('Please answer all questions before submitting.');
+        return;
+    }
+    
+    try {
+        // Save final survey
+        await saveSurveyResponses(responses, 'final');
+        
+        surveyData.finalSurveyResponse = {
+            timestamp: new Date().toISOString(),
+            responses: responses
+        };
+        
+        // Hide modal
+        document.getElementById('finalSurveyModal').classList.add('hidden');
+        
+        addTerminalOutput('Final survey completed - proceeding with code submission...', 'success');
+        
+        // Proceed with actual code submission
+        proceedWithSubmission();
+        
+    } catch (error) {
+        console.error('Final survey submission error:', error);
+        addTerminalOutput('Final survey submission failed - please try again', 'error');
+        blockEditor(false);
+    }
+}
+
+function collectSurveyResponses(modalId) {
+    const modal = document.getElementById(modalId);
+    const responses = [];
+    
+    for (let i = 0; i < surveyData.questions.length; i++) {
+        const checkedRadio = modal.querySelector(`input[name="question_${i}"]:checked`);
+        if (checkedRadio) {
+            responses.push({
+                question: surveyData.questions[i],
+                response: parseInt(checkedRadio.value)
+            });
+        }
+    }
+    
+    return responses;
+}
+
+async function saveSurveyResponses(responses, surveyType) {
+    try {
+        const response = await fetch('/submit-survey', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                user_id: currentSession.userId,
+                session_id: currentSession.sessionId,
+                assignment_key: currentSession.assignmentKey,
+                survey_type: surveyType,
+                responses: responses,
+                analysis_count: surveyData.analysisCount,
+                timestamp: new Date().toISOString()
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Survey submission failed: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        console.log('Survey saved successfully:', result);
+        
+    } catch (error) {
+        console.error('Error saving survey:', error);
+        throw error;
+    }
+}
+
+function blockEditor(block) {
+    const editorContainer = document.getElementById('editor');
+    
+    if (block) {
+        editorContainer.classList.add('editor-blocked');
+        
+        // Add overlay if not exists
+        if (!document.getElementById('editorBlockOverlay')) {
+            const overlay = document.createElement('div');
+            overlay.id = 'editorBlockOverlay';
+            overlay.className = 'editor-block-overlay';
+            overlay.innerHTML = '⚠️<br>Complete the survey to continue coding';
+            editorContainer.appendChild(overlay);
+        }
+        
+        // Disable Monaco editor
+        if (window.editor) {
+            window.editor.updateOptions({ readOnly: true });
+        }
+    } else {
+        editorContainer.classList.remove('editor-blocked');
+        
+        // Remove overlay
+        const overlay = document.getElementById('editorBlockOverlay');
+        if (overlay) {
+            overlay.remove();
+        }
+        
+        // Re-enable Monaco editor
+        if (window.editor) {
+            window.editor.updateOptions({ readOnly: false });
+            window.editor.focus();
+        }
+    }
+}
+
+// Store original submit function
+let originalSubmitToDatabase = null;
+
+function proceedWithSubmission() {
+    // Call the original submit function
+    if (originalSubmitToDatabase) {
+        originalSubmitToDatabase();
+    }
+}
+
+
+async function loadSurveyQuestions() {
+    try {
+        const response = await fetch('/survey-config', {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        if (response.ok) {
+            const config = await response.json();
+            surveyData.questions = config.questions;
+            surveyData.surveyInterval = config.feedback_interval;
+            console.log('Survey config loaded:', config);
+        } else {
+            console.warn('Failed to load survey config, using defaults');
+            surveyData.questions = [
+                "I trust the AI's responses.",
+                "I am confident in the AI's responses.", 
+                "I am suspicious of the AI's intentions.",
+                "The AI's responses are consistent."
+            ];
+        }
+    } catch (error) {
+        console.error('Error loading survey config:', error);
+        // Use default questions
+        surveyData.questions = [
+            "I trust the AI's responses.",
+            "I am confident in the AI's responses.", 
+            "I am suspicious of the AI's intentions.",
+            "The AI's responses are consistent."
+        ];
+    }
 }
     function processSuggestionWithIndentation(suggestion, baseIndentation) {
         const lines = suggestion.split('\n');
@@ -2056,7 +2794,7 @@ async function executePythonOnBackend(code) {
         addTerminalOutput(error.message, 'error');
     }
 }
-   async function submitToDatabase() {
+async function submitToDatabase() {
     if (!currentSession.sessionId) {
         addTerminalOutput('No active session to submit', 'error');
         return;
@@ -2079,75 +2817,89 @@ async function executePythonOnBackend(code) {
         return;
     }
 
-    // FINAL AI ANALYSIS BEFORE SUBMISSION
-    addTerminalOutput('Performing final AI analysis before submission...', 'info');
-    await analyzeCurrentCode();
+    // Store original function for survey completion
+    originalSubmitToDatabase = async function() {
+        // FINAL AI ANALYSIS BEFORE SUBMISSION
+        addTerminalOutput('Performing final AI analysis before submission...', 'info');
+        await analyzeCurrentCode();
+        
+        submitButton.disabled = true;
+        submitButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Submitting & Logging out...</div>';
+
+        try {
+            const response = await fetch('/submit', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    code: code,
+                    user_id: currentSession.userId,
+                    assignment_key: currentSession.assignmentKey,
+                    session_id: currentSession.sessionId,
+                    programming_language: currentSession.programmingLanguage,
+                    timestamp: new Date().toISOString(),
+                    suggestion_clicked: currentSession.suggestionClickCount,
+                    compiler_clicked: currentSession.compilerClickCount,
+                    survey_data: {
+                        periodic_surveys: surveyData.surveyResponses,
+                        final_survey: surveyData.finalSurveyResponse,
+                        total_analyses: surveyData.analysisCount
+                    }
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Submission failed: ${response.statusText}`);
+            }
+
+            const result = await response.json();
+            addTerminalOutput(`${result.message}`, 'success');
+            addTerminalOutput(`Database Status: ${result.firebase_status}`, 'info');
+            addTerminalOutput(`Submission ID: ${result.submission_id}`, 'info');
+            addTerminalOutput(`Problem Guess Logs: ${currentSession.guessLogCount}`, 'info');
+            addTerminalOutput(`Suggestions Clicked: ${currentSession.suggestionClickCount}`, 'info');
+            addTerminalOutput(`Compiler Runs: ${currentSession.compilerClickCount}`, 'info');
+            addTerminalOutput(`Surveys Completed: ${surveyData.surveyResponses.length}`, 'info');
+            if (currentSession.condition === 1) {
+                addTerminalOutput(`Description-based Logs: ${currentSession.descLogCount}`, 'info');
+            }
+            if (currentSession.condition === 3) {
+                addTerminalOutput(`AI Suggestion Logs: ${currentSession.suggestionsLogCount}`, 'info');
+            }
+            
+            if (result.firebase_status === 'success') {
+                addTerminalOutput(`Database save successful - logging out now...`, 'success');
+                setTimeout(() => {
+                    showSuccessMessage(
+                        'Code submitted successfully to Database!\nSession ended for security.', 
+                        3
+                    );
+                }, 500);
+            } else {
+                addTerminalOutput(`Database save failed but data preserved locally - logging out...`, 'warning');
+                setTimeout(() => {
+                    showSuccessMessage(
+                        'Submission completed with local backup.\nSession ended for security.', 
+                        3
+                    );
+                }, 500);
+            }
+
+        } catch (error) {
+            console.error('Submission error:', error);
+            addTerminalOutput(`Submission failed: ${error.message}`, 'error');
+            addTerminalOutput(`Data preserved locally in session logs`, 'warning');
+            submitButton.disabled = false;
+            submitButton.innerHTML = 'Submit & Logout';
+        }
+    };
+
+    // Show final survey before submission
+    showFinalSurvey();
+}
+
     
-    submitButton.disabled = true;
-    submitButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Submitting & Logging out...</div>';
-
-       try {
-           const response = await fetch('/submit', {
-               method: 'POST',
-               headers: {
-                   'Content-Type': 'application/json',
-               },
-               body: JSON.stringify({
-                code: code,
-                user_id: currentSession.userId,
-                assignment_key: currentSession.assignmentKey,
-                session_id: currentSession.sessionId,
-                programming_language: currentSession.programmingLanguage,
-                timestamp: new Date().toISOString(),
-                suggestion_clicked: currentSession.suggestionClickCount,
-                compiler_clicked: currentSession.compilerClickCount
-            })
-           });
-
-           if (!response.ok) {
-               throw new Error(`Submission failed: ${response.statusText}`);
-           }
-
-           const result = await response.json();
-           addTerminalOutput(`${result.message}`, 'success');
-           addTerminalOutput(`Database Status: ${result.firebase_status}`, 'info');
-           addTerminalOutput(`Submission ID: ${result.submission_id}`, 'info');
-           addTerminalOutput(`Problem Guess Logs: ${currentSession.guessLogCount}`, 'info');
-           addTerminalOutput(`Suggestions Clicked: ${currentSession.suggestionClickCount}`, 'info');
-           addTerminalOutput(`Compiler Runs: ${currentSession.compilerClickCount}`, 'info');
-           if (currentSession.condition === 1) {
-               addTerminalOutput(`Description-based Logs: ${currentSession.descLogCount}`, 'info');
-           }
-           if (currentSession.condition === 3) {
-               addTerminalOutput(`AI Suggestion Logs: ${currentSession.suggestionsLogCount}`, 'info');
-           }
-           
-           if (result.firebase_status === 'success') {
-               addTerminalOutput(`Database save successful - logging out now...`, 'success');
-               setTimeout(() => {
-                   showSuccessMessage(
-                       'Code submitted successfully to Database!\nSession ended for security.', 
-                       3
-                   );
-               }, 500);
-           } else {
-               addTerminalOutput(`Database save failed but data preserved locally - logging out...`, 'warning');
-               setTimeout(() => {
-                   showSuccessMessage(
-                       'Submission completed with local backup.\nSession ended for security.', 
-                       3
-                   );
-               }, 500);
-           }
-
-       } catch (error) {
-           console.error('Submission error:', error);
-           addTerminalOutput(`Submission failed: ${error.message}`, 'error');
-           addTerminalOutput(`Data preserved locally in session logs`, 'warning');
-           submitButton.disabled = false;
-           submitButton.innerHTML = 'Submit & Logout';
-       }
-   }
 
    function endSession() {
        if (confirm('Are you sure you want to end this session? Any unsaved code will be lost.')) {
@@ -2252,7 +3004,7 @@ if (historySuggestionsButton) {
        }
        if ((e.ctrlKey || e.metaKey) && e.key === '0') {
            e.preventDefault();
-           updateFontSize(14);
+           updateFontSize(12);
            addTerminalOutput(`Font size reset to ${currentFontSize}px`, 'info');
        }
    });
