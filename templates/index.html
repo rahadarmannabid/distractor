@@ -1403,7 +1403,8 @@ const ACTIVITY_BATCH_SIZE = 10;
     surveyResponses: [],
     finalSurveyResponse: null,
     pendingSurvey: false,
-    questions: []
+    questions: [],
+    isSubmitting: false  // ADD THIS LINE
 };
 
     // UI Elements
@@ -2670,8 +2671,10 @@ function incrementAnalysisCount() {
     surveyData.analysisCount++;
     console.log(`Analysis count: ${surveyData.analysisCount}`);
     
-    // Check if survey should be shown
-    if (surveyData.analysisCount % surveyData.surveyInterval === 0 && !surveyData.pendingSurvey) {
+    // Check if survey should be shown (but not during submission process)
+    if (surveyData.analysisCount % surveyData.surveyInterval === 0 && 
+        !surveyData.pendingSurvey && 
+        !surveyData.isSubmitting) {  // ADD THIS CONDITION
         showPeriodicSurvey();
     }
 }
@@ -2705,6 +2708,9 @@ function showPeriodicSurvey() {
     addTerminalOutput(`Survey ${Math.floor(surveyData.analysisCount / surveyData.surveyInterval)} appeared - please complete to continue coding`, 'info');
 }
 function showFinalSurvey() {
+    // Set submission flag to prevent any periodic surveys
+    surveyData.isSubmitting = true;
+    
     if (surveyData.questions.length === 0) {
         console.warn('No survey questions loaded for final survey');
         // If no questions, proceed with submission
@@ -3203,14 +3209,29 @@ async function executeJavaScriptInBrowser(code) {
     };
 
     try {
-        const canvas = document.createElement("canvas");
-        addTerminalOutput(`Running JavaScript...`, 'prompt');
-        const startTime = Date.now();
+    const canvas = document.createElement("canvas");
+    addTerminalOutput(`Running JavaScript...`, 'prompt');
+    const startTime = Date.now();
 
+    // Create a safer execution environment that still allows output
+    try {
+        // Override print function to use console.log instead of window.print
+        const originalPrint = window.print;
+        window.print = function(...args) {
+            console.log(...args);
+        };
+        
         const run = new Function(["canvas"], code);
         run(canvas);
+        
+        // Restore original print function
+        window.print = originalPrint;
+        
+    } catch (execError) {
+        throw execError;
+    }
 
-        const executionTime = Date.now() - startTime;
+    const executionTime = Date.now() - startTime;
         
         addTerminalOutput(`Process finished (${executionTime}ms)`, 'execution-time');
         addTerminalOutput(`Ready for more code!`, 'prompt');
@@ -3334,9 +3355,12 @@ async function submitToDatabase() {
 
     // Store original function for survey completion
     originalSubmitToDatabase = async function() {
-        // FINAL AI ANALYSIS BEFORE SUBMISSION
-        addTerminalOutput('Performing final AI analysis before submission...', 'info');
-        await analyzeCurrentCode();
+        // Set submission flag to prevent periodic surveys
+        surveyData.isSubmitting = true;
+        
+        // FINAL AI ANALYSIS BEFORE SUBMISSION (without counting for surveys)
+        addTerminalOutput('Performing final analysis before submission...', 'info');
+        // Don't call analyzeCurrentCode() here to avoid triggering periodic surveys
         
         submitButton.disabled = true;
         submitButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Submitting & Logging out...</div>';
