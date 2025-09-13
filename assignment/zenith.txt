@@ -1,0 +1,3 @@
+```markdown
+Write a Python program zenith that prints a centered pyramid made of the character '@'. The height isfixed in the program (e.g., height = 6). The pyramid must contain exactly height rows, where the firstrow has one '@' centered at the top, the second row has three '@', and so on, increasing by two eachrow, forming a symmetric pyramid with no trailing spaces on any line
+```

@@ -1,0 +1,3 @@
+```markdown
+Write a Python program ascend that prints a right-aligned staircase made of the character '*'. Theheight is fixed in the program (e.g., height = 5). The staircase must contain exactly that many rows,aligned to the right using spaces so the top row has one '*' and the bottom row has height '*'s, with notrailing spaces on any line.
+```

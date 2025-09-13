@@ -1,0 +1,3 @@
+```markdown
+Write a Python program twine that prints two adjacent pyramids of the character '+', separated by twospaces. The height is fixed in the program (e.g., height = 4). The output should contain exactly heightrows, where each row shows a left pyramid, a two-space gap, and a mirrored right pyramid, alignedvertically, with no trailing spaces on any line.
+```

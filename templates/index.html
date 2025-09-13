@@ -1128,6 +1128,53 @@
             overflow-wrap: break-word;
         }
 
+        /* Temporary paste banner */
+.paste-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(135deg, #dc2626, #ef4444);
+    color: white;
+    padding: 8px 20px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: bold;
+    z-index: 10000;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    font-family: 'Segoe UI', sans-serif;
+    animation: bannerSlideDown 0.3s ease-out;
+}
+
+@keyframes bannerSlideDown {
+    from { transform: translateY(-100%); }
+    to { transform: translateY(0); }
+}
+
+/* Temporary paste notification */
+.paste-notification {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: linear-gradient(135deg, #dc2626, #ef4444);
+    color: white;
+    padding: 20px 30px;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    z-index: 10001;
+    min-width: 400px;
+    animation: notificationSlideIn 0.3s ease-out;
+}
+
+@keyframes notificationSlideIn {
+    from { transform: translate(-50%, -50%) scale(0.8); opacity: 0; }
+    to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+
     </style>
 </head>
 <body>
@@ -1321,6 +1368,29 @@ let currentSession = {
 
 };
 
+
+// Activity Logging System
+let activityLog = [];
+let activitySummary = {
+    totalKeystrokes: 0,
+    totalCodeExecutions: 0,
+    totalSuggestionClicks: 0,
+    totalHistoryViews: 0,
+    focusTimeSeconds: 0,
+    awayTimeSeconds: 0,
+    fontChanges: 0,
+    terminalClears: 0,
+    surveysCompleted: 0,
+    peakCodeLines: 0,
+    totalAiAnalyses: 0
+};
+
+let sessionStartTime = Date.now();
+let lastFocusTime = Date.now();
+let isTabVisible = true;
+let activityBuffer = [];
+const ACTIVITY_BATCH_SIZE = 10;
+
     // Font size management
     let currentFontSize = 12;    
     const minFontSize = 10;
@@ -1351,6 +1421,190 @@ let currentSession = {
     const suggestionGuess = document.getElementById('suggestionGuess');
     const suggestionDesc = document.getElementById('suggestionDesc');
 
+
+    // Enhanced Activity Logging with Time Tracking
+let lastUserInteraction = Date.now();
+let idleTimer = null;
+let userTypingTimer = null;
+let currentEditingActivity = null;
+
+// Core Activity Logging Function
+function logActivity(activityType, activityDetails = {}, sessionContext = {}) {
+    if (!currentSession.sessionId) {
+        console.warn('No session ID available for activity logging');
+        return;
+    }
+    
+    const timestamp = new Date().toISOString();
+    const timeSinceStart = (Date.now() - sessionStartTime) / 1000;
+    
+    // Get current code context if available
+    let currentLines = 0;
+    try {
+        if (window.editor && window.editor.getModel()) {
+            currentLines = window.editor.getModel().getLineCount();
+        }
+    } catch (e) {
+        console.warn('Could not get editor line count:', e);
+        currentLines = 0;
+    }
+    
+    // Ensure all required fields are present and properly typed
+    const activity = {
+        timestamp: timestamp,
+        activity_type: String(activityType),
+        activity_details: {
+            ...Object.fromEntries(
+                Object.entries(activityDetails).map(([key, value]) => [
+                    String(key), 
+                    value !== null && value !== undefined ? value : null
+                ])
+            )
+        },
+        session_context: {
+            total_lines: Number(currentLines) || 0,
+            current_analysis_count: Number(surveyData.analysisCount) || 0,
+            time_since_start: Number(timeSinceStart) || 0,
+            session_id: String(currentSession.sessionId),
+            user_id: String(currentSession.userId || 'unknown'),
+            condition: Number(currentSession.condition) || 0,
+            ...Object.fromEntries(
+                Object.entries(sessionContext).map(([key, value]) => [
+                    String(key), 
+                    value !== null && value !== undefined ? value : null
+                ])
+            )
+        }
+    };
+    
+    if (!activity.timestamp || !activity.activity_type) {
+        console.error('Invalid activity object:', activity);
+        return;
+    }
+    
+    activityLog.push(activity);
+    activityBuffer.push(activity);
+    
+    if (activityBuffer.length >= ACTIVITY_BATCH_SIZE) {
+        uploadActivityBatch();
+    }
+}
+
+// Time-based activity tracking functions
+function updateUserInteraction() {
+    lastUserInteraction = Date.now();
+    resetIdleTimer();
+}
+
+function resetIdleTimer() {
+    if (idleTimer) {
+        clearTimeout(idleTimer);
+    }
+    
+    idleTimer = setTimeout(() => {
+        logActivity('idle', {
+            start_time: new Date().toISOString(),
+            idle_duration: 30000
+        });
+    }, 30000); // 30 seconds
+}
+
+// Code editing activity tracking
+function startCodeEditingActivity(editType, details = {}) {
+    const now = Date.now();
+    
+    // If we're already in a code editing activity of the same type, extend it
+    if (currentEditingActivity && currentEditingActivity.type === editType) {
+        // Update details for ongoing activity
+        Object.assign(currentEditingActivity.details, details);
+        return;
+    }
+    
+    // End previous editing activity if different type
+    if (currentEditingActivity) {
+        endCodeEditingActivity();
+    }
+    
+    currentEditingActivity = {
+        type: editType,
+        startTime: now,
+        details: {...details}
+    };
+    
+    // Clear any existing timer
+    if (userTypingTimer) {
+        clearTimeout(userTypingTimer);
+    }
+}
+
+function endCodeEditingActivity(finalDetails = {}) {
+    if (!currentEditingActivity) {
+        return;
+    }
+    
+    const now = Date.now();
+    const duration = now - currentEditingActivity.startTime;
+    
+    // Only log if activity lasted more than 100ms (avoid micro-edits)
+    if (duration > 100) {
+        logActivity(currentEditingActivity.type, {
+            start_time: new Date(currentEditingActivity.startTime).toISOString(),
+            end_time: new Date(now).toISOString(),
+            duration: duration,
+            ...currentEditingActivity.details,
+            ...finalDetails
+        });
+    }
+    
+    currentEditingActivity = null;
+}
+
+function scheduleCodeEditingEnd() {
+    if (userTypingTimer) {
+        clearTimeout(userTypingTimer);
+    }
+    
+    // End editing activity after 2 seconds of inactivity
+    userTypingTimer = setTimeout(() => {
+        endCodeEditingActivity();
+    }, 2000);
+}
+
+// Batch upload function
+async function uploadActivityBatch() {
+    if (activityBuffer.length === 0) return;
+    
+    try {
+        const response = await fetch('/log-activities', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                activities: activityBuffer,
+                session_id: currentSession.sessionId
+            })
+        });
+        
+        if (response.ok) {
+            console.log(`Uploaded ${activityBuffer.length} activities`);
+            activityBuffer = [];
+        } else {
+            const errorData = await response.json().catch(() => ({}));
+            console.warn(`Activity upload failed: ${response.status} - ${errorData.message || 'Unknown error'}`);
+            // Keep activities in buffer for retry, but limit buffer size to prevent memory issues
+            if (activityBuffer.length > 100) {
+                activityBuffer = activityBuffer.slice(-50); // Keep only last 50 activities
+            }
+        }
+    } catch (error) {
+        console.error('Activity upload failed:', error);
+        // Keep activities in buffer for retry, but limit buffer size
+        if (activityBuffer.length > 100) {
+            activityBuffer = activityBuffer.slice(-50);
+        }
+    }
+}
     function updateLoadingMessage(message) {
     const loadingDetail = document.getElementById('loadingDetail');
     if (loadingDetail) {
@@ -1447,7 +1701,7 @@ let currentSession = {
         }, 1000);
     }
 
-    // Initialize application from URL parameters
+// Initialize application from URL parameters
 // Initialize application from URL parameters
 async function initializeFromURL() {
     console.log('Starting initialization...');
@@ -1570,7 +1824,40 @@ async function initializeFromURL() {
             loadSurveyConfig();
             // Fetch survey questions from backend
             loadSurveyQuestions();
+            
+            // Initialize activity logging
+            sessionStartTime = Date.now();
+            isTabVisible = !document.hidden;
+            lastFocusTime = sessionStartTime;
+
+            // Log session start
+            logActivity('session_start', {
+                user_id: authData.userId,
+                condition: authData.condition,
+                assignment_key: authData.assignmentKey,
+                programming_language: authData.programmingLanguage || 'javascript'
+            });
+
+            // Set up periodic activity uploads
+            setInterval(() => {
+                if (activityBuffer.length > 0) {
+                    uploadActivityBatch();
+                }
+            }, 30000); // Upload every 30 seconds
         }, 100);
+        
+        // Initialize enhanced activity tracking
+        setTimeout(() => {
+            // Start idle tracking
+            resetIdleTimer();
+            
+            // Track user interactions globally
+            document.addEventListener('click', updateUserInteraction);
+            document.addEventListener('keypress', updateUserInteraction);
+            document.addEventListener('scroll', updateUserInteraction);
+            
+            console.log('Enhanced activity tracking initialized');
+        }, 200);
         
     } catch (error) {
         console.error('Initialization failed:', error);
@@ -1578,10 +1865,11 @@ async function initializeFromURL() {
     }
 }
 
+
+// Initialize Monaco Editor with timeout and error handling
 // Initialize Monaco Editor with timeout and error handling
 async function initializeEditor() {
     return new Promise((resolve, reject) => {
-        // Set a timeout for Monaco loading
         const loadingTimeout = setTimeout(() => {
             reject(new Error('Monaco Editor loading timed out after 15 seconds'));
         }, 15000);
@@ -1604,7 +1892,6 @@ async function initializeEditor() {
         
         editorContainer.innerHTML = '';
         
-        // Configure RequireJS with timeout
         require.config({ 
             paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs' },
             waitSeconds: 15
@@ -1614,7 +1901,6 @@ async function initializeEditor() {
             try {
                 clearTimeout(loadingTimeout);
                 
-                // Set language-specific defaults
                 const languageDefaults = {
                     javascript: '// Start coding here...\n',
                     python: '# Start coding here...\n'
@@ -1638,113 +1924,57 @@ async function initializeEditor() {
                     fontSize: 12
                 });
 
-                // Paste control implementation
-                console.log('DEBUG: pasteAllowed value:', currentSession.pasteAllowed);
-                console.log('DEBUG: pasteAllowed type:', typeof currentSession.pasteAllowed);
-                console.log('DEBUG: Will block paste:', (currentSession.pasteAllowed === 0 || currentSession.pasteAllowed === "0"));
-
-                if (currentSession.pasteAllowed === 0 || currentSession.pasteAllowed === "0") {
-                    console.log('DEBUG: Applying paste blocking...');
-                    window.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV, function() {
-                        addTerminalOutput('❌ Copy/paste is disabled - please type your code manually', 'warning');
-                        return null;
-                    });
-                    
-                    const domNode = window.editor.getDomNode();
-                    
-                    if (domNode) {
-                        domNode.addEventListener('keydown', function(e) {
-                            if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                e.stopImmediatePropagation();
-                                addTerminalOutput('❌ Ctrl+V blocked - copy/paste is disabled for this study', 'warning');
-                                return false;
-                            }
-                            if (e.shiftKey && e.key === 'Insert') {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                e.stopImmediatePropagation();
-                                addTerminalOutput('Keyboard paste blocked (Shift+Insert)', 'warning');
-                                return false;
-                            }
-                        }, true);
-                        
-                        domNode.addEventListener('paste', function(e) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            e.stopImmediatePropagation();
-                            addTerminalOutput('Paste event blocked', 'warning');
-                            return false;
-                        }, true);
-                        
-                        domNode.addEventListener('contextmenu', function(e) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            addTerminalOutput('❌ Right-click paste blocked - please type manually', 'warning');
-                            return false;
-                        }, true);
-                        
-                        // Add visual indicator
-                        const pasteIndicator = document.createElement('div');
-                        pasteIndicator.style.cssText = `
-                            position: absolute;
-                            top: 5px;
-                            right: 5px;
-                            background: #ef4444;
-                            color: white;
-                            padding: 2px 6px;
-                            border-radius: 3px;
-                            font-size: 10px;
-                            z-index: 100;
-                            pointer-events: none;
-                            font-family: monospace;
-                            font-weight: bold;
-                        `;
-                        pasteIndicator.textContent = 'COPY/PASTE DISABLED';
-                        editorContainer.appendChild(pasteIndicator);
-                        
-                        const notificationBanner = document.createElement('div');
-                        notificationBanner.style.cssText = `
-                            position: fixed;
-                            top: 0;
-                            left: 0;
-                            right: 0;
-                            background: linear-gradient(135deg, #dc2626, #ef4444);
-                            color: white;
-                            padding: 8px 20px;
-                            text-align: center;
-                            font-size: 14px;
-                            font-weight: bold;
-                            z-index: 10000;
-                            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-                            font-family: 'Segoe UI', sans-serif;
-                        `;
-                        notificationBanner.innerHTML = `
-                            ⚠️ NOTICE: Copy and paste functionality is disabled in this IDE. All code must be typed manually.
-                        `;
-                        document.body.appendChild(notificationBanner);
-                        
-                        const mainApp = document.getElementById('application');
-                        if (mainApp) {
-                            mainApp.style.marginTop = '40px';
-                        }
-                    }
-                    
-                    addTerminalOutput('Paste functionality completely disabled for this session', 'warning');
-                } else {
-                    addTerminalOutput('Paste functionality enabled', 'info');
-                }
-
-                // AI analysis triggers
-                let analysisTimeout;
-                let lastAnalyzedContent = '';
-                
+                // Enhanced Monaco Editor event handlers with time tracking
                 window.editor.onDidChangeModelContent((e) => {
+                    updateUserInteraction();
+                    
                     const changes = e.changes;
+                    const model = window.editor.getModel();
+                    const currentContent = model.getValue();
+                    
                     for (const change of changes) {
+                        const isInsertion = change.text.length > 0;
+                        const isDeletion = change.rangeLength > 0;
+                        const isModification = isInsertion && isDeletion;
+                        
+                        let editType, details;
+                        
+                        if (isModification) {
+                            editType = 'code_editing_modify';
+                            details = {
+                                lines_modified: Math.abs(change.range.endLineNumber - change.range.startLineNumber) + 1,
+                                characters_changed: Math.abs(change.text.length - change.rangeLength),
+                                content_length: currentContent.length
+                            };
+                        } else if (isInsertion) {
+                            const linesAdded = (change.text.match(/\n/g) || []).length;
+                            editType = 'code_editing_insert';
+                            details = {
+                                lines_added: linesAdded,
+                                characters_added: change.text.length,
+                                content_length: currentContent.length,
+                                line_number: change.range.startLineNumber
+                            };
+                        } else if (isDeletion) {
+                            const linesRemoved = Math.abs(change.range.endLineNumber - change.range.startLineNumber);
+                            editType = 'code_editing_delete';
+                            details = {
+                                lines_removed: linesRemoved,
+                                characters_removed: change.rangeLength,
+                                content_length: currentContent.length,
+                                line_number: change.range.startLineNumber
+                            };
+                        }
+                        
+                        if (editType) {
+                            startCodeEditingActivity(editType, details);
+                            scheduleCodeEditingEnd();
+                        }
+                        
+                        // Trigger AI analysis on new lines
                         if (change.text.includes('\n')) {
                             const currentContent = window.editor.getValue().trim();
+                            let lastAnalyzedContent = '';
                             
                             if (currentContent !== lastAnalyzedContent && currentContent.length > 0) {
                                 analyzeCurrentCode();
@@ -1754,6 +1984,54 @@ async function initializeEditor() {
                         }
                     }
                 });
+
+                // ACTIVITY LOGGING: Cursor position tracking (for user interaction only - no logging)
+                window.editor.onDidChangeCursorPosition((e) => {
+                    updateUserInteraction();
+                    // Cursor movement tracking removed to reduce database load
+                });
+
+                // ACTIVITY LOGGING: Selection tracking (for user interaction only - no logging)
+                window.editor.onDidChangeCursorSelection((e) => {
+                    updateUserInteraction();
+                    // Selection change tracking removed to reduce database load
+                });
+
+
+                // Complete paste control implementation
+                if (currentSession.pasteAllowed === 0 || currentSession.pasteAllowed === "0") {
+                    const logPasteAttempt = () => {
+                        logActivity('paste_attempt', {
+                            attempt_blocked: true,
+                            paste_control_active: true
+                        });
+                    };
+                    
+                    // Block Ctrl+V
+                    window.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV, function() {
+                        logPasteAttempt();
+                        showTemporaryPasteNotification();
+                        return null;
+                    });
+                    
+                    // Block Shift+Insert
+                    window.editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.Insert, function() {
+                        logPasteAttempt();
+                        showTemporaryPasteNotification();
+                        return null;
+                    });
+                    
+                    // Block context menu paste
+                    document.addEventListener('contextmenu', function(e) {
+                        if (e.target.closest('#editor')) {
+                            e.preventDefault();
+                            logPasteAttempt();
+                            showTemporaryPasteNotification();
+                        }
+                    });
+                    
+                    console.log('Paste control active - all paste operations blocked');
+                }
                 
                 updateFontSize(currentFontSize);
                 resolve();
@@ -1763,12 +2041,60 @@ async function initializeEditor() {
                 console.error('Monaco Editor initialization failed:', error);
                 reject(error);
             }
-        }, function (err) {
-            clearTimeout(loadingTimeout);
-            console.error('Monaco Editor loading failed:', err);
-            reject(new Error('Failed to load Monaco Editor: ' + (err.message || err)));
         });
     });
+}
+
+
+function showTemporaryPasteNotification() {
+    // Remove any existing notifications
+    const existingNotification = document.getElementById('pasteNotification');
+    const existingBanner = document.getElementById('pasteBanner');
+    
+    if (existingNotification) {
+        existingNotification.remove();
+    }
+    if (existingBanner) {
+        existingBanner.remove();
+    }
+    
+    // Create center notification
+    const notification = document.createElement('div');
+    notification.id = 'pasteNotification';
+    notification.className = 'paste-notification';
+    notification.innerHTML = '⚠️ COPY/PASTE DISABLED: All code must be typed manually';
+    
+    // Create top banner
+    const banner = document.createElement('div');
+    banner.id = 'pasteBanner';
+    banner.className = 'paste-banner';
+    banner.innerHTML = `⚠️ NOTICE: Copy and paste functionality is disabled in this IDE. All code must be typed manually.`;
+    
+    // Add both to document
+    document.body.appendChild(notification);
+    document.body.appendChild(banner);
+    
+    // Adjust main app margin temporarily
+    const mainApp = document.getElementById('application');
+    if (mainApp) {
+        mainApp.style.marginTop = '40px';
+        mainApp.style.transition = 'margin-top 0.3s ease';
+    }
+    
+    // Remove after 3 seconds
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.remove();
+        }
+        if (banner.parentNode) {
+            banner.remove();
+        }
+        
+        // Reset margin
+        if (mainApp) {
+            mainApp.style.marginTop = '0px';
+        }
+    }, 3000);
 }
 
     // Analyze current code
@@ -1789,6 +2115,12 @@ async function analyzeCurrentCode() {
 
     // Set analyzing flag
     isAnalyzing = true;
+    // ACTIVITY LOG: AI analysis trigger
+logActivity('ai_analysis_trigger', {
+    trigger_reason: 'new_line_added',
+    code_length: code.length,
+    analysis_number: surveyData.analysisCount + 1
+});
 
     // Show AI thinking animation and disable editor
     showAIThinking();
@@ -1812,6 +2144,17 @@ async function analyzeCurrentCode() {
         }
 
         const data = await response.json();
+
+        const analysisTime = Date.now() - (new Date().getTime()); // You'll need to add startTime variable
+        
+// ACTIVITY LOG: AI analysis complete
+logActivity('ai_analysis_complete', {
+    analysis_time_ms: 2000, // Approximate - you can make this more precise
+    analysis_result: data.analysis ? data.analysis.substring(0, 50) + '...' : 'none',
+    suggestion_generated: !!data.next_line
+});
+
+
         const problemDescription = data.analysis || "Problem description not available";
         let nextLineCode = data.next_line || "// No suggestions available";
         
@@ -2036,207 +2379,257 @@ if (currentSession.condition === 1) {
     // Add terminal notification
     addTerminalOutput('AI analysis completed - new suggestions available in sidebar!', 'success');
     }
-    function showHistoryInline(type) {
+
+
+function showHistoryInline(type) {
+    const historyStartTime = Date.now();
+    
     const isGuessHistory = type === 'guess';
     const isDescHistory = type === 'desc';
     const isSuggestionsHistory = type === 'suggestions';
     
-    let history, targetElement, buttonElement;
+    let history, targetElement, buttonElement, historyType;
     
     if (isGuessHistory) {
         history = currentSession.guessHistory;
         targetElement = document.getElementById('analysis');
         buttonElement = document.getElementById('history-guess');
+        historyType = 'ai_history';
     } else if (isDescHistory) {
         history = currentSession.descHistory;
         targetElement = document.getElementById('problemDescriptionDisplay');
         buttonElement = document.getElementById('history-desc');
+        historyType = 'correct_history';
     } else if (isSuggestionsHistory) {
         history = currentSession.suggestionsHistory;
         targetElement = document.getElementById('suggestionOnly');
         buttonElement = document.getElementById('history-suggestions');
+        historyType = 'suggestions_history';
     }
         
-        const isShowingHistory = targetElement.getAttribute('data-showing-history') === 'true';
+    const isShowingHistory = targetElement.getAttribute('data-showing-history') === 'true';
+    const action = isShowingHistory ? 'hide_history' : 'show_history';
+    
+    // Log with proper start/end timestamps
+    logActivity('history_interaction', {
+        start_time: new Date(historyStartTime).toISOString(),
+        end_time: new Date().toISOString(),
+        duration: Date.now() - historyStartTime,
+        history_type: historyType,
+        action: action,
+        entries_available: history.length
+    });
         
-        if (isShowingHistory) {
-    // Switch back to current analysis
-    if (isGuessHistory) {
-        const currentAnalysis = currentSession.guessHistory.length > 0 ? 
-            currentSession.guessHistory[currentSession.guessHistory.length - 1].problemAnalysis : 
-            'Waiting for code...';
-        targetElement.textContent = currentAnalysis;  // CHANGED: use textContent instead of innerHTML
-    } else if (isDescHistory) {
-        if (currentSession.problemDescription) {
-            try {
-                const parsedMarkdown = marked.parse(currentSession.problemDescription);
-                targetElement.innerHTML = parsedMarkdown;
-            } catch (e) {
-                console.error('Markdown parsing error:', e);
-                targetElement.innerHTML = currentSession.problemDescription;
+    if (isShowingHistory) {
+        // Switch back to current analysis
+        if (isGuessHistory) {
+            const currentAnalysis = currentSession.guessHistory.length > 0 ? 
+                currentSession.guessHistory[currentSession.guessHistory.length - 1].problemAnalysis : 
+                'Waiting for code...';
+            targetElement.textContent = currentAnalysis;
+        } else if (isDescHistory) {
+            if (currentSession.problemDescription) {
+                try {
+                    // FIXED: Added safety check for marked library
+                    if (typeof marked !== 'undefined' && marked.parse) {
+                        const parsedMarkdown = marked.parse(currentSession.problemDescription);
+                        targetElement.innerHTML = parsedMarkdown;
+                    } else {
+                        targetElement.innerHTML = currentSession.problemDescription;
+                    }
+                } catch (e) {
+                    console.error('Markdown parsing error:', e);
+                    targetElement.innerHTML = currentSession.problemDescription;
+                }
+            } else {
+                targetElement.innerHTML = 'Loading problem description...';
             }
-        } else {
-            targetElement.innerHTML = 'Loading problem description...';
+        } else if (isSuggestionsHistory) {
+            const lastSuggestion = currentSession.suggestionsHistory.length > 0 ? 
+                currentSession.suggestionsHistory[currentSession.suggestionsHistory.length - 1].nextLine : 
+                'Start coding...';
+            targetElement.textContent = lastSuggestion;
         }
-    } else if (isSuggestionsHistory) {
-        // For suggestions history, restore the last suggestion
-        const lastSuggestion = currentSession.suggestionsHistory.length > 0 ? 
-            currentSession.suggestionsHistory[currentSession.suggestionsHistory.length - 1].nextLine : 
-            'Start coding...';
-        targetElement.textContent = lastSuggestion;
-    }
-    targetElement.setAttribute('data-showing-history', 'false');
-    
-    buttonElement.textContent = 'View History';
+        targetElement.setAttribute('data-showing-history', 'false');
+        buttonElement.textContent = 'View History';
+    } else {
+        // Show history
+        let historyHTML = '';
 
-        } else {
-            // Show history
-let historyHTML = '';
-
-if (history.length === 0) {
-    const activityText = isSuggestionsHistory ? "Start coding to see AI suggestions!" : "Start coding to see AI analysis!";
-    historyHTML = `
-        <div style="text-align: center; color: #888; font-style: italic; padding: 20px;">
-            No history entries yet. ${activityText}
-        </div>
-    `;
-} else {
-    historyHTML = `<div style="max-height: 300px; overflow-y: auto; font-size: 12px;">`;
-    
-    const entriesToShow = Math.min(5, history.length);
-    for (let i = history.length - 1; i >= history.length - entriesToShow; i--) {
-        const entry = history[i];
-        const timeStr = new Date(entry.timestamp).toLocaleTimeString();
-        
-        if (isSuggestionsHistory) {
-            // Simpler display for suggestions-only history
-            historyHTML += `
-                <div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 8px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                        <span style="color: #8b5cf6; font-weight: bold;">Suggestion #${i + 1}</span>
-                        <span style="color: #d1d5db; font-size: 10px; font-weight: 500;">${timeStr}</span>
-                    </div>
-                    <div style="background: #374151; padding: 6px 8px; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 12px; color: #f9fafb; border: 1px solid #8b5cf6;">
-                        <strong style="color: #a855f7;">Code:</strong> ${entry.nextLine}
-                    </div>
+        if (history.length === 0) {
+            const activityText = isSuggestionsHistory ? "Start coding to see AI suggestions!" : "Start coding to see AI analysis!";
+            historyHTML = `
+                <div style="text-align: center; color: #888; font-style: italic; padding: 20px;">
+                    No history entries yet. ${activityText}
                 </div>
             `;
         } else {
-            // Full display for guess and description history
-            historyHTML += `
-                <div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 8px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                        <span style="color: #569cd6; font-weight: bold;">Entry #${i + 1}</span>
-                        <span style="color: #888; font-size: 10px;">${timeStr}</span>
-                    </div>
-                    <div style="margin-bottom: 5px;">
-                        <strong style="color: #4ade80;">Analysis:</strong><br>
-                        <span style="color: #d4d4d4; line-height: 1.3;">${entry.problemAnalysis}</span>
-                    </div>
-                    <div style="background: #2d2d2d; padding: 4px 6px; border-radius: 3px; font-family: 'Consolas', monospace; font-size: 12px; color: #4ade80;">
-                        <strong>Suggestion:</strong> ${entry.nextLine}
-                    </div>
-                </div>
-            `;
-        }
-    }
-    
-    if (history.length > 5) {
-        historyHTML += `<div style="text-align: center; color: #888; font-size: 10px; font-style: italic;">Showing last 5 of ${history.length} entries</div>`;
-    }
-    
-    historyHTML += `</div>`;
-}
+            historyHTML = `<div style="max-height: 300px; overflow-y: auto; font-size: 12px;">`;
             
-            targetElement.innerHTML = historyHTML;
-            targetElement.setAttribute('data-showing-history', 'true');
+            const entriesToShow = Math.min(5, history.length);
+            for (let i = history.length - 1; i >= history.length - entriesToShow; i--) {
+                const entry = history[i];
+                const timeStr = new Date(entry.timestamp).toLocaleTimeString();
+                
+                if (isSuggestionsHistory) {
+                    historyHTML += `
+                        <div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 8px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <span style="color: #8b5cf6; font-weight: bold;">Suggestion #${i + 1}</span>
+                                <span style="color: #d1d5db; font-size: 10px; font-weight: 500;">${timeStr}</span>
+                            </div>
+                            <div style="background: #374151; padding: 6px 8px; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 12px; color: #f9fafb; border: 1px solid #8b5cf6;">
+                                <strong style="color: #a855f7;">Code:</strong> ${entry.nextLine}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    historyHTML += `
+                        <div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 8px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <span style="color: #569cd6; font-weight: bold;">Entry #${i + 1}</span>
+                                <span style="color: #888; font-size: 10px;">${timeStr}</span>
+                            </div>
+                            <div style="margin-bottom: 5px;">
+                                <strong style="color: #4ade80;">Analysis:</strong><br>
+                                <span style="color: #d4d4d4; line-height: 1.3;">${entry.problemAnalysis}</span>
+                            </div>
+                            <div style="background: #2d2d2d; padding: 4px 6px; border-radius: 3px; font-family: 'Consolas', monospace; font-size: 12px; color: #4ade80;">
+                                <strong>Suggestion:</strong> ${entry.nextLine}
+                            </div>
+                        </div>
+                    `;
+                }
+            }
             
-buttonElement.textContent = 'Hide History';
-
+            if (history.length > 5) {
+                historyHTML += `<div style="text-align: center; color: #888; font-size: 10px; font-style: italic;">Showing last 5 of ${history.length} entries</div>`;
+            }
+            
+            historyHTML += `</div>`;
         }
+                
+        targetElement.innerHTML = historyHTML;
+        targetElement.setAttribute('data-showing-history', 'true');
+        buttonElement.textContent = 'Hide History';
+    }
+}
+function insertSuggestion(type) {
+    if (!window.editor) {
+        addTerminalOutput('Editor not initialized', 'error');
+        return;
     }
 
-    // Insert suggestion into editor with proper indentation
-    function insertSuggestion(type) {
-        if (!window.editor) {
-            addTerminalOutput('Editor not initialized', 'error');
-            return;
-        }
+    const suggestionStartTime = Date.now();
+    
+    // Determine suggestion source
+    let suggestionSource;
+    if (type === 'guess') {
+        suggestionSource = 'ai_guess';
+    } else if (type === 'desc') {
+        suggestionSource = 'correct_description';
+    } else if (type === 'suggestions') {
+        suggestionSource = 'ai_only';
+    }
 
-        currentSession.suggestionClickCount++;
+    currentSession.suggestionClickCount++;
 
-let suggestionText = '';
-if (type === 'guess') {
-    suggestionText = document.getElementById('suggestionGuess').textContent.trim();
-} else if (type === 'desc') {
-    suggestionText = document.getElementById('suggestionDesc').textContent.trim();
-} else if (type === 'suggestions') {
-    suggestionText = document.getElementById('suggestionOnly').textContent.trim();
-}
+    let suggestionText = '';
+    if (type === 'guess') {
+        suggestionText = document.getElementById('suggestionGuess').textContent.trim();
+    } else if (type === 'desc') {
+        suggestionText = document.getElementById('suggestionDesc').textContent.trim();
+    } else if (type === 'suggestions') {
+        suggestionText = document.getElementById('suggestionOnly').textContent.trim();
+    }
 
-        if (!suggestionText || 
-            suggestionText.includes('Start coding...') || 
-            suggestionText.includes('Based on correct problem...') ||
-            suggestionText.includes('No suggestions available') ||
-            suggestionText.includes('spinner')) {
-            addTerminalOutput('No valid suggestion to insert', 'warning');
-            return;
-        }
+    const position = window.editor.getPosition();
 
-        const position = window.editor.getPosition();
-        const model = window.editor.getModel();
+    if (!suggestionText || 
+        suggestionText.includes('Start coding...') || 
+        suggestionText.includes('Based on correct problem...') ||
+        suggestionText.includes('No suggestions available') ||
+        suggestionText.includes('spinner')) {
         
-        const currentLineContent = model.getLineContent(position.lineNumber);
-        const currentIndentation = getCurrentIndentation(currentLineContent);
-        
-        const isAtEndOfLine = position.column > currentLineContent.length;
-        const needsNewLine = currentLineContent.trim() !== '' || !isAtEndOfLine;
-        
-        let processedSuggestion = processSuggestionWithIndentation(suggestionText, currentIndentation);
-        
-        let textToInsert = needsNewLine ? '\n' + processedSuggestion : processedSuggestion;
-        
-        if (!needsNewLine && position.column > 1 && !currentLineContent.endsWith(' ')) {
-            textToInsert = ' ' + textToInsert;
-        }
-
-        window.editor.executeEdits('copilot-suggestion', [{
-            range: {
-                startLineNumber: position.lineNumber,
-                startColumn: position.column,
-                endLineNumber: position.lineNumber,
-                endColumn: position.column
-            },
-            text: textToInsert
-        }]);
-
-        const insertedLines = textToInsert.split('\n');
-        const newLineNumber = position.lineNumber + insertedLines.length - 1;
-        const lastLine = insertedLines[insertedLines.length - 1];
-        const newColumn = insertedLines.length === 1 ? 
-            position.column + textToInsert.length : 
-            lastLine.length + 1;
-        
-        window.editor.setPosition({
-            lineNumber: newLineNumber,
-            column: newColumn
+        // Log failed suggestion interaction
+        logActivity('suggestion_interaction', {
+            start_time: new Date(suggestionStartTime).toISOString(),
+            end_time: new Date().toISOString(),
+            duration: Date.now() - suggestionStartTime,
+            suggestion_type: type,
+            suggestion_source: suggestionSource,
+            suggestion_inserted: false,
+            rejection_reason: 'invalid_suggestion'
         });
-        window.editor.focus();
-
-        if (suggestionText.includes('{') || suggestionText.includes('}') || suggestionText.includes(';')) {
-            setTimeout(() => {
-                window.editor.getAction('editor.action.formatDocument')?.run();
-            }, 100);
-        }
-
-        const sourceType = type === 'guess' ? 'AI Problem Guess' : 
-                          type === 'desc' ? 'Problem Description' : 
-                          'AI Code Suggestions';
-        addTerminalOutput(`Inserted suggestion from ${sourceType}`, 'success');
-        const preview = suggestionText.split('\n')[0].substring(0, 40);
-        addTerminalOutput(`Code: ${preview}${suggestionText.length > 40 ? '...' : ''}`, 'info');
+        addTerminalOutput('No valid suggestion to insert', 'warning');
+        return;
     }
 
+    const model = window.editor.getModel();
+    
+    const currentLineContent = model.getLineContent(position.lineNumber);
+    const currentIndentation = getCurrentIndentation(currentLineContent);
+    
+    const isAtEndOfLine = position.column > currentLineContent.length;
+    const needsNewLine = currentLineContent.trim() !== '' || !isAtEndOfLine;
+    
+    let processedSuggestion = processSuggestionWithIndentation(suggestionText, currentIndentation);
+    
+    let textToInsert = needsNewLine ? '\n' + processedSuggestion : processedSuggestion;
+    
+    if (!needsNewLine && position.column > 1 && !currentLineContent.endsWith(' ')) {
+        textToInsert = ' ' + textToInsert;
+    }
+
+    window.editor.executeEdits('copilot-suggestion', [{
+        range: {
+            startLineNumber: position.lineNumber,
+            startColumn: position.column,
+            endLineNumber: position.lineNumber,
+            endColumn: position.column
+        },
+        text: textToInsert
+    }]);
+
+    const insertedLines = textToInsert.split('\n');
+    const newLineNumber = position.lineNumber + insertedLines.length - 1;
+    const lastLine = insertedLines[insertedLines.length - 1];
+    const newColumn = insertedLines.length === 1 ? 
+        position.column + textToInsert.length : 
+        lastLine.length + 1;
+    
+    window.editor.setPosition({
+        lineNumber: newLineNumber,
+        column: newColumn
+    });
+    window.editor.focus();
+
+    if (suggestionText.includes('{') || suggestionText.includes('}') || suggestionText.includes(';')) {
+        setTimeout(() => {
+            window.editor.getAction('editor.action.formatDocument')?.run();
+        }, 100);
+    }
+
+// Log suggestion interaction with proper timestamps
+    logActivity('suggestion_interaction', {
+        start_time: new Date(suggestionStartTime).toISOString(),
+        end_time: new Date().toISOString(),
+        duration: Date.now() - suggestionStartTime,
+        suggestion_type: type,
+        suggestion_source: suggestionSource,
+        suggestion_inserted: true,
+        suggestion_content: suggestionText.substring(0, 50) + (suggestionText.length > 50 ? '...' : ''),
+        insertion_position: {line: position.lineNumber, column: position.column},
+        suggestion_length: suggestionText.length
+    });
+
+    const sourceType = type === 'guess' ? 'AI Problem Guess' : 
+                      type === 'desc' ? 'Problem Description' : 
+                      'AI Code Suggestions';
+    addTerminalOutput(`Inserted suggestion from ${sourceType}`, 'success');
+    const preview = suggestionText.split('\n')[0].substring(0, 40);
+    addTerminalOutput(`Code: ${preview}${suggestionText.length > 40 ? '...' : ''}`, 'info');
+}
     function getCurrentIndentation(lineContent) {
         const match = lineContent.match(/^(\s*)/);
         return match ? match[1] : '';
@@ -2289,6 +2682,13 @@ function showPeriodicSurvey() {
         return;
     }
     
+    // ACTIVITY LOG: Survey start
+    logActivity('survey_interaction', {
+        survey_type: 'periodic',
+        action: 'survey_started',
+        analysis_count_trigger: surveyData.analysisCount
+    });
+    
     surveyData.pendingSurvey = true;
     blockEditor(true);
     
@@ -2304,7 +2704,6 @@ function showPeriodicSurvey() {
     
     addTerminalOutput(`Survey ${Math.floor(surveyData.analysisCount / surveyData.surveyInterval)} appeared - please complete to continue coding`, 'info');
 }
-
 function showFinalSurvey() {
     if (surveyData.questions.length === 0) {
         console.warn('No survey questions loaded for final survey');
@@ -2312,6 +2711,12 @@ function showFinalSurvey() {
         proceedWithSubmission();
         return;
     }
+    
+    // ACTIVITY LOG: Final survey start
+    logActivity('survey_interaction', {
+        survey_type: 'final',
+        action: 'survey_started'
+    });
     
     blockEditor(true);
     
@@ -2327,7 +2732,6 @@ function showFinalSurvey() {
     
     addTerminalOutput('Please complete the final survey before submitting your code', 'info');
 }
-
 function generateSurveyHTML(questions) {
     return questions.map((question, index) => `
         <div class="survey-question">
@@ -2391,20 +2795,24 @@ async function submitPeriodicSurvey() {
     }
     
     try {
-        // Save to backend
         await saveSurveyResponses(responses, 'periodic');
         
-        // Store locally
         surveyData.surveyResponses.push({
             timestamp: new Date().toISOString(),
             analysisCount: surveyData.analysisCount,
             responses: responses
         });
         
-        // Hide modal and unblock editor
         document.getElementById('surveyModal').classList.add('hidden');
         blockEditor(false);
         surveyData.pendingSurvey = false;
+        
+        // ACTIVITY LOG: Survey completed
+        logActivity('survey_interaction', {
+            survey_type: 'periodic',
+            action: 'survey_completed',
+            responses_count: responses.length
+        });
         
         addTerminalOutput('Survey completed successfully - you can continue coding!', 'success');
         
@@ -2423,7 +2831,6 @@ async function submitFinalSurvey() {
     }
     
     try {
-        // Save final survey
         await saveSurveyResponses(responses, 'final');
         
         surveyData.finalSurveyResponse = {
@@ -2431,12 +2838,16 @@ async function submitFinalSurvey() {
             responses: responses
         };
         
-        // Hide modal
         document.getElementById('finalSurveyModal').classList.add('hidden');
         
-        addTerminalOutput('Final survey completed - proceeding with code submission...', 'success');
+        // ACTIVITY LOG: Final survey completed
+        logActivity('survey_interaction', {
+            survey_type: 'final',
+            action: 'survey_completed',
+            responses_count: responses.length
+        });
         
-        // Proceed with actual code submission
+        addTerminalOutput('Final survey completed - proceeding with code submission...', 'success');
         proceedWithSubmission();
         
     } catch (error) {
@@ -2445,6 +2856,8 @@ async function submitFinalSurvey() {
         blockEditor(false);
     }
 }
+
+
 
 function collectSurveyResponses(modalId) {
     const modal = document.getElementById(modalId);
@@ -2640,15 +3053,35 @@ async function loadSurveyQuestions() {
        increaseFontBtn.disabled = currentFontSize >= maxFontSize;
    }
 
-   function increaseFontSize() {
-       updateFontSize(currentFontSize + 1);
-       addTerminalOutput(`Font size increased to ${currentFontSize}px`, 'info');
-   }
+function increaseFontSize() {
+    const oldSize = currentFontSize;
+    updateFontSize(currentFontSize + 1);
+    
+    // ACTIVITY LOG: Font size change
+    logActivity('font_size_change', {
+        action: 'increase',
+        from_size: oldSize,
+        to_size: currentFontSize,
+        trigger: 'button_click'
+    });
+    
+    addTerminalOutput(`Font size increased to ${currentFontSize}px`, 'info');
+}
 
-   function decreaseFontSize() {
-       updateFontSize(currentFontSize - 1);
-       addTerminalOutput(`Font size decreased to ${currentFontSize}px`, 'info');
-   }
+function decreaseFontSize() {
+    const oldSize = currentFontSize;
+    updateFontSize(currentFontSize - 1);
+    
+    // ACTIVITY LOG: Font size change
+    logActivity('font_size_change', {
+        action: 'decrease',
+        from_size: oldSize,
+        to_size: currentFontSize,
+        trigger: 'button_click'
+    });
+    
+    addTerminalOutput(`Font size decreased to ${currentFontSize}px`, 'info');
+}
 
    // Terminal and execution functionality
    const runButton = document.getElementById("runButton");
@@ -2661,10 +3094,20 @@ async function loadSurveyQuestions() {
 async function executeCode() {
     if (isRunning) return;
     
+    const executionStartTime = Date.now();
     currentSession.compilerClickCount++;
     
     const code = window.editor.getValue();
     if (!code) {
+        logActivity('code_execution', {
+            start_time: new Date(executionStartTime).toISOString(),
+            end_time: new Date().toISOString(),
+            duration: Date.now() - executionStartTime,
+            execution_trigger: 'run_button',
+            execution_result: 'no_code',
+            output_summary: 'No code to execute',
+            error_message: 'No code provided'
+        });
         addTerminalOutput('No code to execute. Please write some code first.', 'warning');
         return;
     }
@@ -2674,17 +3117,51 @@ async function executeCode() {
     runButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Running...</div>';
 
     try {
+        let executionResult, outputSummary, errorMessage = '';
+        
         if (currentSession.programmingLanguage === 'javascript') {
-            // Execute JavaScript in browser (existing functionality)
-            await executeJavaScriptInBrowser(code);
+            const result = await executeJavaScriptInBrowser(code);
+            executionResult = result.success ? 'success' : 'error';
+            outputSummary = result.output || 'No output';
+            errorMessage = result.error || '';
         } else if (currentSession.programmingLanguage === 'python') {
-            // Execute Python on backend
-            await executePythonOnBackend(code);
+            const result = await executePythonOnBackend(code);
+            executionResult = result.success ? 'success' : 'error';
+            outputSummary = result.output || 'No output';
+            errorMessage = result.error || '';
         } else {
-            addTerminalOutput(`${currentSession.programmingLanguage} execution not supported yet`, 'warning');
+            executionResult = 'unsupported';
+            outputSummary = `${currentSession.programmingLanguage} execution not supported yet`;
+            errorMessage = 'Language not supported';
+            addTerminalOutput(outputSummary, 'warning');
         }
+        
+        const executionEndTime = Date.now();
+        logActivity('code_execution', {
+            start_time: new Date(executionStartTime).toISOString(),
+            end_time: new Date(executionEndTime).toISOString(),
+            duration: executionEndTime - executionStartTime,
+            execution_trigger: 'run_button',
+            code_length: code.length,
+            execution_number: currentSession.compilerClickCount,
+            execution_result: executionResult,
+            output_summary: outputSummary.substring(0, 100) + (outputSummary.length > 100 ? '...' : ''),
+            error_message: errorMessage.substring(0, 100) + (errorMessage.length > 100 ? '...' : '')
+        });
+        
     } catch (error) {
         console.error('Execution error:', error);
+        logActivity('code_execution', {
+            start_time: new Date(executionStartTime).toISOString(),
+            end_time: new Date().toISOString(),
+            duration: Date.now() - executionStartTime,
+            execution_trigger: 'run_button',
+            code_length: code.length,
+            execution_number: currentSession.compilerClickCount,
+            execution_result: 'error',
+            output_summary: 'Execution failed',
+            error_message: error.message
+        });
         addTerminalOutput('Execution failed:', 'error');
         addTerminalOutput(error.message, 'error');
     } finally {
@@ -2700,19 +3177,29 @@ async function executeJavaScriptInBrowser(code) {
     const originalError = console.error;
     const originalWarn = console.warn;
     
+    let executionSuccess = true;
+    let executionOutput = '';
+    let executionError = '';
+    
     console.log = function(...args) {
         originalLog.apply(this, args);
-        addTerminalOutput(args.join(' '));
+        const output = args.join(' ');
+        executionOutput += output + '\n';
+        addTerminalOutput(output);
     };
     
     console.error = function(...args) {
         originalError.apply(this, args);
-        addTerminalOutput(args.join(' '), 'error');
+        const error = args.join(' ');
+        executionError += error + '\n';
+        addTerminalOutput(error, 'error');
     };
     
     console.warn = function(...args) {
         originalWarn.apply(this, args);
-        addTerminalOutput(args.join(' '), 'warning');
+        const warning = args.join(' ');
+        executionOutput += 'Warning: ' + warning + '\n';
+        addTerminalOutput(warning, 'warning');
     };
 
     try {
@@ -2723,21 +3210,36 @@ async function executeJavaScriptInBrowser(code) {
         const run = new Function(["canvas"], code);
         run(canvas);
 
-        const finishTime = Date.now();
-        addTerminalOutput(`Process finished (${finishTime-startTime}ms)`, 'execution-time');
+        const executionTime = Date.now() - startTime;
+        
+        addTerminalOutput(`Process finished (${executionTime}ms)`, 'execution-time');
         addTerminalOutput(`Ready for more code!`, 'prompt');
+        
+        return {
+            success: true,
+            output: executionOutput,
+            error: executionError
+        };
+        
     } catch (error) {
+        executionSuccess = false;
+        executionError += error.message;
+        
         addTerminalOutput('JavaScript error:', 'error');
         addTerminalOutput(error.message, 'error');
+        
+        return {
+            success: false,
+            output: executionOutput,
+            error: executionError
+        };
+        
     } finally {
         console.log = originalLog;
         console.error = originalError;
         console.warn = originalWarn;
     }
 }
-
-
-
 async function executePythonOnBackend(code) {
     try {
         addTerminalOutput(`Running Python on server...`, 'prompt');
@@ -2762,11 +3264,11 @@ async function executePythonOnBackend(code) {
 
         const result = await response.json();
         const finishTime = Date.now();
+        const executionTime = finishTime - startTime;
         
         if (result.success) {
             if (result.output) {
                 addTerminalOutput('Output:', 'success');
-                // Split output into lines and display each
                 result.output.split('\n').forEach(line => {
                     if (line.trim()) {
                         addTerminalOutput(line, 'normal');
@@ -2777,7 +3279,7 @@ async function executePythonOnBackend(code) {
                 addTerminalOutput('Warnings:', 'warning');
                 addTerminalOutput(result.error, 'warning');
             }
-            addTerminalOutput(`Python execution completed (${finishTime-startTime}ms)`, 'execution-time');
+            addTerminalOutput(`Python execution completed (${executionTime}ms)`, 'execution-time');
         } else {
             addTerminalOutput('Python error:', 'error');
             addTerminalOutput(result.error, 'error');
@@ -2789,11 +3291,24 @@ async function executePythonOnBackend(code) {
         
         addTerminalOutput(`Ready for more code!`, 'prompt');
         
+        return {
+            success: result.success,
+            output: result.output || '',
+            error: result.error || ''
+        };
+        
     } catch (error) {
         addTerminalOutput('Network/Server error:', 'error');
         addTerminalOutput(error.message, 'error');
+        
+        return {
+            success: false,
+            output: '',
+            error: error.message
+        };
     }
 }
+
 async function submitToDatabase() {
     if (!currentSession.sessionId) {
         addTerminalOutput('No active session to submit', 'error');
@@ -2941,6 +3456,11 @@ async function submitToDatabase() {
    }
 
    function clearTerminal() {
+        // ACTIVITY LOG: Terminal clear
+    logActivity('terminal_clear', {
+        trigger: 'clear_button',
+        terminal_lines_cleared: document.getElementById('terminalOutput').children.length
+    });
        const terminalOutput = document.getElementById('terminalOutput');
        terminalOutput.innerHTML = `
            <div class="output-line">
@@ -3044,15 +3564,31 @@ if (historySuggestionsButton) {
        document.removeEventListener('mousemove', handleTerminalResize);
    }
 
-   // Prevent accidental page close
-   window.addEventListener('beforeunload', (e) => {
-       if (currentSession.sessionId) {
-           e.preventDefault();
-           e.returnValue = 'You have an active secure coding session! Submit your code to Database before leaving to save your work.';
-           return e.returnValue;
-       }
-   });
-// Prevent double initialization
+// Prevent accidental page close
+window.addEventListener('beforeunload', (e) => {
+    if (currentSession.sessionId) {
+        // ACTIVITY LOG: Page unload attempt
+        logActivity('page_unload_attempt', {
+            unload_reason: 'beforeunload_triggered',
+            session_duration_seconds: (Date.now() - sessionStartTime) / 1000
+        });
+        
+        // Upload any remaining activities synchronously
+        if (activityBuffer.length > 0) {
+            navigator.sendBeacon('/log-activities', JSON.stringify({
+                activities: activityBuffer,
+                session_id: currentSession.sessionId
+            }));
+        }
+        
+        e.preventDefault();
+        e.returnValue = 'You have an active secure coding session! Submit your code to Database before leaving to save your work.';
+        return e.returnValue;
+    }
+});
+
+
+   // Prevent double initialization
 let isInitializing = false;
 let isInitialized = false;
 
@@ -3085,6 +3621,36 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
     console.log('DOM already ready, initializing immediately...');
     safeInitialize();
 }
+
+
+// Enhanced tab visibility tracking with time-based logging
+document.addEventListener('visibilitychange', function() {
+    const currentTime = Date.now();
+    const newVisibilityState = document.hidden ? 'hidden' : 'visible';
+    
+    if (newVisibilityState === 'hidden' && isTabVisible) {
+        // User switched away from tab
+        lastFocusTime = currentTime;
+        logActivity('tab_switching', {
+            start_time: new Date(currentTime).toISOString(),
+            switch_type: 'tab_away',
+            visibility_state: 'hidden'
+        });
+    } else if (newVisibilityState === 'visible' && !isTabVisible) {
+    // User returned to tab
+    const awayDuration = lastFocusTime ? currentTime - lastFocusTime : 0;
+        logActivity('tab_switching', {
+            start_time: new Date(lastFocusTime).toISOString(),
+            end_time: new Date(currentTime).toISOString(),
+            duration: awayDuration,
+            switch_type: 'tab_return',
+            away_duration_ms: awayDuration,
+            visibility_state: 'visible'
+        });
+    }
+    
+    isTabVisible = newVisibilityState === 'visible';
+});
 </script>
 
 </body>

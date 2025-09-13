@@ -21,8 +21,7 @@ from firebase_admin import credentials, db
 from fastapi.responses import HTMLResponse, RedirectResponse
 import asyncio
 import shlex
-from typing import Dict, Any
-
+from typing import List, Dict, Optional, Any
 
 
 # Load environment variables
@@ -383,6 +382,30 @@ class AuthResponse(BaseModel):
     session_id: str
     paste_allowed: int = 1  # ADD THIS LINE
 
+class ActivityEntry(BaseModel):
+    timestamp: str
+    activity_type: str
+    activity_details: Dict[str, Any]
+    session_context: Dict[str, Any]
+    
+    class Config:
+        # Allow arbitrary field types for complex nested data
+        arbitrary_types_allowed = True
+
+class ActivitySummary(BaseModel):
+    total_keystrokes: int = 0
+    total_code_executions: int = 0
+    total_suggestion_clicks: int = 0
+    total_history_views: int = 0
+    focus_time_seconds: float = 0
+    away_time_seconds: float = 0
+    font_changes: int = 0
+    terminal_clears: int = 0
+    surveys_completed: int = 0
+    peak_code_lines: int = 0
+    total_ai_analyses: int = 0
+
+
 class AIGuessEntry(BaseModel):
     problem_analysis: str  # FIXED: Renamed from existing_code for clarity
     next_line_suggestion: str
@@ -399,9 +422,11 @@ class SessionLog(BaseModel):
     code_submit_timestamp: Optional[str] = None
     submitted_full_code: Optional[str] = None
     ai_guess_history: List[AIGuessEntry] = []
-    correct_description_history: Optional[List[AIGuessEntry]] = None  # Only for condition 1
-    suggestions_only_history: Optional[List[AIGuessEntry]] = None  # For condition 3
+    correct_description_history: Optional[List[AIGuessEntry]] = None
+    suggestions_only_history: Optional[List[AIGuessEntry]] = None
     problem_description: Optional[str] = None
+    activity_log: List[ActivityEntry] = []  # NEW
+    activity_summary: ActivitySummary = ActivitySummary()  # NEW
 
 
 class SurveyResponse(BaseModel):
@@ -558,17 +583,17 @@ async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: 
             'survey_data': survey_data
         }
         
-        # Create AI guesses log data - FIXED field mapping
+        # Create AI guesses log data
         ai_guesses = {}
         for i, entry in enumerate(session_log.ai_guess_history, 1):
             ai_guesses[str(i)] = {
-                'ai_analysis': entry.problem_analysis,  # FIXED: Use correct field name
+                'ai_analysis': entry.problem_analysis,
                 'timestamp': entry.timestamp,
                 'next_line_suggestion': entry.next_line_suggestion,
                 'full_code_suggestion': entry.full_code_suggestion
             }
         
-# Create logs structure
+        # Create logs structure
         logs_data = {
             'ai_guesses': ai_guesses
         }
@@ -578,7 +603,7 @@ async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: 
             correct_guesses = {}
             for i, entry in enumerate(session_log.correct_description_history, 1):
                 correct_guesses[str(i)] = {
-                    'correct_analysis': entry.problem_analysis,  # FIXED: Use correct field name
+                    'correct_analysis': entry.problem_analysis,
                     'timestamp': entry.timestamp,
                     'next_line_suggestion': entry.next_line_suggestion,
                     'full_code_suggestion': entry.full_code_suggestion
@@ -596,14 +621,20 @@ async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: 
                 }
             logs_data['suggestions_only'] = suggestions_only
         
+        # NEW: Create activity log structure
+        activity_log_data = {
+            'entries': [entry.dict() for entry in session_log.activity_log],
+            'summary': session_log.activity_summary.dict()
+        }
+        
         # Prepare the complete user data
         user_data = {
             'summary': summary_data,
-            'logs': logs_data
+            'logs': logs_data,
+            'activity_log': activity_log_data  # NEW
         }
         
         # Save to Firebase using the hierarchical structure
-        # Path: condition_1/assignment_key/user_id
         user_ref = firebase_db.child(f'{condition_path}/{session_log.assignment_id}/{session_log.user_id}')
         user_ref.set(user_data)
         
@@ -613,7 +644,6 @@ async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: 
     except Exception as e:
         logger.error(f"Firebase save failed: {e}")
         return False
-
 # OpenAI Configuration
 API_KEY = os.getenv("OPENAI_API_KEY")
 if not API_KEY:
@@ -809,6 +839,9 @@ class ExecuteResponse(BaseModel):
     output: str
     error: str
     execution_time: float
+
+
+
 
 @app.post("/analyze", response_model=CodeResponse)
 async def analyze_code(request: CodeRequest):
@@ -1350,6 +1383,177 @@ async def get_survey_config():
             ],
             feedback_interval=4
         )
+    
+
+class ActivityLogRequest(BaseModel):
+    activities: List[ActivityEntry]
+    session_id: str
+
+@app.post("/log-activities")
+async def log_activities(request: ActivityLogRequest):
+    """Log user activities during the session"""
+    try:
+        session_id = request.session_id
+        
+        if not session_id:
+            raise HTTPException(status_code=400, detail="Session ID is required")
+        
+        # Validate that activities list is not empty
+        if not request.activities:
+            logger.warning(f"Empty activities list for session {session_id}")
+            return {"status": "success", "logged_activities": 0, "message": "No activities to log"}
+        
+        if session_id not in active_sessions:
+            logger.warning(f"Session {session_id} not found in active sessions - creating minimal session for logging")
+            active_sessions[session_id] = SessionLog(
+                user_id="unknown",
+                assignment_id="unknown", 
+                session_id=session_id,
+                condition=0,
+                code_start_timestamp=datetime.now().isoformat(),
+                activity_log=[],
+                activity_summary=ActivitySummary()
+            )
+        
+        session_log = active_sessions[session_id]
+        
+        # Add activities to session log
+        session_log.activity_log.extend(request.activities)
+        
+        # Update activity summary
+        for activity in request.activities:
+            activity_type = activity.activity_type
+            try:
+                # Code execution activities
+                if activity_type == "code_execution":
+                    session_log.activity_summary.total_code_executions += 1
+                
+                # New enhanced editing activities
+                elif activity_type in ["code_editing_insert", "code_editing_delete", "code_editing_modify"]:
+                    session_log.activity_summary.total_keystrokes += 1
+                    # Update peak lines safely
+                    if isinstance(activity.session_context, dict) and "total_lines" in activity.session_context:
+                        try:
+                            total_lines = int(activity.session_context["total_lines"])
+                            session_log.activity_summary.peak_code_lines = max(
+                                session_log.activity_summary.peak_code_lines,
+                                total_lines
+                            )
+                        except (ValueError, TypeError):
+                            logger.warning(f"Invalid total_lines value: {activity.session_context.get('total_lines')}")
+                
+                # Suggestion and history interactions
+                elif activity_type == "suggestion_interaction":
+                    session_log.activity_summary.total_suggestion_clicks += 1
+                elif activity_type == "history_interaction":
+                    session_log.activity_summary.total_history_views += 1
+                
+                # AI analysis activities
+                elif activity_type == "ai_analysis_trigger":
+                    session_log.activity_summary.total_ai_analyses += 1
+                elif activity_type == "ai_analysis_complete":
+                    # Don't double count - already counted in trigger
+                    pass
+                # Idle tracking
+                elif activity_type == "idle":
+                    pass  # Just log, no summary update needed
+
+                # Page unload attempts
+                elif activity_type == "page_unload_attempt":
+                    pass  # Security logging, no summary update needed
+                
+                # UI interaction activities
+                elif activity_type == "font_size_change":
+                    session_log.activity_summary.font_changes += 1
+                elif activity_type == "terminal_clear":
+                    session_log.activity_summary.terminal_clears += 1
+                
+                # Survey activities (simplified)
+                elif activity_type == "survey_interaction":
+                    action = activity.activity_details.get("action")
+                    if action == "survey_completed":
+                        session_log.activity_summary.surveys_completed += 1
+                    # Only log survey start/end, ignore other survey variants
+                
+                # Tab switching activities
+                elif activity_type == "tab_switching":
+                    if activity.activity_details.get("switch_type") == "tab_return":
+                        # Track away time safely
+                        away_duration = activity.activity_details.get("away_duration_ms", 0)
+                        try:
+                            away_duration = float(away_duration) / 1000  # Convert to seconds
+                            session_log.activity_summary.away_time_seconds += away_duration
+                        except (ValueError, TypeError):
+                            logger.warning(f"Invalid away_duration_ms value: {away_duration}")
+                
+                # Session management activities
+                elif activity_type in ["session_start", "session_end"]:
+                    pass  # These are tracked differently
+                
+                # Idle and focus tracking
+                elif activity_type == "idle":
+                    pass  # Handled by duration tracking
+                
+                # Paste attempts
+                elif activity_type == "paste_attempt":
+                    pass  # Security logging, no summary update needed
+                
+                # Page unload attempts
+                elif activity_type == "page_unload_attempt":
+                    pass  # Security logging
+                
+                # Legacy activity types (keep for backward compatibility)
+                elif activity_type == "code_edit":
+                    session_log.activity_summary.total_keystrokes += 1
+                elif activity_type == "suggestion_click":
+                    session_log.activity_summary.total_suggestion_clicks += 1
+                elif activity_type == "history_view":
+                    session_log.activity_summary.total_history_views += 1
+                elif activity_type == "tab_visibility_change":
+                    if activity.activity_details.get("visibility_state") == "visible":
+                        # Track away time safely
+                        away_duration = activity.activity_details.get("away_duration_ms", 0)
+                        try:
+                            away_duration = float(away_duration) / 1000  # Convert to seconds
+                            session_log.activity_summary.away_time_seconds += away_duration
+                        except (ValueError, TypeError):
+                            logger.warning(f"Invalid away_duration_ms value: {away_duration}")
+                
+                # Execution output activities
+                elif activity_type == "execution_output":
+                    pass  # Already counted in code_execution
+                
+                # Unknown activity types
+                else:
+                    logger.debug(f"Unknown activity type: {activity_type}")
+                    
+            except Exception as activity_error:
+                logger.error(f"Error processing activity {activity_type}: {activity_error}")
+                # Continue processing other activities
+        
+        # Calculate focus time safely
+        try:
+            import time
+            current_time = time.time()
+            session_start_time = datetime.fromisoformat(session_log.code_start_timestamp.replace('Z', '+00:00')).timestamp()
+            total_session_time = current_time - session_start_time
+            session_log.activity_summary.focus_time_seconds = max(0, total_session_time - session_log.activity_summary.away_time_seconds)
+        except Exception as time_error:
+            logger.warning(f"Could not calculate focus time: {time_error}")
+        
+        # Save updated session locally
+        save_session_to_local(session_log)
+        
+        return {"status": "success", "logged_activities": len(request.activities)}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Activity logging error: {str(e)}")
+        return {"status": "error", "message": f"Activity logging failed: {str(e)}", "logged_activities": 0}
+    
+
+
 
 @app.post("/submit-survey")
 async def submit_survey(request: SurveySubmission):
