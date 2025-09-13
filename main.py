@@ -22,6 +22,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 import asyncio
 import shlex
 from typing import List, Dict, Optional, Any
+import smtplib
+import email
+from email import encoders
+import traceback
 
 
 # Load environment variables
@@ -194,6 +198,70 @@ def get_assignment_file_path(assignment_key):
     
     assignment_file = Path("assignment") / f"{base_key}.txt"
     return assignment_file if assignment_file.exists() else None
+
+
+def send_notification_email(submission_data):
+    """Send notification email when a user submits their code"""
+    if not os.getenv("EMAIL_ENABLED", "false").lower() == "true":
+        logger.info("Email notifications disabled")
+        return False
+    
+    try:
+        # Email configuration from environment variables
+        smtp_server = os.getenv("SMTP_SERVER")
+        smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        email_address = os.getenv("EMAIL_ADDRESS")
+        email_password = os.getenv("EMAIL_PASSWORD")
+        notification_email = os.getenv("NOTIFICATION_EMAIL")
+        
+        if not all([smtp_server, email_address, email_password, notification_email]):
+            logger.error("Missing email configuration in environment variables")
+            return False
+        
+        # Email body
+        body = f"""New code submission received:
+
+User ID: {submission_data['user_id']}
+Assignment Key: {submission_data['assignment_key']}
+Session ID: {submission_data['session_id']}
+Condition: {submission_data['condition']}
+Programming Language: {submission_data['programming_language']}
+Submission Time: {submission_data['timestamp']}
+Submission ID: {submission_data['submission_id']}
+
+Code Length: {len(submission_data['code'])} characters
+Suggestions Clicked: {submission_data['suggestion_clicked']}
+Compiler Runs: {submission_data['compiler_clicked']}
+Firebase Status: {submission_data['firebase_status']}
+
+Code Preview (First 200 characters):
+{submission_data['code'][:200]}{'...' if len(submission_data['code']) > 200 else ''}
+
+---
+This is an automated notification from the AI Code Assistant Research Platform.
+"""
+        
+        # Create message using email.message
+        msg = email.message.EmailMessage()
+        msg['From'] = email_address
+        msg['To'] = notification_email
+        msg['Subject'] = f"New Code Submission - User {submission_data['user_id']}"
+        msg.set_content(body)
+        
+        # Send email
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
+        server.login(email_address, email_password)
+        server.send_message(msg)
+        server.quit()
+        
+        logger.info(f"Notification email sent successfully for submission {submission_data['submission_id']}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to send notification email: {str(e)}")
+        logger.error(f"Email error traceback: {traceback.format_exc()}")
+        return False
 
 def detect_programming_language(code):
     """
@@ -1185,6 +1253,33 @@ async def submit_code(request: SubmitRequest):
             
         except Exception as save_error:
             logger.error(f"Failed to save submission file: {save_error}")
+        
+        # NEW: Send notification email
+        try:
+            email_data = {
+                'user_id': user_id,
+                'assignment_key': assignment_key,
+                'session_id': session_id,
+                'condition': session_log.condition if session_log else 'unknown',
+                'programming_language': programming_language,
+                'timestamp': timestamp,
+                'submission_id': submission_id,
+                'code': code,
+                'suggestion_clicked': suggestion_clicked,
+                'compiler_clicked': compiler_clicked,
+                'firebase_status': firebase_status
+            }
+            
+            # Send email asynchronously to avoid blocking the response
+            import asyncio
+            loop = asyncio.get_event_loop()
+            loop.run_in_executor(None, send_notification_email, email_data)
+            
+            logger.info(f"Email notification queued for submission {submission_id}")
+            
+        except Exception as email_error:
+            logger.error(f"Failed to send email notification: {email_error}")
+            # Don't fail the submission if email fails
         
         return SubmitResponse(
             status="success",
