@@ -581,7 +581,7 @@
         <!-- Consent Form Screen -->
         <div class="consent-screen" id="consentScreen">
             <div class="consent-header">
-                <div class="consent-title">Copilot Clone Research Study</div>
+                <div class="consent-title">GUIDE Research Study</div>
 
 <div class="consent-subtitle">
     Investigating Student Interaction Behaviors with AI Code Assistants - Please read carefully before proceeding
@@ -591,23 +591,23 @@
  <div class="consent-content">
     <div class="consent-section">
         <h3>📋 What is this? Why are we asking for your participation?</h3>
-        <p>We are asking you to participate in a research study titled "Copilot Clone." We will describe the study to you and answer any questions that come up. The Faculty Advisor for this study is Stephen MacNeil, CIS Department at Temple University. We are interested in participants who are at least 18 years old, speak and read fluent English, and have access to a computer with an internet connection.</p>
+        <p>We are asking you to participate in a research study titled "GUIDE (Guessing IDE)". We will describe the study to you and answer any questions that come up. The Faculty Advisor for this study is Stephen MacNeil, CIS Department at Temple University. We are interested in participants who are at least 18 years old, speak and read fluent English, and have access to a computer with an internet connection.</p>
     </div>
 
     <div class="consent-section">
         <h3>🔬 What is this study about?</h3>
-        <p>The purpose of this study is to understand how your trust and coding behavior may change when you see an AI coding assistant present its reasoning behind suggestions in real time. Based on the code you write, the system will generate its best guess of the programming problem you are solving and provide next-line code suggestions to assist you in completing the assignment.</p>
-        <p>You will use a tool similar to GitHub Copilot within a VS Code–style environment to complete multiple programming tasks. The tool will log your coding practices and interactions, which will be stored in an anonymized database.</p>
+        <p>The purpose of this study is to understand how your trust and coding behavior may change when you see an AI shows its reasoning behind suggestions in real time. Based on the code you write, the system will generate its best guess of the programming problem you are solving and provide next-line code suggestions to assist you in completing the assignment.</p>
+        <p>You will use a tool similar to GitHub Copilot within a VS Code–style coding editor to complete multiple programming tasks. The tool will log your coding practices and interactions, which will be stored in an anonymized database. Additionally, the system will collect survey data during the study to gain insights into your experience.</p>
     </div>
 
     <div class="consent-section">
         <h3>💻 What will you do in this study?</h3>
-        <p>If you agree to participate in this study, you will begin by accessing it through a provided link. You will then complete multiple coding assignments (LARP1 and LADP2) using this platform in a self-paced environment on your own computer. The study session will last about 120 minutes at max in total, with approximately 90 minutes spent on coding assignments. You can complete the study remotely at your convenience.</p>
+        <p>If you agree to participate in this study, you will begin by accessing it through a provided link. You will then complete multiple coding assignments using GUIDE (Guessing IDE). The study session will last about 15 minutes at max. You can complete the study remotely at your convenience.</p>
     </div>
 
     <div class="consent-section">
         <h3>⚠️ What risks are associated with this study?</h3>
-        <p><strong>Inappropriate Content:</strong> Generative AI models such as GPT-4o have the potential to generate inappropriate suggestions. While we have not observed any inappropriate or harmful content, we will continue to monitor the AI system throughout the experiment.</p>
+        <p><strong>Inappropriate Content:</strong> Generative AI models such as GPT-4o have the potential to generate inappropriate suggestions. While we have not observed any inappropriate or harmful content, we will continue to monitor the AI system throughout the study.</p>
         <p><strong>Potential for Incorrect Code Suggestions:</strong> GPT-4o may generate incorrect suggestions when providing code. It is important that you verify any generated code yourself before accepting suggestions.</p>
         <p><strong>Loss of Confidentiality:</strong> Data we collect during the coding assignments, such as your interactions with AI-generated suggestions, will only be shared among members of our research team. Data will be deleted at the conclusion of our study.</p>
         <p>Research records will be kept confidential to the extent allowed by law. Research records may also be reviewed by the Temple Institutional Review Board (IRB).</p>
@@ -640,7 +640,7 @@
 
     <div class="highlight-box">
         <h3>📞 Who can you contact if there are additional questions?</h3>
-        <p>If you have any additional questions, you may contact the researchers (Ian Tyler Applebaum: ian.tyler@temple.edu, rahad.arman.nabid@temple.edu). You may also contact Stephen MacNeil, the Faculty Advisor, at stephen.macneil@temple.edu</p>
+        <p>If you have any additional questions, you may contact the researchers (Rahad Arman Nabid: rahad.arman.nabid@temple.edu, Ian Tyler Applebaum: ian.tyler@temple.edu). You may also contact Stephen MacNeil, the Faculty Advisor, at stephen.macneil@temple.edu</p>
         <p>Participants may contact Temple's Human Research Protection Program through the IRB at irb@temple.edu or (215) 707-3390.</p>
         <p><strong>Protocol Number:</strong> 32615<br><strong>PI Name:</strong> Stephen MacNeil</p>
     </div>

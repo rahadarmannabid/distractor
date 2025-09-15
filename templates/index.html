@@ -970,9 +970,8 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 8px;
-    flex-wrap: nowrap;
-    width: 100%;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 
 .likert-option {
@@ -980,8 +979,7 @@
     flex-direction: column;
     align-items: center;
     flex: 1;
-    min-width: 80px;
-    max-width: 120px;
+    min-width: 100px;
 }
 
 .likert-option input[type="radio"] {
@@ -1108,98 +1106,6 @@
     text-align: center;
 }
 
-
-/* Split Survey Modal Layout */
-.survey-container-split {
-    background: #1e1e1e;
-    border: 1px solid #3c3c3c;
-    border-radius: 8px;
-    max-width: 1200px;
-    width: 95%;
-    max-height: 85vh;
-    box-shadow: 
-        0 25px 50px rgba(0,0,0,0.9),
-        0 0 0 1px rgba(255,255,255,0.05),
-        inset 0 1px 0 rgba(255,255,255,0.1);
-    animation: modalSlideIn 0.4s ease-out;
-    display: flex;
-    overflow: hidden;
-}
-
-.survey-left-panel {
-    flex: 1;
-    padding: 32px;
-    border-right: 1px solid #3c3c3c;
-    overflow-y: auto;
-    min-width: 400px;
-}
-
-.survey-right-panel {
-    flex: 1;
-    padding: 32px;
-    overflow-y: auto;
-    background: linear-gradient(135deg, #252526, #2d2d30);
-    min-width: 400px;
-}
-
-.survey-history-header {
-    margin-bottom: 20px;
-    padding-bottom: 15px;
-    border-bottom: 1px solid #444;
-}
-
-.survey-history-header h3 {
-    color: #f97316;
-    margin-bottom: 5px;
-    font-size: 18px;
-}
-
-.survey-history-header p {
-    color: #cccccc;
-    font-size: 12px;
-    line-height: 1.4;
-}
-
-.survey-history-content {
-    max-height: 500px;
-    overflow-y: auto;
-}
-
-.survey-history-entry {
-    background: #1a1a1a;
-    border: 1px solid #333;
-    border-radius: 6px;
-    padding: 15px;
-    margin-bottom: 15px;
-    border-left: 3px solid #f97316;
-}
-
-.survey-history-meta {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-    font-size: 11px;
-    color: #888;
-}
-
-.survey-history-analysis {
-    margin-bottom: 10px;
-    font-size: 12px;
-    line-height: 1.4;
-    color: #fbbf24;
-}
-
-.survey-history-suggestion {
-    background: #2d2d2d;
-    padding: 8px;
-    border-radius: 4px;
-    font-family: 'Consolas', monospace;
-    font-size: 11px;
-    color: #4ade80;
-    border: 1px solid #404040;
-}
-
 /* Fix for Condition 3 suggestions */
         #suggestionsOnlySection .suggestion-button {
             background: linear-gradient(135deg, #2d1b69, #3d2777);
@@ -1298,7 +1204,7 @@
     <div id="application" class="hidden">
         <div id="content">
             <div id="header" class="header">
-                <h2>AI Coding Assistant</h2>
+                <h2>Code Editor</h2>
                 <div class="url-display" id="urlDisplay">Loading...</div>
                 <div class="font-controls">
                     <button class="font-button" id="decreaseFontBtn">A-</button>
@@ -1340,7 +1246,7 @@
         <div id="resize-sidebar"></div>
 <div id="sidebar">
     <div class="header">
-        <h2>AI Analysis</h2>
+        <h2>AI Coding Assistant</h2>
     </div>
     <div class="sidebar-content">
         <!-- AI Problem Guess Section (Conditions 1 & 2) -->
@@ -1365,7 +1271,7 @@
         <div class="sidebar-section hidden" id="problemDescSection">
             <div class="green-box">
                 <div class="sidebar-header">
-                    <h3>Correct Problem Description</h3>
+                    <h3>Original Problem Description</h3>
                     <div id="history-desc" class="history-button">View History</div>
                 </div>
                 <div id="problemDescriptionDisplay" style="line-height: 1.6;">Loading problem description...</div>
@@ -1402,32 +1308,18 @@
 
     <!-- Survey Modal -->
 <div id="surveyModal" class="survey-modal hidden">
-    <div class="survey-container-split">
-        <!-- Left Side: Survey Questions -->
-        <div class="survey-left-panel">
-            <div class="survey-header">
-                <h2>Quick Survey</h2>
-                <p>Please rate your agreement with the following statements:</p>
-            </div>
-            
-            <div class="survey-content">
-                <div id="surveyQuestions"></div>
-                
-                <div class="survey-controls">
-                    <button id="submitSurvey" class="survey-submit-btn" disabled>Submit Survey</button>
-                    <p class="survey-note">You must answer all questions to continue coding.</p>
-                </div>
-            </div>
+    <div class="survey-container">
+        <div class="survey-header">
+            <h2>Quick Survey</h2>
+            <p>Please rate your agreement with the following statements:</p>
         </div>
         
-        <!-- Right Side: AI Analysis History -->
-        <div class="survey-right-panel">
-            <div class="survey-history-header">
-                <h3>Your AI Analysis History</h3>
-                <p>Review your recent AI interactions while answering the survey:</p>
-            </div>
-            <div class="survey-history-content" id="surveyHistoryDisplay">
-                <!-- History will be populated here -->
+        <div class="survey-content">
+            <div id="surveyQuestions"></div>
+            
+            <div class="survey-controls">
+                <button id="submitSurvey" class="survey-submit-btn" disabled>Submit Survey</button>
+                <p class="survey-note">You must answer all questions to continue coding.</p>
             </div>
         </div>
     </div>
@@ -1511,10 +1403,7 @@ const ACTIVITY_BATCH_SIZE = 10;
     surveyResponses: [],
     finalSurveyResponse: null,
     pendingSurvey: false,
-    questions: [],
-    isSubmitting: false,
-    currentQuestionIndex: 0,  // ADD THIS
-    currentResponses: []      // ADD THIS
+    questions: []
 };
 
     // UI Elements
@@ -2781,10 +2670,8 @@ function incrementAnalysisCount() {
     surveyData.analysisCount++;
     console.log(`Analysis count: ${surveyData.analysisCount}`);
     
-    // Check if survey should be shown (but not during submission process)
-    if (surveyData.analysisCount % surveyData.surveyInterval === 0 && 
-        !surveyData.pendingSurvey && 
-        !surveyData.isSubmitting) {  // ADD THIS CONDITION
+    // Check if survey should be shown
+    if (surveyData.analysisCount % surveyData.surveyInterval === 0 && !surveyData.pendingSurvey) {
         showPeriodicSurvey();
     }
 }
@@ -2805,77 +2692,19 @@ function showPeriodicSurvey() {
     surveyData.pendingSurvey = true;
     blockEditor(true);
     
-    // Show modal first
+    // Generate survey HTML
+    const questionsHTML = generateSurveyHTML(surveyData.questions);
+    document.getElementById('surveyQuestions').innerHTML = questionsHTML;
+    
+    // Show modal
     document.getElementById('surveyModal').classList.remove('hidden');
     
-    // THEN populate history panel (so the DOM elements exist)
-    populateSurveyHistory();
-    
-    // THEN setup single question survey
-    setupSingleQuestionSurvey('surveyModal', submitPeriodicSurvey);
+    // Add event listeners
+    setupSurveyEventListeners('surveyModal', 'submitSurvey', submitPeriodicSurvey);
     
     addTerminalOutput(`Survey ${Math.floor(surveyData.analysisCount / surveyData.surveyInterval)} appeared - please complete to continue coding`, 'info');
 }
-
-function populateSurveyHistory() {
-    const historyContainer = document.getElementById('surveyHistoryDisplay');
-    
-    if (!historyContainer) return;
-    
-    let historyHTML = '';
-    
-    // Get recent analysis history (last 5 entries)
-    const recentHistory = currentSession.guessHistory.slice(-5).reverse();
-    
-    if (recentHistory.length === 0) {
-        historyHTML = `
-            <div style="text-align: center; color: #888; font-style: italic; padding: 40px 20px;">
-                No AI analysis history yet.<br>
-                Start coding to see AI interactions here.
-            </div>
-        `;
-    } else {
-        historyHTML = `<div style="font-size: 12px;">`;
-        
-        recentHistory.forEach((entry, index) => {
-            const timeStr = new Date(entry.timestamp).toLocaleTimeString();
-            const entryNumber = currentSession.guessLogCount - index;
-            
-            historyHTML += `
-                <div class="survey-history-entry">
-                    <div class="survey-history-meta">
-                        <span><strong>Analysis #${entryNumber}</strong></span>
-                        <span>${timeStr}</span>
-                    </div>
-                    <div class="survey-history-analysis">
-                        <strong>AI Analysis:</strong><br>
-                        ${entry.problemAnalysis}
-                    </div>
-                    <div class="survey-history-suggestion">
-                        <strong>Suggestion:</strong> ${entry.nextLine}
-                    </div>
-                </div>
-            `;
-        });
-        
-        if (currentSession.guessLogCount > 5) {
-            historyHTML += `
-                <div style="text-align: center; color: #888; font-size: 10px; font-style: italic; margin-top: 10px;">
-                    Showing last 5 of ${currentSession.guessLogCount} total AI interactions
-                </div>
-            `;
-        }
-        
-        historyHTML += `</div>`;
-    }
-    
-    historyContainer.innerHTML = historyHTML;
-}
-
 function showFinalSurvey() {
-    // Set submission flag to prevent any periodic surveys
-    surveyData.isSubmitting = true;
-    
     if (surveyData.questions.length === 0) {
         console.warn('No survey questions loaded for final survey');
         // If no questions, proceed with submission
@@ -2891,144 +2720,70 @@ function showFinalSurvey() {
     
     blockEditor(true);
     
-
-    // Use single question survey for final survey too
-    setupSingleQuestionSurvey('finalSurveyModal', submitFinalSurvey);
+    // Generate survey HTML
+    const questionsHTML = generateSurveyHTML(surveyData.questions);
+    document.getElementById('finalSurveyQuestions').innerHTML = questionsHTML;
     
     // Show final survey modal
     document.getElementById('finalSurveyModal').classList.remove('hidden');
     
-        
+    // Add event listeners
+    setupSurveyEventListeners('finalSurveyModal', 'submitFinalSurvey', submitFinalSurvey);
+    
     addTerminalOutput('Please complete the final survey before submitting your code', 'info');
 }
-function generateSingleQuestionHTML(questionIndex) {
-    const question = surveyData.questions[questionIndex];
-    const totalQuestions = surveyData.questions.length;
-    
-    return `
-        <div class="survey-question-container">
-            <div class="survey-progress" style="margin-bottom: 20px; text-align: center;">
-                <span style="color: #cccccc; font-size: 14px;">Question ${questionIndex + 1} of ${totalQuestions}</span>
-                <div style="width: 100%; height: 6px; background: #333; border-radius: 3px; margin-top: 8px; overflow: hidden;">
-                    <div style="height: 100%; background: linear-gradient(135deg, #569cd6, #4a86c7); width: ${((questionIndex + 1) / totalQuestions) * 100}%; transition: width 0.3s ease;"></div>
+function generateSurveyHTML(questions) {
+    return questions.map((question, index) => `
+        <div class="survey-question">
+            <div class="survey-question-text">Q${index + 1}: ${question}</div>
+            <div class="likert-scale">
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_1" name="question_${index}" value="1">
+                    <label for="q${index}_1">Strongly<br>Disagree</label>
                 </div>
-            </div>
-            
-            <div class="survey-question">
-                <div class="survey-question-text">Q${questionIndex + 1}: ${question}</div>
-                <div class="likert-scale">
-                    <div class="likert-option">
-                        <input type="radio" id="q${questionIndex}_1" name="question_${questionIndex}" value="1">
-                        <label for="q${questionIndex}_1">Strongly<br>Disagree</label>
-                    </div>
-                    <div class="likert-option">
-                        <input type="radio" id="q${questionIndex}_2" name="question_${questionIndex}" value="2">
-                        <label for="q${questionIndex}_2">Disagree</label>
-                    </div>
-                    <div class="likert-option">
-                        <input type="radio" id="q${questionIndex}_3" name="question_${questionIndex}" value="3">
-                        <label for="q${questionIndex}_3">Neutral</label>
-                    </div>
-                    <div class="likert-option">
-                        <input type="radio" id="q${questionIndex}_4" name="question_${questionIndex}" value="4">
-                        <label for="q${questionIndex}_4">Agree</label>
-                    </div>
-                    <div class="likert-option">
-                        <input type="radio" id="q${questionIndex}_5" name="question_${questionIndex}" value="5">
-                        <label for="q${questionIndex}_5">Strongly<br>Agree</label>
-                    </div>
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_2" name="question_${index}" value="2">
+                    <label for="q${index}_2">Disagree</label>
                 </div>
-            </div>
-            
-            <div class="survey-navigation" style="text-align: center; margin-top: 25px; display: flex; justify-content: space-between; gap: 15px;">
-                <button id="prevQuestion" class="survey-submit-btn" style="flex: 1; max-width: 120px;" ${questionIndex === 0 ? 'disabled' : ''}>Previous</button>
-                <button id="nextQuestion" class="survey-submit-btn" style="flex: 1; max-width: 120px;" disabled>Next</button>
-                <button id="finishSurvey" class="survey-submit-btn hidden" style="flex: 1; max-width: 120px;">Finish Survey</button>
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_3" name="question_${index}" value="3">
+                    <label for="q${index}_3">Neutral</label>
+                </div>
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_4" name="question_${index}" value="4">
+                    <label for="q${index}_4">Agree</label>
+                </div>
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_5" name="question_${index}" value="5">
+                    <label for="q${index}_5">Strongly<br>Agree</label>
+                </div>
             </div>
         </div>
-    `;
+    `).join('');
 }
 
-function setupSingleQuestionSurvey(modalId, submitFunction) {
-    surveyData.currentQuestionIndex = 0;
-    surveyData.currentResponses = new Array(surveyData.questions.length).fill(null);
+function setupSurveyEventListeners(modalId, submitButtonId, submitFunction) {
+    const modal = document.getElementById(modalId);
+    const submitButton = document.getElementById(submitButtonId);
     
-    function showCurrentQuestion() {
-        const questionHTML = generateSingleQuestionHTML(surveyData.currentQuestionIndex);
-        document.getElementById(`${modalId.replace('Modal', '')}Questions`).innerHTML = questionHTML;
+    // Check if all questions are answered
+    function checkSurveyCompletion() {
+        const totalQuestions = surveyData.questions.length;
+        const answeredQuestions = modal.querySelectorAll('input[type="radio"]:checked').length;
         
-        // Restore previous answer if it exists
-        const previousAnswer = surveyData.currentResponses[surveyData.currentQuestionIndex];
-        if (previousAnswer !== null) {
-            const radioButton = document.querySelector(`input[name="question_${surveyData.currentQuestionIndex}"][value="${previousAnswer}"]`);
-            if (radioButton) {
-                radioButton.checked = true;
-            }
-        }
-        
-        setupQuestionListeners();
+        submitButton.disabled = answeredQuestions < totalQuestions;
     }
     
-    function setupQuestionListeners() {
-        // Radio button listeners
-        document.querySelectorAll('input[type="radio"]').forEach(radio => {
-            radio.addEventListener('change', (e) => {
-                const questionIndex = surveyData.currentQuestionIndex;
-                surveyData.currentResponses[questionIndex] = parseInt(e.target.value);
-                updateNavigationButtons();
-            });
-        });
-        
-        // Navigation listeners
-        const prevBtn = document.getElementById('prevQuestion');
-        const nextBtn = document.getElementById('nextQuestion');
-        const finishBtn = document.getElementById('finishSurvey');
-        
-        if (prevBtn) {
-            prevBtn.addEventListener('click', () => {
-                if (surveyData.currentQuestionIndex > 0) {
-                    surveyData.currentQuestionIndex--;
-                    showCurrentQuestion();
-                }
-            });
-        }
-        
-        if (nextBtn) {
-            nextBtn.addEventListener('click', () => {
-                if (surveyData.currentQuestionIndex < surveyData.questions.length - 1) {
-                    surveyData.currentQuestionIndex++;
-                    showCurrentQuestion();
-                }
-            });
-        }
-        
-        if (finishBtn) {
-            finishBtn.addEventListener('click', submitFunction);
-        }
-    }
+    // Add change listeners to all radio buttons
+    modal.querySelectorAll('input[type="radio"]').forEach(radio => {
+        radio.addEventListener('change', checkSurveyCompletion);
+    });
     
-    function updateNavigationButtons() {
-        const nextBtn = document.getElementById('nextQuestion');
-        const finishBtn = document.getElementById('finishSurvey');
-        const currentResponse = surveyData.currentResponses[surveyData.currentQuestionIndex];
-        
-        if (currentResponse !== null) {
-            if (surveyData.currentQuestionIndex === surveyData.questions.length - 1) {
-                if (nextBtn) nextBtn.classList.add('hidden');
-                if (finishBtn) {
-                    finishBtn.classList.remove('hidden');
-                    finishBtn.disabled = false;
-                }
-            } else {
-                if (nextBtn) nextBtn.disabled = false;
-            }
-        } else {
-            if (nextBtn) nextBtn.disabled = true;
-            if (finishBtn) finishBtn.disabled = true;
-        }
-    }
+    // Submit button listener
+    submitButton.onclick = submitFunction;
     
-    showCurrentQuestion();
+    // Initial check
+    checkSurveyCompletion();
 }
 
 async function submitPeriodicSurvey() {
@@ -3105,14 +2860,15 @@ async function submitFinalSurvey() {
 
 
 function collectSurveyResponses(modalId) {
+    const modal = document.getElementById(modalId);
     const responses = [];
     
     for (let i = 0; i < surveyData.questions.length; i++) {
-        const responseValue = surveyData.currentResponses[i];
-        if (responseValue !== null) {
+        const checkedRadio = modal.querySelector(`input[name="question_${i}"]:checked`);
+        if (checkedRadio) {
             responses.push({
                 question: surveyData.questions[i],
-                response: responseValue
+                response: parseInt(checkedRadio.value)
             });
         }
     }
@@ -3447,29 +3203,14 @@ async function executeJavaScriptInBrowser(code) {
     };
 
     try {
-    const canvas = document.createElement("canvas");
-    addTerminalOutput(`Running JavaScript...`, 'prompt');
-    const startTime = Date.now();
+        const canvas = document.createElement("canvas");
+        addTerminalOutput(`Running JavaScript...`, 'prompt');
+        const startTime = Date.now();
 
-    // Create a safer execution environment that still allows output
-    try {
-        // Override print function to use console.log instead of window.print
-        const originalPrint = window.print;
-        window.print = function(...args) {
-            console.log(...args);
-        };
-        
         const run = new Function(["canvas"], code);
         run(canvas);
-        
-        // Restore original print function
-        window.print = originalPrint;
-        
-    } catch (execError) {
-        throw execError;
-    }
 
-    const executionTime = Date.now() - startTime;
+        const executionTime = Date.now() - startTime;
         
         addTerminalOutput(`Process finished (${executionTime}ms)`, 'execution-time');
         addTerminalOutput(`Ready for more code!`, 'prompt');
@@ -3593,12 +3334,9 @@ async function submitToDatabase() {
 
     // Store original function for survey completion
     originalSubmitToDatabase = async function() {
-        // Set submission flag to prevent periodic surveys
-        surveyData.isSubmitting = true;
-        
-        // FINAL AI ANALYSIS BEFORE SUBMISSION (without counting for surveys)
-        addTerminalOutput('Performing final analysis before submission...', 'info');
-        // Don't call analyzeCurrentCode() here to avoid triggering periodic surveys
+        // FINAL AI ANALYSIS BEFORE SUBMISSION
+        addTerminalOutput('Performing final AI analysis before submission...', 'info');
+        await analyzeCurrentCode();
         
         submitButton.disabled = true;
         submitButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Submitting & Logging out...</div>';
