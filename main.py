@@ -509,6 +509,7 @@ class SurveySubmission(BaseModel):
     responses: List[SurveyResponse]
     analysis_count: int
     timestamp: str
+    ai_history_context: Optional[Dict[str, Any]] = None  # NEW: Add AI history context
 
 class SurveyConfig(BaseModel):
     questions: List[str]
@@ -630,6 +631,34 @@ def save_session_to_local(session_log: SessionLog):
     except Exception as e:
         logger.error(f"Failed to save session log locally: {e}")
 
+def extract_survey_ai_history_summary(session_log: SessionLog, survey_data: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Extract a summary of AI history context for surveys"""
+    if not survey_data:
+        return {}
+    
+    summary = {
+        'total_surveys_completed': len(survey_data.get('periodic_surveys', [])) + (1 if survey_data.get('final_survey') else 0),
+        'ai_analyses_per_survey': []
+    }
+    
+    # Track AI analyses at each survey point
+    for survey in survey_data.get('periodic_surveys', []):
+        summary['ai_analyses_per_survey'].append({
+            'survey_timestamp': survey.get('timestamp'),
+            'analyses_count_at_survey': survey.get('analysisCount', 0),
+            'ai_history_captured': True
+        })
+    
+    if survey_data.get('final_survey'):
+        summary['final_survey_ai_context'] = {
+            'timestamp': survey_data['final_survey'].get('timestamp'),
+            'total_analyses_at_completion': session_log.activity_summary.total_ai_analyses,
+            'ai_history_captured': True
+        }
+    
+    return summary
+
+
 async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: int, compiler_clicked: int, programming_language: str = "unknown", survey_data: Dict[str, Any] = None):
     """Save complete session data to Firebase using the new hierarchical structure"""
     if not firebase_db:
@@ -648,7 +677,8 @@ async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: 
             'suggestion_clicked': suggestion_clicked,
             'compiler_clicked': compiler_clicked,
             'end_time': session_log.code_submit_timestamp,
-            'survey_data': survey_data
+            'survey_data': survey_data,
+            'survey_ai_history_context': extract_survey_ai_history_summary(session_log, survey_data)  # NEW
         }
         
         # Create AI guesses log data
@@ -1652,14 +1682,18 @@ async def log_activities(request: ActivityLogRequest):
 
 @app.post("/submit-survey")
 async def submit_survey(request: SurveySubmission):
-    """Submit survey responses"""
+    """Submit survey responses with AI history context"""
     try:
         # Get session log
         session_log = None
         if request.session_id in active_sessions:
             session_log = active_sessions[request.session_id]
         
-        # Save survey data locally
+        # Enhance request with AI history context if not provided
+        if not request.ai_history_context and session_log:
+            request.ai_history_context = extract_ai_history_context(session_log)
+        
+        # Save survey data locally with AI history context
         surveys_dir = Path(os.getenv("SUBMISSIONS_DIR", "submissions")) / "surveys"
         surveys_dir.mkdir(exist_ok=True)
         
@@ -1667,17 +1701,61 @@ async def submit_survey(request: SurveySubmission):
         with open(survey_file, 'w', encoding='utf-8') as f:
             json.dump(request.dict(), f, indent=2, default=str)
         
-        logger.info(f"Survey saved: {request.user_id} - {request.survey_type} survey at analysis {request.analysis_count}")
+        logger.info(f"Survey with AI history saved: {request.user_id} - {request.survey_type} survey at analysis {request.analysis_count}")
         
         return {
             "status": "success",
             "message": f"{request.survey_type.title()} survey saved successfully",
-            "timestamp": request.timestamp
+            "timestamp": request.timestamp,
+            "ai_history_entries": len(request.ai_history_context.get('ai_guess_history', []) if request.ai_history_context else 0)
         }
         
     except Exception as e:
         logger.error(f"Survey submission error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Survey submission failed: {str(e)}")
+
+def extract_ai_history_context(session_log: SessionLog) -> Dict[str, Any]:
+    """Extract AI history context for survey submission"""
+    context = {
+        'condition': session_log.condition,
+        'total_ai_analyses': len(session_log.ai_guess_history),
+        'ai_guess_history': [],
+        'timestamp_range': {
+            'start': session_log.code_start_timestamp,
+            'survey_time': datetime.now().isoformat()
+        }
+    }
+    
+    # Add AI guess history (available for all conditions)
+    for entry in session_log.ai_guess_history:
+        context['ai_guess_history'].append({
+            'timestamp': entry.timestamp,
+            'problem_analysis': entry.problem_analysis,
+            'next_line_suggestion': entry.next_line_suggestion,
+            'analysis_type': entry.analysis_type
+        })
+    
+    # Add condition-specific history
+    if session_log.condition == 1 and session_log.correct_description_history:
+        context['correct_description_history'] = []
+        for entry in session_log.correct_description_history:
+            context['correct_description_history'].append({
+                'timestamp': entry.timestamp,
+                'problem_analysis': entry.problem_analysis,
+                'next_line_suggestion': entry.next_line_suggestion,
+                'analysis_type': entry.analysis_type
+            })
+    
+    elif session_log.condition == 3 and session_log.suggestions_only_history:
+        context['suggestions_only_history'] = []
+        for entry in session_log.suggestions_only_history:
+            context['suggestions_only_history'].append({
+                'timestamp': entry.timestamp,
+                'next_line_suggestion': entry.next_line_suggestion,
+                'analysis_type': entry.analysis_type
+            })
+    
+    return context
 
 if __name__ == "__main__":
     import uvicorn

@@ -910,7 +910,7 @@
     border: 1px solid #3c3c3c;
     border-radius: 8px;
     padding: 32px;
-    max-width: 700px;
+    max-width: 1000px;
     width: 95%;
     max-height: 85vh;
     overflow-y: auto;
@@ -1175,6 +1175,79 @@
     to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
 }
 
+/* AI History Section in Survey */
+.ai-history-section {
+    margin-bottom: 25px;
+    padding: 20px;
+    background: linear-gradient(135deg, #1a1a1a, #252525);
+    border: 1px solid #3c3c3c;
+    border-radius: 8px;
+    border-left: 4px solid #569cd6;
+}
+
+.ai-history-section h3 {
+    color: #569cd6 !important;
+    font-size: 16px;
+    margin-bottom: 15px;
+    text-align: center;
+}
+
+.ai-history-section h4 {
+    color: #22c55e !important;
+    font-size: 13px;
+    margin-bottom: 10px;
+}
+
+/* Side-by-side survey layout */
+.survey-content-container {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+}
+
+.ai-history-panel {
+    flex: 0 0 35%;
+    max-width: 35%;
+}
+
+.survey-questions-panel {
+    flex: 0 0 65%;
+    max-width: 65%;
+    min-width: 0;
+}
+
+/* Update existing AI History Section for side panel */
+.ai-history-section {
+    margin-bottom: 0;
+    padding: 20px;
+    background: linear-gradient(135deg, #1a1a1a, #252525);
+    border: 1px solid #3c3c3c;
+    border-radius: 8px;
+    border-left: 4px solid #569cd6;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Responsive design for smaller screens */
+@media (max-width: 900px) {
+    .survey-content-container {
+        flex-direction: column;
+    }
+    
+    .ai-history-panel {
+        flex: none;
+        max-width: none;
+        width: 100%;
+    }
+    
+    .ai-history-section {
+        position: static;
+        margin-bottom: 20px;
+    }
+}
+
+
     </style>
 </head>
 <body>
@@ -1315,7 +1388,10 @@
         </div>
         
         <div class="survey-content">
-            <div id="surveyQuestions"></div>
+            <div class="survey-content-container">
+                <div class="ai-history-panel" id="surveyAIHistory"></div>
+                <div class="survey-questions-panel" id="surveyQuestions"></div>
+            </div>
             
             <div class="survey-controls">
                 <button id="submitSurvey" class="survey-submit-btn" disabled>Submit Survey</button>
@@ -1334,7 +1410,10 @@
         </div>
         
         <div class="survey-content">
-            <div id="finalSurveyQuestions"></div>
+            <div class="survey-content-container">
+                <div class="ai-history-panel" id="finalSurveyAIHistory"></div>
+                <div class="survey-questions-panel" id="finalSurveyQuestions"></div>
+            </div>
             
             <div class="survey-controls">
                 <button id="submitFinalSurvey" class="survey-submit-btn" disabled>Complete Survey & Submit Code</button>
@@ -1405,6 +1484,9 @@ const ACTIVITY_BATCH_SIZE = 10;
     pendingSurvey: false,
     questions: []
 };
+
+// ADD submission state flag
+let isSubmissionInProgress = false;
 
     // UI Elements
     const loadingScreen = document.getElementById('loadingScreen');
@@ -2670,8 +2752,10 @@ function incrementAnalysisCount() {
     surveyData.analysisCount++;
     console.log(`Analysis count: ${surveyData.analysisCount}`);
     
-    // Check if survey should be shown
-    if (surveyData.analysisCount % surveyData.surveyInterval === 0 && !surveyData.pendingSurvey) {
+    // Check if survey should be shown - BUT NOT during submission process
+    if (surveyData.analysisCount % surveyData.surveyInterval === 0 && 
+        !surveyData.pendingSurvey && 
+        !isSubmissionInProgress) {
         showPeriodicSurvey();
     }
 }
@@ -2694,7 +2778,11 @@ function showPeriodicSurvey() {
     
     // Generate survey HTML
     const questionsHTML = generateSurveyHTML(surveyData.questions);
+    const aiHistoryContext = collectAIHistoryContext();
+    const historyHTML = generateAIHistoryDisplayHTML(aiHistoryContext);
+
     document.getElementById('surveyQuestions').innerHTML = questionsHTML;
+    document.getElementById('surveyAIHistory').innerHTML = historyHTML;
     
     // Show modal
     document.getElementById('surveyModal').classList.remove('hidden');
@@ -2722,7 +2810,11 @@ function showFinalSurvey() {
     
     // Generate survey HTML
     const questionsHTML = generateSurveyHTML(surveyData.questions);
+    const aiHistoryContext = collectAIHistoryContext();
+    const historyHTML = generateAIHistoryDisplayHTML(aiHistoryContext);
+
     document.getElementById('finalSurveyQuestions').innerHTML = questionsHTML;
+    document.getElementById('finalSurveyAIHistory').innerHTML = historyHTML;
     
     // Show final survey modal
     document.getElementById('finalSurveyModal').classList.remove('hidden');
@@ -2762,20 +2854,187 @@ function generateSurveyHTML(questions) {
     `).join('');
 }
 
+function generateAIHistoryDisplayHTML(aiHistoryContext) {
+    const condition = currentSession.condition;
+    
+    if (!aiHistoryContext || !aiHistoryContext.ai_guess_history || aiHistoryContext.ai_guess_history.length === 0) {
+        const conditionText = condition === 1 ? "AI analysis and correct descriptions" : 
+                             condition === 2 ? "AI analysis" : 
+                             "AI code suggestions";
+        return `
+            <div class="ai-history-section">
+                <h3 style="color: #569cd6; margin-bottom: 15px;">AI Interaction History</h3>
+                <div style="background: #2d2d2d; padding: 15px; border-radius: 6px; margin-bottom: 20px; color: #888; text-align: center;">
+                    No AI interactions recorded yet. Start coding to see ${conditionText}.
+                </div>
+            </div>
+        `;
+    }
+    
+    let historyTitle = "AI Interaction History";
+    if (condition === 1) {
+        historyTitle = "AI Analysis & Correct Descriptions";
+    } else if (condition === 2) {
+        historyTitle = "AI Problem Analysis";
+    } else if (condition === 3) {
+        historyTitle = "AI Code Suggestions";
+    }
+    
+    let historyHTML = `
+        <div class="ai-history-section">
+            <h3 style="color: #569cd6; margin-bottom: 15px;">${historyTitle} (${aiHistoryContext.ai_guess_history.length} analyses)</h3>
+            <div style="background: #2d2d2d; padding: 15px; border-radius: 6px; margin-bottom: 20px; flex: 1; overflow-y: auto;">
+    `;
+    
+    // CONDITION 1: Show AI analysis + correct descriptions
+    if (condition === 1) {
+        const recentInteractions = aiHistoryContext.ai_guess_history.slice(-2);
+        
+        // Show AI Problem Guess
+        historyHTML += `<h4 style="color: #f97316; font-size: 12px; margin-bottom: 10px;">AI Problem Guess (Last 2)</h4>`;
+        recentInteractions.forEach((interaction, index) => {
+            const timeStr = new Date(interaction.timestamp).toLocaleTimeString();
+            const analysisNumber = aiHistoryContext.ai_guess_history.length - recentInteractions.length + index + 1;
+            
+            historyHTML += `
+                <div style="border-bottom: 1px solid #444; padding: 8px 0; margin-bottom: 8px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                        <span style="color: #f97316; font-weight: bold; font-size: 11px;">Analysis #${analysisNumber}</span>
+                        <span style="color: #888; font-size: 10px;">${timeStr}</span>
+                    </div>
+                    <div style="margin-bottom: 5px;">
+                        <strong style="color: #f97316; font-size: 10px;">Problem:</strong><br>
+                        <span style="color: #d4d4d4; font-size: 10px; line-height: 1.3;">${interaction.problem_analysis}</span>
+                    </div>
+                    <div style="background: #2d1b0e; padding: 4px 6px; border-radius: 3px; border-left: 3px solid #f97316;">
+                        <span style="font-family: 'Consolas', monospace; font-size: 10px; color: #fbbf24;">${interaction.next_line_suggestion}</span>
+                    </div>
+                </div>
+            `;
+        });
+        
+        // Show Correct Description Suggestions
+        if (aiHistoryContext.correct_description_history && aiHistoryContext.correct_description_history.length > 0) {
+            historyHTML += `
+                <div style="border-top: 2px solid #22c55e; margin-top: 15px; padding-top: 15px;">
+                    <h4 style="color: #22c55e; font-size: 12px; margin-bottom: 10px;">Correct Problem Suggestions (Last 2)</h4>
+            `;
+            
+            const recentCorrect = aiHistoryContext.correct_description_history.slice(-2);
+            recentCorrect.forEach((interaction, index) => {
+                const timeStr = new Date(interaction.timestamp).toLocaleTimeString();
+                const analysisNumber = aiHistoryContext.correct_description_history.length - recentCorrect.length + index + 1;
+                
+                historyHTML += `
+                    <div style="border-bottom: 1px solid #333; padding: 8px 0; margin-bottom: 8px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span style="color: #22c55e; font-weight: bold; font-size: 11px;">Correct #${analysisNumber}</span>
+                            <span style="color: #888; font-size: 10px;">${timeStr}</span>
+                        </div>
+                        <div style="background: #0e2f1e; padding: 4px 6px; border-radius: 3px; border-left: 3px solid #22c55e;">
+                            <span style="font-family: 'Consolas', monospace; font-size: 10px; color: #4ade80;">${interaction.next_line_suggestion}</span>
+                        </div>
+                    </div>
+                `;
+            });
+            historyHTML += `</div>`;
+        }
+    }
+    
+    // CONDITION 2: Show only AI problem analysis
+    else if (condition === 2) {
+        const recentInteractions = aiHistoryContext.ai_guess_history.slice(-3);
+        
+        recentInteractions.forEach((interaction, index) => {
+            const timeStr = new Date(interaction.timestamp).toLocaleTimeString();
+            const analysisNumber = aiHistoryContext.ai_guess_history.length - recentInteractions.length + index + 1;
+            
+            historyHTML += `
+                <div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="color: #f97316; font-weight: bold; font-size: 12px;">Analysis #${analysisNumber}</span>
+                        <span style="color: #888; font-size: 10px;">${timeStr}</span>
+                    </div>
+                    <div style="margin-bottom: 8px;">
+                        <strong style="color: #4ade80; font-size: 11px;">Problem Analysis:</strong><br>
+                        <span style="color: #d4d4d4; font-size: 11px; line-height: 1.3;">${interaction.problem_analysis}</span>
+                    </div>
+                    <div style="background: #1e1e1e; padding: 6px 8px; border-radius: 4px; border-left: 3px solid #f97316;">
+                        <strong style="color: #f97316; font-size: 11px;">Suggestion:</strong> 
+                        <span style="font-family: 'Consolas', monospace; font-size: 11px; color: #fbbf24;">${interaction.next_line_suggestion}</span>
+                    </div>
+                </div>
+            `;
+        });
+    }
+    
+    // CONDITION 3: Show only AI code suggestions (no problem analysis)
+    else if (condition === 3) {
+        if (aiHistoryContext.suggestions_only_history && aiHistoryContext.suggestions_only_history.length > 0) {
+            const recentSuggestions = aiHistoryContext.suggestions_only_history.slice(-4);
+            
+            recentSuggestions.forEach((interaction, index) => {
+                const timeStr = new Date(interaction.timestamp).toLocaleTimeString();
+                const analysisNumber = aiHistoryContext.suggestions_only_history.length - recentSuggestions.length + index + 1;
+                
+                historyHTML += `
+                    <div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <span style="color: #8b5cf6; font-weight: bold; font-size: 12px;">Suggestion #${analysisNumber}</span>
+                            <span style="color: #888; font-size: 10px;">${timeStr}</span>
+                        </div>
+                        <div style="background: #2d1b69; padding: 6px 8px; border-radius: 4px; border-left: 3px solid #8b5cf6;">
+                            <span style="font-family: 'Consolas', monospace; font-size: 11px; color: #e9d5ff;">${interaction.next_line_suggestion}</span>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+    }
+    
+    // Show count information
+    const totalCount = condition === 3 ? 
+        (aiHistoryContext.suggestions_only_history?.length || 0) : 
+        aiHistoryContext.ai_guess_history.length;
+    const showingCount = condition === 1 ? 2 : condition === 2 ? 3 : 4;
+    
+    if (totalCount > showingCount) {
+        historyHTML += `
+            <div style="text-align: center; margin-top: 10px; padding-top: 10px; border-top: 1px solid #444;">
+                <span style="color: #888; font-size: 10px; font-style: italic;">
+                    Showing last ${Math.min(showingCount, totalCount)} of ${totalCount} total ${condition === 3 ? 'suggestions' : 'analyses'}
+                </span>
+            </div>
+        `;
+    }
+    
+    historyHTML += `
+            </div>
+        </div>
+    `;
+    
+    return historyHTML;
+}
+
+
 function setupSurveyEventListeners(modalId, submitButtonId, submitFunction) {
     const modal = document.getElementById(modalId);
     const submitButton = document.getElementById(submitButtonId);
     
+    // Handle both periodic and final survey modals
+    const questionsPanelId = modalId === 'surveyModal' ? 'surveyQuestions' : 'finalSurveyQuestions';
+    const questionsPanel = document.getElementById(questionsPanelId);
+    
     // Check if all questions are answered
     function checkSurveyCompletion() {
         const totalQuestions = surveyData.questions.length;
-        const answeredQuestions = modal.querySelectorAll('input[type="radio"]:checked').length;
+        const answeredQuestions = questionsPanel.querySelectorAll('input[type="radio"]:checked').length;
         
         submitButton.disabled = answeredQuestions < totalQuestions;
     }
     
-    // Add change listeners to all radio buttons
-    modal.querySelectorAll('input[type="radio"]').forEach(radio => {
+    // Add change listeners to all radio buttons in the questions panel
+    questionsPanel.querySelectorAll('input[type="radio"]').forEach(radio => {
         radio.addEventListener('change', checkSurveyCompletion);
     });
     
@@ -2807,14 +3066,18 @@ async function submitPeriodicSurvey() {
         blockEditor(false);
         surveyData.pendingSurvey = false;
         
-        // ACTIVITY LOG: Survey completed
+        // ACTIVITY LOG: Survey completed with AI history
         logActivity('survey_interaction', {
             survey_type: 'periodic',
             action: 'survey_completed',
-            responses_count: responses.length
+            responses_count: responses.length,
+            ai_history_included: true,
+            ai_analyses_at_survey: surveyData.analysisCount
         });
         
+        const aiHistoryCount = currentSession.guessHistory.length;
         addTerminalOutput('Survey completed successfully - you can continue coding!', 'success');
+        addTerminalOutput(`AI History: ${aiHistoryCount} analyses captured with survey`, 'info');
         
     } catch (error) {
         console.error('Survey submission error:', error);
@@ -2840,14 +3103,18 @@ async function submitFinalSurvey() {
         
         document.getElementById('finalSurveyModal').classList.add('hidden');
         
-        // ACTIVITY LOG: Final survey completed
+        // ACTIVITY LOG: Final survey completed with AI history
         logActivity('survey_interaction', {
             survey_type: 'final',
             action: 'survey_completed',
-            responses_count: responses.length
+            responses_count: responses.length,
+            ai_history_included: true,
+            total_session_analyses: surveyData.analysisCount
         });
         
+        const aiHistoryCount = currentSession.guessHistory.length;
         addTerminalOutput('Final survey completed - proceeding with code submission...', 'success');
+        addTerminalOutput(`Final AI History: ${aiHistoryCount} total analyses captured`, 'info');
         proceedWithSubmission();
         
     } catch (error) {
@@ -2876,8 +3143,41 @@ function collectSurveyResponses(modalId) {
     return responses;
 }
 
+
+// Add this function to collect AI history context
+function collectAIHistoryContext() {
+    const context = {
+        condition: currentSession.condition,
+        timestamp: new Date().toISOString(),
+        total_analyses: surveyData.analysisCount,
+        ai_guess_history: currentSession.guessHistory.map(entry => ({
+            timestamp: entry.timestamp,
+            problem_analysis: entry.problemAnalysis,
+            next_line_suggestion: entry.nextLine
+        }))
+    };
+    
+    // Add condition-specific history
+    if (currentSession.condition === 1 && currentSession.descHistory) {
+        context.correct_description_history = currentSession.descHistory.map(entry => ({
+            timestamp: entry.timestamp,
+            problem_analysis: entry.problemAnalysis,
+            next_line_suggestion: entry.nextLine
+        }));
+    } else if (currentSession.condition === 3 && currentSession.suggestionsHistory) {
+        context.suggestions_only_history = currentSession.suggestionsHistory.map(entry => ({
+            timestamp: entry.timestamp,
+            next_line_suggestion: entry.nextLine
+        }));
+    }
+    
+    return context;
+}
+
 async function saveSurveyResponses(responses, surveyType) {
     try {
+        const aiHistoryContext = collectAIHistoryContext();
+        
         const response = await fetch('/submit-survey', {
             method: 'POST',
             headers: {
@@ -2890,7 +3190,8 @@ async function saveSurveyResponses(responses, surveyType) {
                 survey_type: surveyType,
                 responses: responses,
                 analysis_count: surveyData.analysisCount,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
+                ai_history_context: aiHistoryContext  // NEW: Include AI history
             })
         });
 
@@ -2899,10 +3200,18 @@ async function saveSurveyResponses(responses, surveyType) {
         }
 
         const result = await response.json();
-        console.log('Survey saved successfully:', result);
+        console.log('Survey with AI history saved successfully:', result);
+        
+        // Log the AI history capture
+        logActivity('survey_ai_history_captured', {
+            survey_type: surveyType,
+            ai_entries_captured: aiHistoryContext.ai_guess_history.length,
+            condition_specific_entries: aiHistoryContext.correct_description_history?.length || 
+                                       aiHistoryContext.suggestions_only_history?.length || 0
+        });
         
     } catch (error) {
-        console.error('Error saving survey:', error);
+        console.error('Error saving survey with AI history:', error);
         throw error;
     }
 }
@@ -3332,8 +3641,14 @@ async function submitToDatabase() {
         return;
     }
 
+    // Set submission flag to prevent any periodic surveys during submission process
+    isSubmissionInProgress = true;
+
     // Store original function for survey completion
     originalSubmitToDatabase = async function() {
+        // Set submission flag to prevent periodic surveys during submission
+        isSubmissionInProgress = true;
+        
         // FINAL AI ANALYSIS BEFORE SUBMISSION
         addTerminalOutput('Performing final AI analysis before submission...', 'info');
         await analyzeCurrentCode();
