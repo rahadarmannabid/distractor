@@ -437,45 +437,127 @@ async def execute_python_code(code: str, timeout: int = 10):
             "output": "",
             "error": f"Execution error: {str(e)}"
         }
-    
 async def execute_c_code(code: str, timeout: int = 10):
-    # Create a temporary directory, this clears after with block
-    with tempfile.TemporaryDirectory() as tmpdir:
+    """
+    Execute C code safely with security restrictions and async compilation
+    """
+    # Security restrictions - block dangerous includes and functions
+    dangerous_patterns = [
+        # Dangerous system includes
+        '#include <unistd.h>',
+        '#include <sys/',
+        '#include <stdlib.h>',
+        '#include <fcntl.h>',
+        '#include <dirent.h>',
+        '#include <pwd.h>',
+        '#include <grp.h>',
+        '#include <signal.h>',
+        '#include <sys/socket.h>',
+        '#include <netinet/',
+        '#include <arpa/',
+        
+        # Dangerous function calls
+        'system(',
+        'exec(',
+        'fork(',
+        'popen(',
+        'chroot(',
+        'setuid(',
+        'setgid(',
+        'chmod(',
+        'chown(',
+        'remove(',
+        'unlink(',
+        'rmdir(',
+        'rename(',
+        'tmpnam(',
+        'mkstemp(',
+        'fopen(',
+        'freopen(',
+        'fdopen(',
+        'socket(',
+        'bind(',
+        'connect(',
+    ]
+    
+    code_lower = code.lower()
+    for pattern in dangerous_patterns:
+        if pattern.lower() in code_lower:
+            return {
+                "success": False,
+                "output": "",
+                "error": f"Security restriction: '{pattern}' is not allowed for safety reasons"
+            }
+    
+    # Create temporary directory
+    tmpdir = tempfile.mkdtemp()
+    
+    try:
         c_file_path = os.path.join(tmpdir, 'temp.c')
         exe_file_path = os.path.join(tmpdir, 'temp.out')
 
         # Write the C code to a file
-        with open(c_file_path, 'w') as c_file:
-            c_file.write(code)
-
-        # Compile the C code
-        compile_process = subprocess.run(
-            ['gcc', c_file_path, '-o', exe_file_path],
-            capture_output=True,
-            text=True
-        )
-
-        # Check if compilation was successful
-        if compile_process.returncode != 0:
-            return{
+        try:
+            with open(c_file_path, 'w', encoding='utf-8') as c_file:
+                c_file.write(code)
+        except Exception as e:
+            return {
                 "success": False,
                 "output": "",
-                "error": f"Compilation failed:\n{compile_process.stderr}"
+                "error": f"Failed to write C file: {str(e)}"
             }
 
-        process = await asyncio.create_subprocess_exec(
-            exe_file_path,
+        # Compile the C code using ASYNC subprocess - OPTIMIZED FOR SPEED
+        compile_process = await asyncio.create_subprocess_exec(
+            'gcc', c_file_path, '-o', exe_file_path, '-std=c11',
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
 
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            # Wait for compilation with timeout
+            compile_stdout, compile_stderr = await asyncio.wait_for(
+                compile_process.communicate(), 
+                timeout=5
+            )
+            
+            compile_stderr_str = compile_stderr.decode('utf-8', errors='replace')
+            
+            # Check if compilation was successful
+            if compile_process.returncode != 0:
+                return {
+                    "success": False,
+                    "output": "",
+                    "error": f"Compilation failed:\n{compile_stderr_str}"
+                }
+                
+        except asyncio.TimeoutError:
+            compile_process.kill()
+            await compile_process.wait()
+            return {
+                "success": False,
+                "output": "",
+                "error": "Compilation timed out after 5 seconds"
+            }
+
+        # Execute the compiled binary
+        exec_process = await asyncio.create_subprocess_exec(
+            exe_file_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env={'PATH': '/usr/bin:/bin'}
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                exec_process.communicate(), 
+                timeout=timeout
+            )
             
             stdout_str = stdout.decode('utf-8', errors='replace')
             stderr_str = stderr.decode('utf-8', errors='replace')
             
-            if process.returncode == 0:
+            if exec_process.returncode == 0:
                 return {
                     "success": True,
                     "output": stdout_str,
@@ -485,25 +567,32 @@ async def execute_c_code(code: str, timeout: int = 10):
                 return {
                     "success": False,
                     "output": stdout_str,
-                    "error": stderr_str or f"Process exited with code {process.returncode}"
+                    "error": stderr_str or f"Process exited with code {exec_process.returncode}"
                 }
+                
         except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
-
+            exec_process.kill()
+            await exec_process.wait()
             return {
                 "success": False,
                 "output": "",
                 "error": f"Code execution timed out after {timeout} seconds"
             }
-        
+                
+    except Exception as e:
+        logger.error(f"C code execution error: {e}")
+        return {
+            "success": False,
+            "output": "",
+            "error": f"Execution error: {str(e)}"
+        }
+    finally:
+        # Clean up temporary directory
+        try:
+            import shutil
+            shutil.rmtree(tmpdir)
         except Exception as e:
-            return {
-                "success": False,
-                "output": "",
-                "error": f"Execution error: {str(e)}"
-            }
-
+            logger.warning(f"Failed to clean up temp directory {tmpdir}: {e}")
 # Data Models
 class AuthRequest(BaseModel):
     user_id: str
