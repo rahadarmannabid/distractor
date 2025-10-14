@@ -342,6 +342,8 @@ async def execute_code_safely(code: str, language: str, timeout: int = 10):
     try:
         if language == "python":
             return await execute_python_code(code, timeout)
+        elif language == "c":
+            return await execute_c_code(code, timeout)
         elif language == "javascript":
             return {"success": False, "output": "", "error": "JavaScript should be executed in frontend"}
         else:
@@ -435,7 +437,72 @@ async def execute_python_code(code: str, timeout: int = 10):
             "output": "",
             "error": f"Execution error: {str(e)}"
         }
+    
+async def execute_c_code(code: str, timeout: int = 10):
+    # Create a temporary directory, this clears after with block
+    with tempfile.TemporaryDirectory() as tmpdir:
+        c_file_path = os.path.join(tmpdir, 'temp.c')
+        exe_file_path = os.path.join(tmpdir, 'temp.out')
 
+        # Write the C code to a file
+        with open(c_file_path, 'w') as c_file:
+            c_file.write(code)
+
+        # Compile the C code
+        compile_process = subprocess.run(
+            ['gcc', c_file_path, '-o', exe_file_path],
+            capture_output=True,
+            text=True
+        )
+
+        # Check if compilation was successful
+        if compile_process.returncode != 0:
+            return{
+                "success": False,
+                "output": "",
+                "error": f"Compilation failed:\n{compile_process.stderr}"
+            }
+
+        process = await asyncio.create_subprocess_exec(
+            exe_file_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            
+            stdout_str = stdout.decode('utf-8', errors='replace')
+            stderr_str = stderr.decode('utf-8', errors='replace')
+            
+            if process.returncode == 0:
+                return {
+                    "success": True,
+                    "output": stdout_str,
+                    "error": stderr_str if stderr_str else ""
+                }
+            else:
+                return {
+                    "success": False,
+                    "output": stdout_str,
+                    "error": stderr_str or f"Process exited with code {process.returncode}"
+                }
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+
+            return {
+                "success": False,
+                "output": "",
+                "error": f"Code execution timed out after {timeout} seconds"
+            }
+        
+        except Exception as e:
+            return {
+                "success": False,
+                "output": "",
+                "error": f"Execution error: {str(e)}"
+            }
 
 # Data Models
 class AuthRequest(BaseModel):
