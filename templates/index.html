@@ -1985,7 +1985,8 @@ async function initializeEditor() {
                 
                 const languageDefaults = {
                     javascript: '// Start coding here...\n',
-                    python: '# Start coding here...\n'
+                    python: '# Start coding here...\n',
+                    c: '#include <stdio.h>\n\n// Start coding here...\n'
                 };
 
                 const selectedLanguage = currentSession.programmingLanguage || 'javascript';
@@ -3434,7 +3435,12 @@ async function executeCode() {
             outputSummary = result.output || 'No output';
             errorMessage = result.error || '';
         } else if (currentSession.programmingLanguage === 'python') {
-            const result = await executePythonOnBackend(code);
+            const result = await executeOnBackend(code, 'python');
+            executionResult = result.success ? 'success' : 'error';
+            outputSummary = result.output || 'No output';
+            errorMessage = result.error || '';
+        } else if (currentSession.programmingLanguage === 'c') {
+            const result = await executeOnBackend(code, 'c');
             executionResult = result.success ? 'success' : 'error';
             outputSummary = result.output || 'No output';
             errorMessage = result.error || '';
@@ -3549,9 +3555,9 @@ async function executeJavaScriptInBrowser(code) {
         console.warn = originalWarn;
     }
 }
-async function executePythonOnBackend(code) {
+async function executeOnBackend(code, language) {
     try {
-        addTerminalOutput(`Running Python on server...`, 'prompt');
+        addTerminalOutput(`Running ${language} on server...`, 'prompt');
         const startTime = Date.now();
         
         const response = await fetch('/execute', {
@@ -3561,7 +3567,7 @@ async function executePythonOnBackend(code) {
             },
             body: JSON.stringify({
                 code: code,
-                language: 'python',
+                language: language,
                 user_id: currentSession.userId,
                 session_id: currentSession.sessionId
             })
@@ -3588,9 +3594,9 @@ async function executePythonOnBackend(code) {
                 addTerminalOutput('Warnings:', 'warning');
                 addTerminalOutput(result.error, 'warning');
             }
-            addTerminalOutput(`Python execution completed (${executionTime}ms)`, 'execution-time');
+            addTerminalOutput(`${language} execution completed (${executionTime}ms)`, 'execution-time');
         } else {
-            addTerminalOutput('Python error:', 'error');
+            addTerminalOutput(`${language} error:`, 'error');
             addTerminalOutput(result.error, 'error');
             if (result.output) {
                 addTerminalOutput('Output before error:', 'info');
