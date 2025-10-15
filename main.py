@@ -26,6 +26,13 @@ import smtplib
 import email
 from email import encoders
 import traceback
+# Add these to your existing imports section
+from typing import List, Dict, Optional, Any
+from enum import Enum
+import json
+from pathlib import Path
+from fastapi.responses import FileResponse
+
 
 
 # Load environment variables
@@ -604,7 +611,9 @@ class AuthResponse(BaseModel):
     condition: int
     problem_description: str | None = None
     session_id: str
-    paste_allowed: int = 1  # ADD THIS LINE
+    paste_allowed: int = 1
+    has_pre_survey: bool = False   # ADD THIS
+    has_post_survey: bool = False  # ADD THIS
 
 class ActivityEntry(BaseModel):
     timestamp: str
@@ -645,12 +654,25 @@ class SessionLog(BaseModel):
     code_start_timestamp: str
     code_submit_timestamp: Optional[str] = None
     submitted_full_code: Optional[str] = None
+    
+    # ADD THESE NEW FIELDS FOR SURVEY TRACKING
+    pre_survey_status: str = "not_started"
+    pre_survey_timestamp: Optional[str] = None
+    pre_survey_responses: Optional[Dict[str, Any]] = None
+    
+    post_survey_status: str = "not_started"
+    post_survey_timestamp: Optional[str] = None
+    post_survey_responses: Optional[Dict[str, Any]] = None
+    
+    periodic_survey_count: int = 0
+    
+    # Your existing fields continue below...
     ai_guess_history: List[AIGuessEntry] = []
     correct_description_history: Optional[List[AIGuessEntry]] = None
     suggestions_only_history: Optional[List[AIGuessEntry]] = None
     problem_description: Optional[str] = None
-    activity_log: List[ActivityEntry] = []  # NEW
-    activity_summary: ActivitySummary = ActivitySummary()  # NEW
+    activity_log: List[ActivityEntry] = []
+    activity_summary: ActivitySummary = ActivitySummary()
 
 
 class SurveyResponse(BaseModel):
@@ -691,89 +713,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.post("/authenticate", response_model=AuthResponse)
-async def authenticate_user(request: AuthRequest):
-    """
-    Authenticate user and return their assignment condition
-    Creates a new session and starts logging
-    """
-    try:
-        user_id = request.user_id.strip()
-        assignment_key = request.assignment_key.strip()
-        
-        if len(user_id) < 3:
-            raise HTTPException(status_code=400, detail="User ID must be at least 3 characters")
-        
-        if len(assignment_key) < 5:
-            raise HTTPException(status_code=400, detail="Assignment Key must be at least 5 characters")
-        
-        # Determine condition based on assignment key
-        condition = get_assignment_condition(assignment_key)
-        
-        # STRICT VALIDATION: Reject if no matching condition
-        if condition is None:
-            raise HTTPException(status_code=400, detail="Invalid assignment key. Please check your credentials and try again.")
-        
-        # Generate new session ID
-        session_id = f"{user_id}_{assignment_key}_{uuid.uuid4().hex[:8]}"
-        
-        # Get problem description if condition 1
-        problem_description = None
-        if condition == 1:
-            try:
-                # FIXED: Use base key for file reading
-                assignment_file = get_assignment_file_path(assignment_key)
-                if assignment_file and assignment_file.exists():
-                    with open(assignment_file, 'r', encoding='utf-8') as f:
-                        problem_description = f.read().strip()
-                    logger.info(f"Loaded problem description from: {assignment_file}")
-                else:
-                    logger.warning(f"Assignment file not found for key: {assignment_key}")
-                    base_key = get_assignment_base_key(assignment_key)
-                    problem_description = f"Assignment file not found for {base_key or assignment_key}"
-            except Exception as e:
-                logger.error(f"Error reading assignment file for {assignment_key}: {e}")
-                problem_description = f"Error loading assignment description: {str(e)}"
-        
-# Initialize session log
-        session_log = SessionLog(
-            user_id=user_id,
-            assignment_id=assignment_key,
-            session_id=session_id,
-            condition=condition,
-            code_start_timestamp=datetime.now().isoformat(),
-            ai_guess_history=[],
-            correct_description_history=[] if condition == 1 else None,
-            suggestions_only_history=[] if condition == 3 else None,
-            problem_description=problem_description
-        )
-        
-        # Store session in memory
-        active_sessions[session_id] = session_log
-        
-        # Save session log to local file for backup
-        save_session_to_local(session_log)
-        
-        logger.info(f"Authentication successful: {user_id} -> Condition {condition}, Session: {session_id}")
-        
-        # Get paste control setting
-        paste_allowed = int(os.getenv("PASTE_CONTROL", "1"))
-        print(f"Paste control setting: {paste_allowed}")
 
-        return AuthResponse(
-            status="success",
-            message="Authentication successful",
-            condition=condition,
-            problem_description=problem_description,
-            session_id=session_id,
-            paste_allowed=paste_allowed
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Authentication error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Authentication failed: {str(e)}")
 
 def save_session_to_local(session_log: SessionLog):
     """Save session log to local file as backup"""
@@ -815,89 +755,7 @@ def extract_survey_ai_history_summary(session_log: SessionLog, survey_data: Dict
     return summary
 
 
-async def save_session_to_firebase(session_log: SessionLog, suggestion_clicked: int, compiler_clicked: int, programming_language: str = "unknown", survey_data: Dict[str, Any] = None):
-    """Save complete session data to Firebase using the new hierarchical structure"""
-    if not firebase_db:
-        logger.warning("Firebase not available for saving session data")
-        return False
-    
-    try:
-        # Determine the condition path
-        condition_path = f"condition_{session_log.condition}"
-        
-        # Create summary data
-        summary_data = {
-            'starting_time': session_log.code_start_timestamp,
-            'submitted_code': session_log.submitted_full_code,
-            'programming_language': programming_language,
-            'suggestion_clicked': suggestion_clicked,
-            'compiler_clicked': compiler_clicked,
-            'end_time': session_log.code_submit_timestamp,
-            'survey_data': survey_data,
-            'survey_ai_history_context': extract_survey_ai_history_summary(session_log, survey_data)  # NEW
-        }
-        
-        # Create AI guesses log data
-        ai_guesses = {}
-        for i, entry in enumerate(session_log.ai_guess_history, 1):
-            ai_guesses[str(i)] = {
-                'ai_analysis': entry.problem_analysis,
-                'timestamp': entry.timestamp,
-                'next_line_suggestion': entry.next_line_suggestion,
-                'full_code_suggestion': entry.full_code_suggestion
-            }
-        
-        # Create logs structure
-        logs_data = {
-            'ai_guesses': ai_guesses
-        }
-        
-        # For condition 1, add correct guesses
-        if session_log.condition == 1 and session_log.correct_description_history:
-            correct_guesses = {}
-            for i, entry in enumerate(session_log.correct_description_history, 1):
-                correct_guesses[str(i)] = {
-                    'correct_analysis': entry.problem_analysis,
-                    'timestamp': entry.timestamp,
-                    'next_line_suggestion': entry.next_line_suggestion,
-                    'full_code_suggestion': entry.full_code_suggestion
-                }
-            logs_data['correct_guesses'] = correct_guesses
-        
-        # For condition 3, add suggestions-only data
-        elif session_log.condition == 3 and session_log.suggestions_only_history:
-            suggestions_only = {}
-            for i, entry in enumerate(session_log.suggestions_only_history, 1):
-                suggestions_only[str(i)] = {
-                    'suggestion_only': entry.next_line_suggestion,
-                    'timestamp': entry.timestamp,
-                    'full_code_suggestion': entry.full_code_suggestion
-                }
-            logs_data['suggestions_only'] = suggestions_only
-        
-        # NEW: Create activity log structure
-        activity_log_data = {
-            'entries': [entry.dict() for entry in session_log.activity_log],
-            'summary': session_log.activity_summary.dict()
-        }
-        
-        # Prepare the complete user data
-        user_data = {
-            'summary': summary_data,
-            'logs': logs_data,
-            'activity_log': activity_log_data  # NEW
-        }
-        
-        # Save to Firebase using the hierarchical structure
-        user_ref = firebase_db.child(f'{condition_path}/{session_log.assignment_id}/{session_log.user_id}')
-        user_ref.set(user_data)
-        
-        logger.info(f"Session data saved to Firebase: {condition_path}/{session_log.assignment_id}/{session_log.user_id}")
-        return True
-        
-    except Exception as e:
-        logger.error(f"Firebase save failed: {e}")
-        return False
+
 # OpenAI Configuration
 API_KEY = os.getenv("OPENAI_API_KEY")
 if not API_KEY:
@@ -1912,6 +1770,596 @@ def extract_ai_history_context(session_log: SessionLog) -> Dict[str, Any]:
             })
     
     return context
+
+# ADD THIS NEW ENUM
+class SurveyStatus(str, Enum):
+    NOT_STARTED = "not_started"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    SKIPPED = "skipped"
+    NOT_REQUIRED = "not_required"
+
+
+# ADD THESE NEW MODELS
+
+class SurveyQuestionData(BaseModel):
+    """Store complete question data"""
+    id: str
+    type: str  # likert, multiple_choice, open_ended
+    question: str
+    required: bool
+    # Type-specific fields
+    scale: Optional[Dict[str, Any]] = None  # For likert questions
+    options: Optional[List[str]] = None      # For multiple choice
+    placeholder: Optional[str] = None        # For open-ended
+    max_length: Optional[int] = None         # For open-ended
+
+
+class SurveyResponseData(BaseModel):
+    """Store response with question context"""
+    question_id: str
+    question_text: str
+    question_type: str
+    question_config: Dict[str, Any]  # Full question configuration
+    answer: Any  # Can be int, str, or None
+    required: bool
+
+
+class PrePostSurveySubmission(BaseModel):
+    user_id: str
+    session_id: str
+    assignment_key: str
+    survey_type: str  # 'pre' or 'post'
+    survey_title: str
+    survey_description: str
+    questions: List[SurveyQuestionData]
+    responses: List[SurveyResponseData]
+    timestamp: str
+    
+    # Metadata
+    total_questions: int = 0
+    required_questions: int = 0
+    completion_time_seconds: Optional[float] = None
+
+
+class SurveyStatusResponse(BaseModel):
+    pre_survey_status: str
+    post_survey_status: str
+    pre_survey_timestamp: Optional[str] = None
+    post_survey_timestamp: Optional[str] = None
+    can_access_ide: bool
+    can_submit_code: bool
+
+
+
+
+
+
+
+@app.get("/survey-config/{assignment_key}")
+async def get_survey_config(assignment_key: str):
+    """
+    Get pre, post, and periodic survey configuration for an assignment key
+    """
+    try:
+        # Get base key for file reading
+        base_key = get_assignment_base_key(assignment_key)
+        if not base_key:
+            raise HTTPException(status_code=400, detail="Invalid assignment key")
+        
+        # Try to load assignment-specific survey
+        survey_file = Path("surveys") / f"{base_key}.json"
+        
+        if not survey_file.exists():
+            # Fallback to default survey
+            survey_file = Path("surveys") / "default_survey.json"
+            logger.warning(f"Survey config not found for {base_key}, using default")
+        
+        if not survey_file.exists():
+            # Return empty config if no default exists
+            logger.error("No survey configuration found")
+            return {
+                "assignment_key": base_key,
+                "pre_survey": {"title": "", "description": "", "questions": []},
+                "post_survey": {"title": "", "description": "", "questions": []},
+                "periodic_survey": {"enabled": False, "interval": 4, "questions": []}
+            }
+        
+        with open(survey_file, 'r', encoding='utf-8') as f:
+            survey_config = json.load(f)
+        
+        logger.info(f"Loaded survey config for {base_key}")
+        return survey_config
+        
+    except Exception as e:
+        logger.error(f"Error loading survey config: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load survey config: {str(e)}")
+    
+
+@app.get("/survey-status/{session_id}")
+async def get_survey_status(session_id: str):
+    """
+    Get current survey completion status for a session
+    """
+    try:
+        if session_id not in active_sessions:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        session_log = active_sessions[session_id]
+        
+        # Check if surveys are required for this assignment
+        base_key = get_assignment_base_key(session_log.assignment_id)
+        survey_file = Path("surveys") / f"{base_key}.json"
+        
+        has_surveys = survey_file.exists()
+        pre_required = False
+        post_required = False
+        
+        if has_surveys:
+            try:
+                with open(survey_file, 'r', encoding='utf-8') as f:
+                    survey_config = json.load(f)
+                    pre_required = len(survey_config.get('pre_survey', {}).get('questions', [])) > 0
+                    post_required = len(survey_config.get('post_survey', {}).get('questions', [])) > 0
+            except Exception as e:
+                logger.error(f"Error loading survey config: {e}")
+        
+        # Determine access permissions
+        can_access_ide = (
+            not pre_required or 
+            session_log.pre_survey_status == SurveyStatus.COMPLETED
+        )
+        
+        can_submit_code = (
+            not post_required or 
+            session_log.post_survey_status == SurveyStatus.COMPLETED
+        )
+        
+        return SurveyStatusResponse(
+            pre_survey_status=session_log.pre_survey_status,
+            post_survey_status=session_log.post_survey_status,
+            pre_survey_timestamp=session_log.pre_survey_timestamp,
+            post_survey_timestamp=session_log.post_survey_timestamp,
+            can_access_ide=can_access_ide,
+            can_submit_code=can_submit_code
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting survey status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@app.post("/update-survey-status")
+async def update_survey_status(
+    session_id: str, 
+    survey_type: str,
+    status: str
+):
+    """
+    Update survey status for a session
+    """
+    try:
+        if session_id not in active_sessions:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        session_log = active_sessions[session_id]
+        timestamp = datetime.now().isoformat()
+        
+        if survey_type == 'pre':
+            session_log.pre_survey_status = status
+            if status == SurveyStatus.COMPLETED or status == SurveyStatus.IN_PROGRESS:
+                session_log.pre_survey_timestamp = timestamp
+        elif survey_type == 'post':
+            session_log.post_survey_status = status
+            if status == SurveyStatus.COMPLETED or status == SurveyStatus.IN_PROGRESS:
+                session_log.post_survey_timestamp = timestamp
+        else:
+            raise HTTPException(status_code=400, detail="Invalid survey type")
+        
+        # Save updated session to local backup
+        save_session_to_local(session_log)
+        
+        logger.info(f"Survey status updated: {session_id} - {survey_type} - {status}")
+        
+        return {
+            "status": "success",
+            "message": f"{survey_type.title()} survey status updated to {status}",
+            "timestamp": timestamp
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating survey status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+@app.post("/submit-pre-post-survey")
+async def submit_pre_post_survey(request: PrePostSurveySubmission):
+    """Submit pre or post survey with complete question data and responses"""
+    try:
+        # Update session log with complete survey data
+        if request.session_id in active_sessions:
+            session_log = active_sessions[request.session_id]
+            
+            # Create comprehensive survey data package
+            survey_package = {
+                'survey_title': request.survey_title,
+                'survey_description': request.survey_description,
+                'total_questions': request.total_questions or len(request.questions),
+                'required_questions': request.required_questions or sum(1 for q in request.questions if q.required),
+                'completion_time_seconds': request.completion_time_seconds,
+                'timestamp': request.timestamp,
+                
+                # Complete questions as presented to user
+                'questions': [
+                    {
+                        'id': q.id,
+                        'type': q.type,
+                        'question': q.question,
+                        'required': q.required,
+                        'scale': q.scale if q.scale else None,
+                        'options': q.options if q.options else None,
+                        'placeholder': q.placeholder if q.placeholder else None,
+                        'max_length': q.max_length if q.max_length else None
+                    } for q in request.questions
+                ],
+                
+                # User responses with full context
+                'responses': [
+                    {
+                        'question_id': r.question_id,
+                        'question_text': r.question_text,
+                        'question_type': r.question_type,
+                        'question_config': r.question_config,
+                        'answer': r.answer,
+                        'required': r.required,
+                        'answered': r.answer is not None and r.answer != ''
+                    } for r in request.responses
+                ]
+            }
+            
+            # Add AI context for post-survey
+            if request.survey_type == 'post':
+                survey_package['ai_context'] = {
+                    'total_analyses': len(session_log.ai_guess_history),
+                    'suggestion_clicks': len([entry for entry in session_log.activity_log if entry.activity_type == 'suggestion_interaction']),
+                    'code_executions': len([entry for entry in session_log.activity_log if entry.activity_type == 'code_execution']),
+                    'ai_guess_history_summary': [
+                        {
+                            'timestamp': entry.timestamp,
+                            'problem_analysis': entry.problem_analysis[:100] + '...' if len(entry.problem_analysis) > 100 else entry.problem_analysis
+                        } for entry in session_log.ai_guess_history[-5:]
+                    ]
+                }
+            
+            # Store in session log
+            if request.survey_type == 'pre':
+                session_log.pre_survey_status = SurveyStatus.COMPLETED
+                session_log.pre_survey_timestamp = request.timestamp
+                session_log.pre_survey_responses = survey_package
+            elif request.survey_type == 'post':
+                session_log.post_survey_status = SurveyStatus.COMPLETED
+                session_log.post_survey_timestamp = request.timestamp
+                session_log.post_survey_responses = survey_package
+            
+            # Save updated session
+            save_session_to_local(session_log)
+        
+        # Save survey data to separate file (backup)
+        surveys_dir = Path(os.getenv("SUBMISSIONS_DIR", "submissions")) / "pre_post_surveys"
+        surveys_dir.mkdir(exist_ok=True, parents=True)
+        
+        session_id_short = request.session_id.split('_')[-1][:8] if '_' in request.session_id else request.session_id[:8]
+        survey_file = surveys_dir / f"{request.user_id}_{request.assignment_key}_{session_id_short}_{request.survey_type}.json"
+        
+        # Prepare complete data for file storage
+        file_data = {
+            'user_id': request.user_id,
+            'session_id': request.session_id,
+            'assignment_key': request.assignment_key,
+            'survey_type': request.survey_type,
+            'survey_title': request.survey_title,
+            'survey_description': request.survey_description,
+            'timestamp': request.timestamp,
+            'total_questions': request.total_questions or len(request.questions),
+            'required_questions': request.required_questions or sum(1 for q in request.questions if q.required),
+            'completion_time_seconds': request.completion_time_seconds,
+            'questions': [q.dict() for q in request.questions],
+            'responses': [r.dict() for r in request.responses]
+        }
+        
+        with open(survey_file, 'w', encoding='utf-8') as f:
+            json.dump(file_data, f, indent=2, default=str)
+        
+        logger.info(f"{request.survey_type.upper()} survey saved: {request.user_id} - {survey_file.name}")
+        
+        return {
+            "status": "success",
+            "message": f"{request.survey_type.title()} survey saved successfully",
+            "timestamp": request.timestamp,
+            "file": survey_file.name,
+            "questions_saved": len(request.questions),
+            "responses_saved": len(request.responses)
+        }
+        
+    except Exception as e:
+        logger.error(f"Survey submission error: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Survey submission failed: {str(e)}")
+    
+@app.post("/authenticate", response_model=AuthResponse)
+async def authenticate_user(request: AuthRequest):
+    """
+    Authenticate user and return their assignment condition
+    Creates a new session and starts logging
+    """
+    try:
+        user_id = request.user_id.strip()
+        assignment_key = request.assignment_key.strip()
+        
+        if len(user_id) < 3:
+            raise HTTPException(status_code=400, detail="User ID must be at least 3 characters")
+        
+        if len(assignment_key) < 5:
+            raise HTTPException(status_code=400, detail="Assignment Key must be at least 5 characters")
+        
+        condition = get_assignment_condition(assignment_key)
+        
+        if condition is None:
+            raise HTTPException(status_code=400, detail="Invalid assignment key. Please check your credentials and try again.")
+        
+        session_id = f"{user_id}_{assignment_key}_{uuid.uuid4().hex[:8]}"
+        
+        problem_description = None
+        if condition == 1:
+            try:
+                assignment_file = get_assignment_file_path(assignment_key)
+                if assignment_file and assignment_file.exists():
+                    with open(assignment_file, 'r', encoding='utf-8') as f:
+                        problem_description = f.read().strip()
+                    logger.info(f"Loaded problem description from: {assignment_file}")
+                else:
+                    logger.warning(f"Assignment file not found for key: {assignment_key}")
+                    base_key = get_assignment_base_key(assignment_key)
+                    problem_description = f"Assignment file not found for {base_key or assignment_key}"
+            except Exception as e:
+                logger.error(f"Error reading assignment file for {assignment_key}: {e}")
+                problem_description = f"Error loading assignment description: {str(e)}"
+        
+        # ===== ADD THIS SECTION TO CHECK FOR SURVEYS =====
+        base_key = get_assignment_base_key(assignment_key)
+        survey_file = Path("surveys") / f"{base_key}.json"
+        has_surveys = survey_file.exists()
+        
+        has_pre = False
+        has_post = False
+        if has_surveys:
+            try:
+                with open(survey_file, 'r', encoding='utf-8') as f:
+                    survey_config = json.load(f)
+                    has_pre = len(survey_config.get('pre_survey', {}).get('questions', [])) > 0
+                    has_post = len(survey_config.get('post_survey', {}).get('questions', [])) > 0
+            except Exception as e:
+                logger.error(f"Error checking survey config: {e}")
+        # ===== END OF NEW SECTION =====
+        
+        # Initialize session log
+        session_log = SessionLog(
+            user_id=user_id,
+            assignment_id=assignment_key,
+            session_id=session_id,
+            condition=condition,
+            code_start_timestamp=datetime.now().isoformat(),
+            ai_guess_history=[],
+            correct_description_history=[] if condition == 1 else None,
+            suggestions_only_history=[] if condition == 3 else None,
+            problem_description=problem_description,
+            
+            # ===== ADD THESE SURVEY FIELDS =====
+            pre_survey_status=SurveyStatus.NOT_REQUIRED if not has_pre else SurveyStatus.NOT_STARTED,
+            post_survey_status=SurveyStatus.NOT_REQUIRED if not has_post else SurveyStatus.NOT_STARTED,
+            # ===== END OF NEW FIELDS =====
+        )
+        
+        active_sessions[session_id] = session_log
+        save_session_to_local(session_log)
+        
+        logger.info(f"Authentication successful: {user_id} -> Condition {condition}, Session: {session_id}")
+        
+        paste_allowed = int(os.getenv("PASTE_CONTROL", "1"))
+        
+        return AuthResponse(
+            status="success",
+            message="Authentication successful",
+            condition=condition,
+            problem_description=problem_description,
+            session_id=session_id,
+            paste_allowed=paste_allowed,
+            has_pre_survey=has_pre,   # ADD THIS
+            has_post_survey=has_post  # ADD THIS
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Authentication error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Authentication failed: {str(e)}")
+
+
+async def save_session_to_firebase(
+    session_log: SessionLog, 
+    suggestion_clicked: int, 
+    compiler_clicked: int, 
+    programming_language: str = "unknown", 
+    survey_data: Dict[str, Any] = None
+):
+    """Save complete session data to Firebase including survey questions and responses"""
+    if not firebase_db:
+        logger.warning("Firebase not available for saving session data")
+        return False
+    
+    try:
+        condition_path = f"condition_{session_log.condition}"
+        
+        # ===== PREPARE SURVEY DATA WITH QUESTIONS + RESPONSES =====
+        pre_survey_data = None
+        post_survey_data = None
+        
+        if session_log.pre_survey_responses:
+            pre_survey_data = {
+                'status': session_log.pre_survey_status,
+                'timestamp': session_log.pre_survey_timestamp,
+                'completed': session_log.pre_survey_status == SurveyStatus.COMPLETED,
+                'survey_title': session_log.pre_survey_responses.get('survey_title', 'Pre-Study Survey'),
+                'survey_description': session_log.pre_survey_responses.get('survey_description', ''),
+                'total_questions': session_log.pre_survey_responses.get('total_questions', 0),
+                'required_questions': session_log.pre_survey_responses.get('required_questions', 0),
+                'completion_time_seconds': session_log.pre_survey_responses.get('completion_time_seconds'),
+                'questions': session_log.pre_survey_responses.get('questions', []),
+                'responses': session_log.pre_survey_responses.get('responses', [])
+            }
+        
+        if session_log.post_survey_responses:
+            post_survey_data = {
+                'status': session_log.post_survey_status,
+                'timestamp': session_log.post_survey_timestamp,
+                'completed': session_log.post_survey_status == SurveyStatus.COMPLETED,
+                'survey_title': session_log.post_survey_responses.get('survey_title', 'Post-Study Survey'),
+                'survey_description': session_log.post_survey_responses.get('survey_description', ''),
+                'total_questions': session_log.post_survey_responses.get('total_questions', 0),
+                'required_questions': session_log.post_survey_responses.get('required_questions', 0),
+                'completion_time_seconds': session_log.post_survey_responses.get('completion_time_seconds'),
+                'questions': session_log.post_survey_responses.get('questions', []),
+                'responses': session_log.post_survey_responses.get('responses', []),
+                'ai_context': session_log.post_survey_responses.get('ai_context', {})
+            }
+        # ===== END OF SURVEY DATA PREPARATION =====
+        
+        # Create summary data
+        summary_data = {
+            'starting_time': session_log.code_start_timestamp,
+            'submitted_code': session_log.submitted_full_code,
+            'programming_language': programming_language,
+            'suggestion_clicked': suggestion_clicked,
+            'compiler_clicked': compiler_clicked,
+            'end_time': session_log.code_submit_timestamp,
+            'assignment_key': session_log.assignment_id,
+            
+            # ===== ADD SURVEY DATA TO SUMMARY =====
+            'pre_survey': pre_survey_data,
+            'post_survey': post_survey_data,
+            # ===== END OF SURVEY ADDITION =====
+            
+            'periodic_surveys': survey_data,
+            'survey_ai_history_context': extract_survey_ai_history_summary(session_log, survey_data)
+        }
+        
+        # Rest of your existing Firebase save code continues...
+        # (Keep your existing code for logs_data, activity_log_data, etc.)
+        
+        logs_data = {
+            'ai_guesses': {
+                str(i): {
+                    'ai_analysis': entry.problem_analysis,
+                    'timestamp': entry.timestamp,
+                    'next_line_suggestion': entry.next_line_suggestion,
+                    'full_code_suggestion': entry.full_code_suggestion
+                } for i, entry in enumerate(session_log.ai_guess_history, 1)
+            }
+        }
+        
+        if session_log.condition == 1 and session_log.correct_description_history:
+            logs_data['correct_guesses'] = {
+                str(i): {
+                    'correct_analysis': entry.problem_analysis,
+                    'timestamp': entry.timestamp,
+                    'next_line_suggestion': entry.next_line_suggestion,
+                    'full_code_suggestion': entry.full_code_suggestion
+                } for i, entry in enumerate(session_log.correct_description_history, 1)
+            }
+        elif session_log.condition == 3 and session_log.suggestions_only_history:
+            logs_data['suggestions_only'] = {
+                str(i): {
+                    'suggestion_only': entry.next_line_suggestion,
+                    'timestamp': entry.timestamp,
+                    'full_code_suggestion': entry.full_code_suggestion
+                } for i, entry in enumerate(session_log.suggestions_only_history, 1)
+            }
+        
+        activity_log_data = {
+            'entries': [entry.dict() for entry in session_log.activity_log],
+            'summary': session_log.activity_summary.dict()
+        }
+        
+        user_data = {
+            'summary': summary_data,
+            'logs': logs_data,
+            'activity_log': activity_log_data
+        }
+        
+        user_ref = firebase_db.child(f'{condition_path}/{session_log.assignment_id}/{session_log.user_id}')
+        user_ref.set(user_data)
+        
+        logger.info(f"Session with surveys saved to Firebase: {condition_path}/{session_log.assignment_id}/{session_log.user_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Firebase save failed: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False
+    
+
+@app.get("/survey.html", response_class=HTMLResponse)
+async def serve_survey(request: Request):
+    """Serve the survey page"""
+    survey_type = request.query_params.get("type")
+    
+    if not survey_type or survey_type not in ['pre', 'post']:
+        logger.warning(f"Invalid survey type accessed: {survey_type}")
+        return RedirectResponse(url="/home.html", status_code=302)
+    
+    return templates.TemplateResponse("survey.html", {
+        "request": request,
+        "survey_type": survey_type
+    })
+
+
+@app.get("/download-assignment/{assignment_key}")
+async def download_assignment(assignment_key: str):
+    """Download assignment PDF based on assignment key"""
+    try:
+        # Get base key for file reading
+        base_key = get_assignment_base_key(assignment_key)
+        if not base_key:
+            raise HTTPException(status_code=400, detail="Invalid assignment key")
+        
+        # Look for PDF file
+        pdf_file = Path("assignment") / f"{base_key}.pdf"
+        
+        if not pdf_file.exists():
+            logger.warning(f"Assignment PDF not found: {pdf_file}")
+            raise HTTPException(status_code=404, detail="Assignment PDF not found")
+        
+        logger.info(f"Downloading assignment PDF: {pdf_file}")
+        
+        return FileResponse(
+            path=pdf_file,
+            media_type='application/pdf',
+            filename=f"{base_key}.pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename={base_key}.pdf"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading assignment PDF: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to download assignment: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

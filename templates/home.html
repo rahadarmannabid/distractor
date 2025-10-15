@@ -883,30 +883,39 @@
                 
                 // Store credentials and consent status in sessionStorage for the IDE page
                 sessionStorage.setItem('authData', JSON.stringify({
-                userId: userId,
-                assignmentKey: assignmentKey,
-                sessionToken: sessionToken,
-                condition: data.condition,
-                problemDescription: data.problem_description,
-                sessionId: data.session_id,
-                programmingLanguage: selectedLanguage,
-                timestamp: new Date().toISOString(),
-                consentGiven: true,
-                consentTimestamp: new Date().toISOString(),
-                pasteAllowed: data.paste_allowed !== undefined ? data.paste_allowed : 1
-
-
-            }));
+                    userId: userId,
+                    assignmentKey: assignmentKey,
+                    sessionToken: sessionToken,
+                    condition: data.condition,
+                    problemDescription: data.problem_description,
+                    sessionId: data.session_id,
+                    programmingLanguage: selectedLanguage,
+                    timestamp: new Date().toISOString(),
+                    consentGiven: true,
+                    consentTimestamp: new Date().toISOString(),
+                    pasteAllowed: data.paste_allowed !== undefined ? data.paste_allowed : 1,
+                    hasPreSurvey: data.has_pre_survey || false,
+                    hasPostSurvey: data.has_post_survey || false
+                }));
                 
-                // Redirect to unique IDE URL
-                const ideUrl = `index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
+                // Check if pre-survey is required and redirect accordingly
+                let redirectUrl;
+                let successMessage;
+                
+                if (data.has_pre_survey) {
+                    redirectUrl = `survey.html?type=pre`;
+                    successMessage = '✅ Authentication successful! Redirecting to pre-study survey...';
+                } else {
+                    redirectUrl = `index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
+                    successMessage = '✅ Authentication successful! Redirecting to coding environment...';
+                }
                 
                 // Show success message briefly before redirect
-                loginButton.innerHTML = '✅ Authentication successful! Redirecting to research environment...';
+                loginButton.innerHTML = successMessage;
                 loginButton.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
                 
                 setTimeout(() => {
-                    window.location.href = ideUrl;
+                    window.location.href = redirectUrl;
                 }, 1500);
 
             } catch (error) {

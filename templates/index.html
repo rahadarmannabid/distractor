@@ -1401,27 +1401,7 @@
     </div>
 </div>
 
-<!-- Final Survey Modal -->
-<div id="finalSurveyModal" class="survey-modal hidden">
-    <div class="survey-container">
-        <div class="survey-header">
-            <h2>Final Survey</h2>
-            <p>Before submitting your code, please complete this final survey:</p>
-        </div>
-        
-        <div class="survey-content">
-            <div class="survey-content-container">
-                <div class="ai-history-panel" id="finalSurveyAIHistory"></div>
-                <div class="survey-questions-panel" id="finalSurveyQuestions"></div>
-            </div>
-            
-            <div class="survey-controls">
-                <button id="submitFinalSurvey" class="survey-submit-btn" disabled>Complete Survey & Submit Code</button>
-                <p class="survey-note">You must complete this survey before submitting your code.</p>
-            </div>
-        </div>
-    </div>
-</div>
+
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs/loader.min.js"></script>
 <script>
@@ -1882,6 +1862,23 @@ async function initializeFromURL() {
         
         updateLoadingMessage('Finalizing setup...');
         showMainApp();
+
+        // Check if we're returning from post-survey to submit code
+        const urlParams = new URLSearchParams(window.location.search);
+        const shouldSubmitCode = urlParams.get('submit_code') === 'true';
+
+        if (shouldSubmitCode) {
+            // Remove the parameter from URL
+            window.history.replaceState({}, document.title, window.location.pathname + 
+                `?session=${urlParams.get('session')}&user=${urlParams.get('user')}`);
+            
+            // Trigger code submission after a brief delay
+            setTimeout(async () => {
+                addTerminalOutput('Post-survey completed! Proceeding with code submission...', 'success');
+                await proceedWithActualSubmission();
+            }, 1000);
+        }
+        
         
         // Add welcome messages
         setTimeout(() => {
@@ -2796,14 +2793,14 @@ function showPeriodicSurvey() {
 function showFinalSurvey() {
     if (surveyData.questions.length === 0) {
         console.warn('No survey questions loaded for final survey');
-        // If no questions, proceed with submission
-        proceedWithSubmission();
+        // If no questions, proceed with post-survey check
+        checkAndShowPostSurvey();
         return;
     }
     
     // ACTIVITY LOG: Final survey start
     logActivity('survey_interaction', {
-        survey_type: 'final',
+        survey_type: 'final_periodic',
         action: 'survey_started'
     });
     
@@ -2814,14 +2811,39 @@ function showFinalSurvey() {
     const aiHistoryContext = collectAIHistoryContext();
     const historyHTML = generateAIHistoryDisplayHTML(aiHistoryContext);
 
-    document.getElementById('finalSurveyQuestions').innerHTML = questionsHTML;
-    document.getElementById('finalSurveyAIHistory').innerHTML = historyHTML;
+    // REUSE the existing surveyModal (not a separate finalSurveyModal)
+    document.getElementById('surveyQuestions').innerHTML = questionsHTML;
+    document.getElementById('surveyAIHistory').innerHTML = historyHTML;
     
-    // Show final survey modal
-    document.getElementById('finalSurveyModal').classList.remove('hidden');
+    // Update header to indicate it's the final survey
+    const surveyHeader = document.querySelector('#surveyModal .survey-header h2');
+    if (surveyHeader) {
+        surveyHeader.textContent = 'Final Survey Before Submission';
+    }
     
-    // Add event listeners
-    setupSurveyEventListeners('finalSurveyModal', 'submitFinalSurvey', submitFinalSurvey);
+    const surveyNote = document.querySelector('#surveyModal .survey-note');
+    if (surveyNote) {
+        surveyNote.textContent = 'Complete this final survey to proceed with code submission.';
+    }
+    
+    // Show survey modal
+    document.getElementById('surveyModal').classList.remove('hidden');
+    
+    // Update submit button to call submitFinalSurvey instead
+    const submitButton = document.getElementById('submitSurvey');
+    submitButton.onclick = submitFinalSurvey;
+    
+    // Add change listeners
+    document.getElementById('surveyQuestions').querySelectorAll('input[type="radio"]').forEach(radio => {
+        radio.addEventListener('change', () => {
+            const totalQuestions = surveyData.questions.length;
+            const answeredQuestions = document.getElementById('surveyQuestions').querySelectorAll('input[type="radio"]:checked').length;
+            submitButton.disabled = answeredQuestions < totalQuestions;
+        });
+    });
+    
+    // Initial check
+    submitButton.disabled = true;
     
     addTerminalOutput('Please complete the final survey before submitting your code', 'info');
 }
@@ -3087,7 +3109,18 @@ async function submitPeriodicSurvey() {
 }
 
 async function submitFinalSurvey() {
-    const responses = collectSurveyResponses('finalSurveyModal');
+    const modal = document.getElementById('surveyModal');
+    const responses = [];
+    
+    for (let i = 0; i < surveyData.questions.length; i++) {
+        const checkedRadio = modal.querySelector(`input[name="question_${i}"]:checked`);
+        if (checkedRadio) {
+            responses.push({
+                question: surveyData.questions[i],
+                response: parseInt(checkedRadio.value)
+            });
+        }
+    }
     
     if (responses.length !== surveyData.questions.length) {
         alert('Please answer all questions before submitting.');
@@ -3102,11 +3135,12 @@ async function submitFinalSurvey() {
             responses: responses
         };
         
-        document.getElementById('finalSurveyModal').classList.add('hidden');
+        // Hide the modal
+        document.getElementById('surveyModal').classList.add('hidden');
         
         // ACTIVITY LOG: Final survey completed with AI history
         logActivity('survey_interaction', {
-            survey_type: 'final',
+            survey_type: 'final_periodic',
             action: 'survey_completed',
             responses_count: responses.length,
             ai_history_included: true,
@@ -3114,9 +3148,11 @@ async function submitFinalSurvey() {
         });
         
         const aiHistoryCount = currentSession.guessHistory.length;
-        addTerminalOutput('Final survey completed - proceeding with code submission...', 'success');
+        addTerminalOutput('Final periodic survey completed!', 'success');
         addTerminalOutput(`Final AI History: ${aiHistoryCount} total analyses captured`, 'info');
-        proceedWithSubmission();
+        
+        // Now check for post-survey
+        await checkAndShowPostSurvey();
         
     } catch (error) {
         console.error('Final survey submission error:', error);
@@ -3256,12 +3292,7 @@ function blockEditor(block) {
 // Store original submit function
 let originalSubmitToDatabase = null;
 
-function proceedWithSubmission() {
-    // Call the original submit function
-    if (originalSubmitToDatabase) {
-        originalSubmitToDatabase();
-    }
-}
+
 
 
 async function loadSurveyQuestions() {
@@ -3650,91 +3681,146 @@ async function submitToDatabase() {
     // Set submission flag to prevent any periodic surveys during submission process
     isSubmissionInProgress = true;
 
-    // Store original function for survey completion
-    originalSubmitToDatabase = async function() {
-        // Set submission flag to prevent periodic surveys during submission
-        isSubmissionInProgress = true;
-        
-        // FINAL AI ANALYSIS BEFORE SUBMISSION
-        addTerminalOutput('Performing final AI analysis before submission...', 'info');
-        await analyzeCurrentCode();
-        
-        submitButton.disabled = true;
-        submitButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Submitting & Logging out...</div>';
-
-        try {
-            const response = await fetch('/submit', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    code: code,
-                    user_id: currentSession.userId,
-                    assignment_key: currentSession.assignmentKey,
-                    session_id: currentSession.sessionId,
-                    programming_language: currentSession.programmingLanguage,
-                    timestamp: new Date().toISOString(),
-                    suggestion_clicked: currentSession.suggestionClickCount,
-                    compiler_clicked: currentSession.compilerClickCount,
-                    survey_data: {
-                        periodic_surveys: surveyData.surveyResponses,
-                        final_survey: surveyData.finalSurveyResponse,
-                        total_analyses: surveyData.analysisCount
-                    }
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error(`Submission failed: ${response.statusText}`);
-            }
-
-            const result = await response.json();
-            addTerminalOutput(`${result.message}`, 'success');
-            addTerminalOutput(`Database Status: ${result.firebase_status}`, 'info');
-            addTerminalOutput(`Submission ID: ${result.submission_id}`, 'info');
-            addTerminalOutput(`Problem Guess Logs: ${currentSession.guessLogCount}`, 'info');
-            addTerminalOutput(`Suggestions Clicked: ${currentSession.suggestionClickCount}`, 'info');
-            addTerminalOutput(`Compiler Runs: ${currentSession.compilerClickCount}`, 'info');
-            addTerminalOutput(`Surveys Completed: ${surveyData.surveyResponses.length}`, 'info');
-            if (currentSession.condition === 1) {
-                addTerminalOutput(`Description-based Logs: ${currentSession.descLogCount}`, 'info');
-            }
-            if (currentSession.condition === 3) {
-                addTerminalOutput(`AI Suggestion Logs: ${currentSession.suggestionsLogCount}`, 'info');
-            }
-            
-            if (result.firebase_status === 'success') {
-                addTerminalOutput(`Database save successful - logging out now...`, 'success');
-                setTimeout(() => {
-                    showSuccessMessage(
-                        'Code submitted successfully to Database!\nSession ended for security.', 
-                        3
-                    );
-                }, 500);
-            } else {
-                addTerminalOutput(`Database save failed but data preserved locally - logging out...`, 'warning');
-                setTimeout(() => {
-                    showSuccessMessage(
-                        'Submission completed with local backup.\nSession ended for security.', 
-                        3
-                    );
-                }, 500);
-            }
-
-        } catch (error) {
-            console.error('Submission error:', error);
-            addTerminalOutput(`Submission failed: ${error.message}`, 'error');
-            addTerminalOutput(`Data preserved locally in session logs`, 'warning');
-            submitButton.disabled = false;
-            submitButton.innerHTML = 'Submit & Logout';
-        }
-    };
-
-    // Show final survey before submission
-    showFinalSurvey();
+    // ===== CORRECTED FLOW: Final Periodic Survey → Post Survey → Submit =====
+    
+    // Step 1: Check if final periodic survey is needed
+    if (surveyData.questions.length > 0 && !surveyData.finalSurveyResponse) {
+        // Show final periodic survey first
+        addTerminalOutput('Final periodic survey required before submission...', 'info');
+        showFinalSurvey();
+        return; // Exit here, will continue after final survey
+    }
+    
+    // Step 2: Check for post-survey
+    await checkAndShowPostSurvey();
 }
 
+// NEW FUNCTION: Check and show post survey if needed
+async function checkAndShowPostSurvey() {
+    const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
+    
+    if (authData.hasPostSurvey) {
+        try {
+            const statusResponse = await fetch(`/survey-status/${currentSession.sessionId}`);
+            if (statusResponse.ok) {
+                const statusData = await statusResponse.json();
+                
+                if (statusData.post_survey_status !== 'completed') {
+                    // Post-survey required but not completed - redirect to survey page
+                    addTerminalOutput('⚠️ Post-survey required before code submission!', 'warning');
+                    addTerminalOutput('Redirecting to post-survey...', 'info');
+                    
+                    // Mark that we're in submission flow
+                    sessionStorage.setItem('postSurveySubmissionPending', 'true');
+                    
+                    // Get session parameters for redirect
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const sessionToken = urlParams.get('session');
+                    const userId = urlParams.get('user');
+                    
+                    // Redirect to survey page with session preserved
+                    setTimeout(() => {
+                        window.location.href = `/survey.html?type=post&session=${sessionToken}&user=${encodeURIComponent(userId)}`;
+                    }, 1500);
+                    return;
+                }
+            }
+        } catch (error) {
+            console.error('Error checking survey status:', error);
+            addTerminalOutput('⚠️ Could not verify post-survey status, proceeding with submission', 'warning');
+            // Continue with submission if check fails (fallback)
+        }
+    }
+    
+    // No post survey needed or already completed, proceed with submission
+    addTerminalOutput('All surveys completed! Proceeding with code submission...', 'success');
+    await proceedWithActualSubmission();
+}
+
+
+// RENAME the original function
+async function proceedWithActualSubmission() {
+    // This is the original submission code
+    isSubmissionInProgress = true;
+    
+    // FINAL AI ANALYSIS BEFORE SUBMISSION
+    addTerminalOutput('Performing final AI analysis before submission...', 'info');
+    await analyzeCurrentCode();
+    
+    const code = window.editor.getValue();
+    
+    submitButton.disabled = true;
+    submitButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Submitting & Logging out...</div>';
+
+    try {
+        const response = await fetch('/submit', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                code: code,
+                user_id: currentSession.userId,
+                assignment_key: currentSession.assignmentKey,
+                session_id: currentSession.sessionId,
+                programming_language: currentSession.programmingLanguage,
+                timestamp: new Date().toISOString(),
+                suggestion_clicked: currentSession.suggestionClickCount,
+                compiler_clicked: currentSession.compilerClickCount,
+                survey_data: {
+                    periodic_surveys: surveyData.surveyResponses,
+                    final_survey: surveyData.finalSurveyResponse,
+                    total_analyses: surveyData.analysisCount
+                }
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Submission failed: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        addTerminalOutput(`${result.message}`, 'success');
+        addTerminalOutput(`Database Status: ${result.firebase_status}`, 'info');
+        addTerminalOutput(`Submission ID: ${result.submission_id}`, 'info');
+        addTerminalOutput(`Problem Guess Logs: ${currentSession.guessLogCount}`, 'info');
+        addTerminalOutput(`Suggestions Clicked: ${currentSession.suggestionClickCount}`, 'info');
+        addTerminalOutput(`Compiler Runs: ${currentSession.compilerClickCount}`, 'info');
+        addTerminalOutput(`Surveys Completed: ${surveyData.surveyResponses.length}`, 'info');
+        if (currentSession.condition === 1) {
+            addTerminalOutput(`Description-based Logs: ${currentSession.descLogCount}`, 'info');
+        }
+        if (currentSession.condition === 3) {
+            addTerminalOutput(`AI Suggestion Logs: ${currentSession.suggestionsLogCount}`, 'info');
+        }
+        
+        if (result.firebase_status === 'success') {
+            addTerminalOutput(`Database save successful - logging out now...`, 'success');
+            setTimeout(() => {
+                showSuccessMessage(
+                    'Code submitted successfully to Database!\nSession ended for security.', 
+                    3
+                );
+            }, 500);
+        } else {
+            addTerminalOutput(`Database save failed but data preserved locally - logging out...`, 'warning');
+            setTimeout(() => {
+                showSuccessMessage(
+                    'Submission completed with local backup.\nSession ended for security.', 
+                    3
+                );
+            }, 500);
+        }
+
+    } catch (error) {
+        console.error('Submission error:', error);
+        addTerminalOutput(`Submission failed: ${error.message}`, 'error');
+        addTerminalOutput(`Data preserved locally in session logs`, 'warning');
+        submitButton.disabled = false;
+        submitButton.innerHTML = 'Submit & Logout';
+        isSubmissionInProgress = false;
+    }
+}
     
 
    function endSession() {

@@ -1,0 +1,108 @@
+{
+  "assignment_key": "zenith",
+  "pre_survey": {
+    "title": "Pre-Study Survey",
+    "description": "Please answer the following questions before starting the coding task.",
+    "questions": [
+      {
+        "id": "zenith_pre_q1",
+        "type": "likert",
+        "question": "I am confident in my programming abilities",
+        "required": true,
+        "scale": {
+          "min": 1,
+          "max": 5,
+          "minLabel": "Strongly Disagree",
+          "maxLabel": "Strongly Agree"
+        }
+      },
+      {
+        "id": "zenith_pre_q2",
+        "type": "multiple_choice",
+        "question": "What is your experience level with AI coding assistants?",
+        "required": true,
+        "options": [
+          "Never used",
+          "Beginner (< 6 months)",
+          "Intermediate (6-24 months)",
+          "Advanced (2+ years)"
+        ]
+      },
+      {
+        "id": "zenith_pre_q3",
+        "type": "open_ended",
+        "question": "What programming languages are you most comfortable with?",
+        "required": false,
+        "placeholder": "e.g., Python, JavaScript, Java...",
+        "max_length": 500
+      }
+    ]
+  },
+  "post_survey": {
+    "title": "Post-Study Survey",
+    "description": "Thank you for completing the task! Please share your experience.",
+    "questions": [
+      {
+        "id": "zenith_post_q1",
+        "type": "likert",
+        "question": "I trust the AI's responses",
+        "required": true,
+        "scale": {
+          "min": 1,
+          "max": 5,
+          "minLabel": "Strongly Disagree",
+          "maxLabel": "Strongly Agree"
+        }
+      },
+      {
+        "id": "zenith_post_q2",
+        "type": "likert",
+        "question": "I am confident in the AI's responses",
+        "required": true,
+        "scale": {
+          "min": 1,
+          "max": 5,
+          "minLabel": "Strongly Disagree",
+          "maxLabel": "Strongly Agree"
+        }
+      },
+      {
+        "id": "zenith_post_q3",
+        "type": "likert",
+        "question": "I am suspicious of the AI's intentions",
+        "required": true,
+        "scale": {
+          "min": 1,
+          "max": 5,
+          "minLabel": "Strongly Disagree",
+          "maxLabel": "Strongly Agree"
+        }
+      },
+      {
+        "id": "zenith_post_q4",
+        "type": "likert",
+        "question": "The AI's responses are consistent",
+        "required": true,
+        "scale": {
+          "min": 1,
+          "max": 5,
+          "minLabel": "Strongly Disagree",
+          "maxLabel": "Strongly Agree"
+        }
+      },
+      {
+        "id": "zenith_post_q5",
+        "type": "open_ended",
+        "question": "What did you like most about the AI assistant?",
+        "required": false,
+        "placeholder": "Share your thoughts...",
+        "max_length": 1000
+      }
+    ]
+  },
+  "periodic_survey": {
+    "enabled": false,
+    "interval": 4,
+    "questions": []
+  }
+}
