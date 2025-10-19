@@ -544,7 +544,7 @@ async def execute_c_code(code: str, timeout: int = 10):
             return {
                 "success": False,
                 "output": "",
-                "error": "Compilation timed out after 5 seconds"
+                "error": "Compilation timed out after 10 seconds"
             }
 
         # Execute the compiled binary

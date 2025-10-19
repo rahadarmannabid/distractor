@@ -1630,6 +1630,103 @@ function clearPeriodicSurveysFromStorage() {
 
 // ===== END NEW FUNCTIONS =====
 
+
+// ===== SUBMISSION DATA CACHING FUNCTIONS =====
+
+function captureAllSubmissionData() {
+    try {
+        const code = window.editor ? window.editor.getValue() : '';
+        const model = window.editor ? window.editor.getModel() : null;
+        
+        const submissionData = {
+            // Core code data
+            code: code,
+            lineCount: model ? model.getLineCount() : 0,
+            characterCount: code.length,
+            
+            // Session data
+            session: {
+                sessionId: currentSession.sessionId,
+                userId: currentSession.userId,
+                assignmentKey: currentSession.assignmentKey,
+                sessionToken: currentSession.sessionToken,
+                condition: currentSession.condition,
+                programmingLanguage: currentSession.programmingLanguage,
+                startTime: currentSession.startTime,
+                endTime: new Date().toISOString()
+            },
+            
+            // Activity data
+            activity: {
+                allActivityLogs: [...activityLog],
+                guessHistory: [...currentSession.guessHistory],
+                descHistory: [...currentSession.descHistory],
+                suggestionsHistory: [...currentSession.suggestionsHistory]
+            },
+            
+            // Metrics
+            metrics: {
+                totalKeystrokes: activitySummary.totalKeystrokes,
+                focusTime: activitySummary.focusTimeSeconds,
+                awayTime: activitySummary.awayTimeSeconds,
+                totalAIAnalyses: surveyData.analysisCount,
+                suggestionClicks: currentSession.suggestionClickCount,
+                compilerClicks: currentSession.compilerClickCount,
+                peakCodeLines: activitySummary.peakCodeLines
+            },
+            
+            // Survey data
+            surveys: {
+                periodicSurveys: [...surveyData.surveyResponses],
+                totalOccurrences: surveyData.periodicSurveyOccurrenceCount,
+                totalAnalyses: surveyData.analysisCount
+            },
+            
+            // Timestamp
+            capturedAt: new Date().toISOString()
+        };
+        
+        sessionStorage.setItem('pendingSubmissionData', JSON.stringify(submissionData));
+        console.log('✅ Captured all submission data to sessionStorage');
+        console.log('   Code length:', code.length);
+        console.log('   Line count:', submissionData.lineCount);
+        console.log('   Activity logs:', activityLog.length);
+        
+        return submissionData;
+        
+    } catch (error) {
+        console.error('❌ Failed to capture submission data:', error);
+        return null;
+    }
+}
+
+function retrieveCachedSubmissionData() {
+    try {
+        const cached = sessionStorage.getItem('pendingSubmissionData');
+        if (cached) {
+            const data = JSON.parse(cached);
+            console.log('✅ Retrieved cached submission data');
+            console.log('   Captured at:', data.capturedAt);
+            console.log('   Code length:', data.code.length);
+            return data;
+        }
+        console.log('ℹ️ No cached submission data found');
+        return null;
+    } catch (error) {
+        console.error('❌ Failed to retrieve cached data:', error);
+        return null;
+    }
+}
+
+function clearCachedSubmissionData() {
+    try {
+        sessionStorage.removeItem('pendingSubmissionData');
+        console.log('✅ Cleared cached submission data');
+    } catch (error) {
+        console.error('❌ Failed to clear cached data:', error);
+    }
+}
+
 // Code editing activity tracking
 function startCodeEditingActivity(editType, details = {}) {
     const now = Date.now();
@@ -3813,20 +3910,18 @@ async function submitToDatabase() {
     }
 
     console.log('=== CODE SUBMISSION START ===');
-    console.log('Periodic surveys to submit:', surveyData.surveyResponses.length);
-
-    // Log survey data for debugging
-    if (surveyData.surveyResponses.length > 0) {
-        console.log('Survey data summary:');
-        surveyData.surveyResponses.forEach((survey, idx) => {
-            console.log(`  Survey ${idx + 1}:`, {
-                occurrence: survey.occurrence,
-                responses: survey.responses.length,
-                analysisCount: survey.analysisCount,
-                hasAIHistory: !!survey.ai_history_at_survey
-            });
-        });
+    
+    // ✅ CRITICAL FIX: Capture ALL data RIGHT NOW before any redirects
+    const capturedData = captureAllSubmissionData();
+    if (!capturedData) {
+        addTerminalOutput('❌ Failed to capture submission data', 'error');
+        alert('Error preparing submission. Please try again.');
+        return;
     }
+    
+    addTerminalOutput('✅ Code and session data captured successfully', 'success');
+    addTerminalOutput(`   Code: ${capturedData.code.length} characters, ${capturedData.lineCount} lines`, 'info');
+    addTerminalOutput(`   Activity logs: ${capturedData.activity.allActivityLogs.length} entries`, 'info');
 
     const confirmSubmit = confirm(
         'IMPORTANT: Submitting your code will automatically log you out of this session.\n\n' +
@@ -3836,26 +3931,24 @@ async function submitToDatabase() {
 
     if (!confirmSubmit) {
         addTerminalOutput('Submission cancelled by user', 'warning');
+        // Clear the cache since user cancelled
+        clearCachedSubmissionData();
         return;
     }
 
     // Set submission flag to prevent any periodic surveys during submission process
     isSubmissionInProgress = true;
 
-    // ===== FIX: MERGE FINAL SURVEY INTO PERIODIC ARRAY =====
-    
-    // Step 1: Check if final periodic survey is needed
+    // Check if final periodic survey is needed
     if (surveyData.questions.length > 0 && !surveyData.finalSurveyResponse) {
-        // Show final periodic survey first
         addTerminalOutput('Final periodic survey required before submission...', 'info');
         showFinalSurvey();
-        return; // Exit here, will continue after final survey
+        return; // Will continue after final survey
     }
     
-    // Step 2: Check for post-survey
+    // Check for post-survey
     await checkAndShowPostSurvey();
 }
-
 // NEW FUNCTION: Check and show post survey if needed
 async function checkAndShowPostSurvey() {
     const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
@@ -3914,7 +4007,18 @@ async function proceedWithActualSubmission() {
     addTerminalOutput('Performing final AI analysis before submission...', 'info');
     await analyzeCurrentCode();
     
-    const code = window.editor.getValue();
+    // ✅ RETRIEVE CACHED DATA instead of reading from editor
+    const cachedData = retrieveCachedSubmissionData();
+    if (!cachedData) {
+        addTerminalOutput('❌ No cached submission data found!', 'error');
+        alert('Submission data was lost. Please try submitting again.');
+        isSubmissionInProgress = false;
+        return;
+    }
+
+    const code = cachedData.code;
+    addTerminalOutput('✅ Using cached submission data', 'success');
+    addTerminalOutput(`   Code: ${code.length} characters from cache`, 'info');
     
     submitButton.disabled = true;
     submitButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Submitting & Logging out...</div>';
@@ -3925,17 +4029,22 @@ async function proceedWithActualSubmission() {
             headers: {
                 'Content-Type': 'application/json',
             },
+            // NEW CODE - Use cached data:
             body: JSON.stringify({
-                code: code,
-                user_id: currentSession.userId,
-                assignment_key: currentSession.assignmentKey,
-                session_id: currentSession.sessionId,
-                programming_language: currentSession.programmingLanguage,
+                code: cachedData.code,
+                user_id: cachedData.session.userId,
+                assignment_key: cachedData.session.assignmentKey,
+                session_id: cachedData.session.sessionId,
+                programming_language: cachedData.session.programmingLanguage,
                 timestamp: new Date().toISOString(),
-                suggestion_clicked: currentSession.suggestionClickCount,
-                compiler_clicked: currentSession.compilerClickCount,
+                suggestion_clicked: cachedData.metrics.suggestionClicks,
+                compiler_clicked: cachedData.metrics.compilerClicks,
+                // Include ALL captured data
+                session_metadata: cachedData.session,
+                activity_logs: cachedData.activity.allActivityLogs,
+                activity_summary: cachedData.metrics,
                 survey_data: {
-                    periodic_surveys: surveyData.surveyResponses,  // NOW INCLUDES FINAL SURVEY
+                    periodic_surveys: surveyData.surveyResponses,
                     total_occurrences: surveyData.periodicSurveyOccurrenceCount,
                     total_analyses: surveyData.analysisCount,
                     survey_interval: surveyData.surveyInterval
@@ -3965,8 +4074,9 @@ async function proceedWithActualSubmission() {
         if (result.firebase_status === 'success') {
             addTerminalOutput(`Database save successful - logging out now...`, 'success');
             
-            // ✅ NEW: Clear periodic surveys from sessionStorage after successful submission
+            // Clear both caches
             clearPeriodicSurveysFromStorage();
+            clearCachedSubmissionData();  // ✅ ADD THIS LINE
             
             setTimeout(() => {
                 showSuccessMessage(
@@ -3974,7 +4084,7 @@ async function proceedWithActualSubmission() {
                     3
                 );
             }, 500);
-        } else {
+        }else {
             addTerminalOutput(`Database save failed but data preserved locally - logging out...`, 'warning');
             
             // ✅ NEW: Keep data in storage if submission failed (for retry)
@@ -3998,6 +4108,8 @@ async function proceedWithActualSubmission() {
     }
 }
     
+
+
 
    function endSession() {
        if (confirm('Are you sure you want to end this session? Any unsaved code will be lost.')) {
