@@ -1458,11 +1458,12 @@ const ACTIVITY_BATCH_SIZE = 10;
 
     let surveyData = {
     analysisCount: 0,
-    surveyInterval: 4, // Will be loaded from backend
+    surveyInterval: 4,
     surveyResponses: [],
     finalSurveyResponse: null,
     pendingSurvey: false,
-    questions: []
+    questions: [],
+    periodicSurveyOccurrenceCount: 0  // ADD THIS LINE
 };
 
 // ADD submission state flag
@@ -1570,6 +1571,64 @@ function resetIdleTimer() {
         });
     }, 30000); // 30 seconds
 }
+
+
+// ===== NEW FUNCTIONS FOR SESSIONSTORAGE PERSISTENCE =====
+
+function savePeriodicSurveysToStorage() {
+    try {
+        const storageKey = `periodicSurveys_${currentSession.sessionId}`;
+        const dataToSave = {
+            surveyResponses: surveyData.surveyResponses,
+            periodicSurveyOccurrenceCount: surveyData.periodicSurveyOccurrenceCount,
+            analysisCount: surveyData.analysisCount,
+            surveyInterval: surveyData.surveyInterval,
+            savedAt: new Date().toISOString()
+        };
+        
+        sessionStorage.setItem(storageKey, JSON.stringify(dataToSave));
+        console.log(`✅ Saved ${surveyData.surveyResponses.length} periodic surveys to sessionStorage`);
+    } catch (error) {
+        console.error('❌ Failed to save periodic surveys to sessionStorage:', error);
+    }
+}
+
+function restorePeriodicSurveysFromStorage() {
+    try {
+        const storageKey = `periodicSurveys_${currentSession.sessionId}`;
+        const savedData = sessionStorage.getItem(storageKey);
+        
+        if (savedData) {
+            const parsedData = JSON.parse(savedData);
+            surveyData.surveyResponses = parsedData.surveyResponses || [];
+            surveyData.periodicSurveyOccurrenceCount = parsedData.periodicSurveyOccurrenceCount || 0;
+            surveyData.analysisCount = parsedData.analysisCount || 0;
+            surveyData.surveyInterval = parsedData.surveyInterval || 4;
+            
+            console.log(`✅ Restored ${surveyData.surveyResponses.length} periodic surveys from sessionStorage`);
+            console.log(`   Saved at: ${parsedData.savedAt}`);
+            return true;
+        } else {
+            console.log('ℹ️ No periodic surveys found in sessionStorage');
+            return false;
+        }
+    } catch (error) {
+        console.error('❌ Failed to restore periodic surveys from sessionStorage:', error);
+        return false;
+    }
+}
+
+function clearPeriodicSurveysFromStorage() {
+    try {
+        const storageKey = `periodicSurveys_${currentSession.sessionId}`;
+        sessionStorage.removeItem(storageKey);
+        console.log('✅ Cleared periodic surveys from sessionStorage');
+    } catch (error) {
+        console.error('❌ Failed to clear periodic surveys from sessionStorage:', error);
+    }
+}
+
+// ===== END NEW FUNCTIONS =====
 
 // Code editing activity tracking
 function startCodeEditingActivity(editType, details = {}) {
@@ -1803,6 +1862,9 @@ async function initializeFromURL() {
             descHistory: [],
             suggestionsHistory: []
         };
+        
+        // ✅ NEW: Restore periodic surveys from sessionStorage if returning from post-survey
+        restorePeriodicSurveysFromStorage();
         
         // Update UI
         userDisplay.textContent = `User: ${authData.userId}`;
@@ -2764,11 +2826,18 @@ function showPeriodicSurvey() {
         return;
     }
     
+    // Increment occurrence counter
+    surveyData.periodicSurveyOccurrenceCount++;
+    
+    // CAPTURE AI HISTORY NOW (not later)
+    const aiHistorySnapshot = collectAIHistoryContext();
+    
     // ACTIVITY LOG: Survey start
     logActivity('survey_interaction', {
         survey_type: 'periodic',
         action: 'survey_started',
-        analysis_count_trigger: surveyData.analysisCount
+        analysis_count_trigger: surveyData.analysisCount,
+        occurrence_number: surveyData.periodicSurveyOccurrenceCount
     });
     
     surveyData.pendingSurvey = true;
@@ -2776,11 +2845,24 @@ function showPeriodicSurvey() {
     
     // Generate survey HTML
     const questionsHTML = generateSurveyHTML(surveyData.questions);
-    const aiHistoryContext = collectAIHistoryContext();
-    const historyHTML = generateAIHistoryDisplayHTML(aiHistoryContext);
+    const historyHTML = generateAIHistoryDisplayHTML(aiHistorySnapshot);
+    
+    // Store snapshot for later use
+    surveyData.currentSurveyAISnapshot = aiHistorySnapshot;
 
     document.getElementById('surveyQuestions').innerHTML = questionsHTML;
     document.getElementById('surveyAIHistory').innerHTML = historyHTML;
+    
+    // Update header to show occurrence number
+    const surveyHeader = document.querySelector('#surveyModal .survey-header h2');
+    if (surveyHeader) {
+        surveyHeader.textContent = `Periodic Survey #${surveyData.periodicSurveyOccurrenceCount}`;
+    }
+    
+    const surveyDescription = document.querySelector('#surveyModal .survey-header p');
+    if (surveyDescription) {
+        surveyDescription.textContent = `Please rate your current experience with the AI assistant (Survey ${surveyData.periodicSurveyOccurrenceCount} of approximately ${Math.ceil(surveyData.analysisCount / surveyData.surveyInterval)} total)`;
+    }
     
     // Show modal
     document.getElementById('surveyModal').classList.remove('hidden');
@@ -2798,18 +2880,27 @@ function showFinalSurvey() {
         return;
     }
     
+    // Increment occurrence counter for final survey
+    surveyData.periodicSurveyOccurrenceCount++;
+    
+    // CAPTURE AI HISTORY NOW (not at submission time)
+    const aiHistorySnapshot = collectAIHistoryContext();
+    
     // ACTIVITY LOG: Final survey start
     logActivity('survey_interaction', {
         survey_type: 'final_periodic',
-        action: 'survey_started'
+        action: 'survey_started',
+        occurrence_number: surveyData.periodicSurveyOccurrenceCount
     });
     
     blockEditor(true);
     
     // Generate survey HTML
     const questionsHTML = generateSurveyHTML(surveyData.questions);
-    const aiHistoryContext = collectAIHistoryContext();
-    const historyHTML = generateAIHistoryDisplayHTML(aiHistoryContext);
+    const historyHTML = generateAIHistoryDisplayHTML(aiHistorySnapshot);
+    
+    // Store snapshot for later use
+    surveyData.currentSurveyAISnapshot = aiHistorySnapshot;
 
     // REUSE the existing surveyModal (not a separate finalSurveyModal)
     document.getElementById('surveyQuestions').innerHTML = questionsHTML;
@@ -3069,21 +3160,42 @@ function setupSurveyEventListeners(modalId, submitButtonId, submitFunction) {
 }
 
 async function submitPeriodicSurvey() {
+    console.log('=== PERIODIC SURVEY SUBMISSION START ===');
     const responses = collectSurveyResponses('surveyModal');
+    
+    console.log('Responses collected:', responses.length, 'of', surveyData.questions.length);
     
     if (responses.length !== surveyData.questions.length) {
         alert('Please answer all questions before submitting.');
+        console.error('Incomplete survey - missing answers');
         return;
     }
     
     try {
+        console.log('Saving survey responses to backend...');
         await saveSurveyResponses(responses, 'periodic');
         
-        surveyData.surveyResponses.push({
+        // Use the AI snapshot captured when survey was shown
+        const aiSnapshot = surveyData.currentSurveyAISnapshot || collectAIHistoryContext();
+        
+        const surveyEntry = {
+            occurrence: surveyData.periodicSurveyOccurrenceCount,
             timestamp: new Date().toISOString(),
             analysisCount: surveyData.analysisCount,
-            responses: responses
-        });
+            responses: responses,
+            ai_history_at_survey: aiSnapshot
+        };
+        
+        console.log('Adding survey to array:', surveyEntry);
+        surveyData.surveyResponses.push(surveyEntry);
+        
+        // ✅ NEW: Save to sessionStorage immediately
+        savePeriodicSurveysToStorage();
+        
+        console.log('Total periodic surveys now:', surveyData.surveyResponses.length);
+        
+        // Clear the snapshot
+        surveyData.currentSurveyAISnapshot = null;
         
         document.getElementById('surveyModal').classList.add('hidden');
         blockEditor(false);
@@ -3095,16 +3207,21 @@ async function submitPeriodicSurvey() {
             action: 'survey_completed',
             responses_count: responses.length,
             ai_history_included: true,
-            ai_analyses_at_survey: surveyData.analysisCount
+            ai_analyses_at_survey: surveyData.analysisCount,
+            occurrence_number: surveyData.periodicSurveyOccurrenceCount
         });
         
         const aiHistoryCount = currentSession.guessHistory.length;
         addTerminalOutput('Survey completed successfully - you can continue coding!', 'success');
         addTerminalOutput(`AI History: ${aiHistoryCount} analyses captured with survey`, 'info');
         
+        console.log('=== PERIODIC SURVEY SUBMISSION SUCCESS ===');
+        
     } catch (error) {
         console.error('Survey submission error:', error);
+        console.error('Error stack:', error.stack);
         addTerminalOutput('Survey submission failed - please try again', 'error');
+        alert('Survey submission failed. Please try again or contact support.');
     }
 }
 
@@ -3128,12 +3245,33 @@ async function submitFinalSurvey() {
     }
     
     try {
+        // Use the AI snapshot captured when survey was shown
+        const finalAISnapshot = surveyData.currentSurveyAISnapshot || collectAIHistoryContext();
+        
         await saveSurveyResponses(responses, 'final');
         
+        // Occurrence count already incremented when survey was shown
+        // (No need to increment again)
+        
+        // MERGE into periodic surveys array (not separate finalSurveyResponse)
+        surveyData.surveyResponses.push({
+            occurrence: surveyData.periodicSurveyOccurrenceCount,
+            timestamp: new Date().toISOString(),
+            analysisCount: surveyData.analysisCount,
+            responses: responses,
+            ai_history_at_survey: finalAISnapshot,
+            is_final: true,  // ADD FLAG to identify this is the final one
+            triggered_at_submission: true
+        });
+        
+        // Also set finalSurveyResponse for backward compatibility
         surveyData.finalSurveyResponse = {
             timestamp: new Date().toISOString(),
             responses: responses
         };
+        
+        // ✅ NEW: Save to sessionStorage before navigating away
+        savePeriodicSurveysToStorage();
         
         // Hide the modal
         document.getElementById('surveyModal').classList.add('hidden');
@@ -3667,6 +3805,29 @@ async function submitToDatabase() {
         return;
     }
 
+    // Check for pending survey before submission
+    if (surveyData.pendingSurvey) {
+        addTerminalOutput('⚠️ Please complete the pending survey before submitting code', 'warning');
+        alert('Please complete the pending survey before submitting your code.');
+        return;
+    }
+
+    console.log('=== CODE SUBMISSION START ===');
+    console.log('Periodic surveys to submit:', surveyData.surveyResponses.length);
+
+    // Log survey data for debugging
+    if (surveyData.surveyResponses.length > 0) {
+        console.log('Survey data summary:');
+        surveyData.surveyResponses.forEach((survey, idx) => {
+            console.log(`  Survey ${idx + 1}:`, {
+                occurrence: survey.occurrence,
+                responses: survey.responses.length,
+                analysisCount: survey.analysisCount,
+                hasAIHistory: !!survey.ai_history_at_survey
+            });
+        });
+    }
+
     const confirmSubmit = confirm(
         'IMPORTANT: Submitting your code will automatically log you out of this session.\n\n' +
         'You will need to start a new session with your credentials to continue coding.\n\n' +
@@ -3681,7 +3842,7 @@ async function submitToDatabase() {
     // Set submission flag to prevent any periodic surveys during submission process
     isSubmissionInProgress = true;
 
-    // ===== CORRECTED FLOW: Final Periodic Survey → Post Survey → Submit =====
+    // ===== FIX: MERGE FINAL SURVEY INTO PERIODIC ARRAY =====
     
     // Step 1: Check if final periodic survey is needed
     if (surveyData.questions.length > 0 && !surveyData.finalSurveyResponse) {
@@ -3743,6 +3904,12 @@ async function proceedWithActualSubmission() {
     // This is the original submission code
     isSubmissionInProgress = true;
     
+    // ✅ NEW: Restore periodic surveys from storage before submission
+    const restored = restorePeriodicSurveysFromStorage();
+    if (restored) {
+        addTerminalOutput(`Restored ${surveyData.surveyResponses.length} periodic surveys from storage`, 'info');
+    }
+    
     // FINAL AI ANALYSIS BEFORE SUBMISSION
     addTerminalOutput('Performing final AI analysis before submission...', 'info');
     await analyzeCurrentCode();
@@ -3768,9 +3935,10 @@ async function proceedWithActualSubmission() {
                 suggestion_clicked: currentSession.suggestionClickCount,
                 compiler_clicked: currentSession.compilerClickCount,
                 survey_data: {
-                    periodic_surveys: surveyData.surveyResponses,
-                    final_survey: surveyData.finalSurveyResponse,
-                    total_analyses: surveyData.analysisCount
+                    periodic_surveys: surveyData.surveyResponses,  // NOW INCLUDES FINAL SURVEY
+                    total_occurrences: surveyData.periodicSurveyOccurrenceCount,
+                    total_analyses: surveyData.analysisCount,
+                    survey_interval: surveyData.surveyInterval
                 }
             })
         });
@@ -3796,6 +3964,10 @@ async function proceedWithActualSubmission() {
         
         if (result.firebase_status === 'success') {
             addTerminalOutput(`Database save successful - logging out now...`, 'success');
+            
+            // ✅ NEW: Clear periodic surveys from sessionStorage after successful submission
+            clearPeriodicSurveysFromStorage();
+            
             setTimeout(() => {
                 showSuccessMessage(
                     'Code submitted successfully to Database!\nSession ended for security.', 
@@ -3804,6 +3976,10 @@ async function proceedWithActualSubmission() {
             }, 500);
         } else {
             addTerminalOutput(`Database save failed but data preserved locally - logging out...`, 'warning');
+            
+            // ✅ NEW: Keep data in storage if submission failed (for retry)
+            console.log('⚠️ Keeping periodic surveys in sessionStorage due to submission failure');
+            
             setTimeout(() => {
                 showSuccessMessage(
                     'Submission completed with local backup.\nSession ended for security.', 
@@ -4017,10 +4193,29 @@ async function safeInitialize() {
     }
 }
 
-// Initialize on page load with better error handling
+// Prevent closing modal by clicking outside
 document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM loaded, starting initialization...');
     safeInitialize();
+    
+    // Setup modal protection
+    const surveyModal = document.getElementById('surveyModal');
+    
+    surveyModal.addEventListener('click', function(e) {
+        if (e.target === this && surveyData.pendingSurvey) {
+            e.preventDefault();
+            e.stopPropagation();
+            addTerminalOutput('⚠️ Please complete the survey to continue', 'warning');
+        }
+    });
+    
+    // Prevent ESC key from closing modal
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && surveyData.pendingSurvey) {
+            e.preventDefault();
+            addTerminalOutput('⚠️ Please complete the survey to continue', 'warning');
+        }
+    });
 });
 
 // Backup initialization if DOM already loaded

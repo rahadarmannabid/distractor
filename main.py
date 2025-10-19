@@ -730,24 +730,31 @@ def save_session_to_local(session_log: SessionLog):
 def extract_survey_ai_history_summary(session_log: SessionLog, survey_data: Dict[str, Any] = None) -> Dict[str, Any]:
     """Extract a summary of AI history context for surveys"""
     if not survey_data:
-        return {}
+        return {
+            'total_surveys_completed': 0,
+            'ai_analyses_per_survey': []
+        }
+    
+    periodic_surveys = survey_data.get('periodic_surveys', []) if isinstance(survey_data.get('periodic_surveys'), list) else []
+    final_survey = survey_data.get('final_survey')
     
     summary = {
-        'total_surveys_completed': len(survey_data.get('periodic_surveys', [])) + (1 if survey_data.get('final_survey') else 0),
+        'total_surveys_completed': len(periodic_surveys) + (1 if final_survey else 0),
         'ai_analyses_per_survey': []
     }
     
-    # Track AI analyses at each survey point
-    for survey in survey_data.get('periodic_surveys', []):
+    # Track AI analyses at each periodic survey point
+    for survey in periodic_surveys:
         summary['ai_analyses_per_survey'].append({
             'survey_timestamp': survey.get('timestamp'),
             'analyses_count_at_survey': survey.get('analysisCount', 0),
             'ai_history_captured': True
         })
     
-    if survey_data.get('final_survey'):
+    # Add final survey context if it exists
+    if final_survey:
         summary['final_survey_ai_context'] = {
-            'timestamp': survey_data['final_survey'].get('timestamp'),
+            'timestamp': final_survey.get('timestamp'),
             'total_analyses_at_completion': session_log.activity_summary.total_ai_analyses,
             'ai_history_captured': True
         }
@@ -2197,7 +2204,7 @@ async def save_session_to_firebase(
     programming_language: str = "unknown", 
     survey_data: Dict[str, Any] = None
 ):
-    """Save complete session data to Firebase including survey questions and responses"""
+    """Save complete session data to Firebase with surveys as separate top-level entries"""
     if not firebase_db:
         logger.warning("Firebase not available for saving session data")
         return False
@@ -2205,15 +2212,27 @@ async def save_session_to_firebase(
     try:
         condition_path = f"condition_{session_log.condition}"
         
-        # ===== PREPARE SURVEY DATA WITH QUESTIONS + RESPONSES =====
-        pre_survey_data = None
-        post_survey_data = None
+        # ===== PREPARE SESSION METADATA =====
+        session_metadata = {
+            'user_id': session_log.user_id,
+            'assignment_key': session_log.assignment_id,
+            'session_id': session_log.session_id,
+            'condition': session_log.condition,
+            'programming_language': programming_language,
+            'starting_time': session_log.code_start_timestamp,
+            'end_time': session_log.code_submit_timestamp,
+            'submitted_code': session_log.submitted_full_code,
+            'suggestion_clicked': suggestion_clicked,
+            'compiler_clicked': compiler_clicked,
+        }
         
+        # ===== PREPARE PRE-SURVEY =====
+        pre_survey = None
         if session_log.pre_survey_responses:
-            pre_survey_data = {
+            pre_survey = {
                 'status': session_log.pre_survey_status,
                 'timestamp': session_log.pre_survey_timestamp,
-                'completed': session_log.pre_survey_status == SurveyStatus.COMPLETED,
+                'completed': session_log.pre_survey_status == SurveyStatus.COMPLETED or session_log.pre_survey_status == "completed",
                 'survey_title': session_log.pre_survey_responses.get('survey_title', 'Pre-Study Survey'),
                 'survey_description': session_log.pre_survey_responses.get('survey_description', ''),
                 'total_questions': session_log.pre_survey_responses.get('total_questions', 0),
@@ -2223,11 +2242,13 @@ async def save_session_to_firebase(
                 'responses': session_log.pre_survey_responses.get('responses', [])
             }
         
+        # ===== PREPARE POST-SURVEY =====
+        post_survey = None
         if session_log.post_survey_responses:
-            post_survey_data = {
+            post_survey = {
                 'status': session_log.post_survey_status,
                 'timestamp': session_log.post_survey_timestamp,
-                'completed': session_log.post_survey_status == SurveyStatus.COMPLETED,
+                'completed': session_log.post_survey_status == SurveyStatus.COMPLETED or session_log.post_survey_status == "completed",
                 'survey_title': session_log.post_survey_responses.get('survey_title', 'Post-Study Survey'),
                 'survey_description': session_log.post_survey_responses.get('survey_description', ''),
                 'total_questions': session_log.post_survey_responses.get('total_questions', 0),
@@ -2237,30 +2258,69 @@ async def save_session_to_firebase(
                 'responses': session_log.post_survey_responses.get('responses', []),
                 'ai_context': session_log.post_survey_responses.get('ai_context', {})
             }
-        # ===== END OF SURVEY DATA PREPARATION =====
         
-        # Create summary data
-        summary_data = {
-            'starting_time': session_log.code_start_timestamp,
-            'submitted_code': session_log.submitted_full_code,
-            'programming_language': programming_language,
-            'suggestion_clicked': suggestion_clicked,
-            'compiler_clicked': compiler_clicked,
-            'end_time': session_log.code_submit_timestamp,
-            'assignment_key': session_log.assignment_id,
+        # ===== PREPARE PERIODIC SURVEYS WITH AI HISTORY =====
+        periodic_surveys_data = []
+        
+        # Log what we received
+        logger.info(f"Processing session for Firebase save:")
+        logger.info(f"  - User: {session_log.user_id}")
+        logger.info(f"  - Session: {session_log.session_id}")
+        logger.info(f"  - Survey data received: {bool(survey_data)}")
+
+        if survey_data:
+            logger.info(f"  - Survey data keys: {list(survey_data.keys())}")
+            logger.info(f"  - Periodic surveys: {len(survey_data.get('periodic_surveys', []))}")
             
-            # ===== ADD SURVEY DATA TO SUMMARY =====
-            'pre_survey': pre_survey_data,
-            'post_survey': post_survey_data,
-            # ===== END OF SURVEY ADDITION =====
+            # Log the actual content if it exists
+            if survey_data.get('periodic_surveys'):
+                logger.info(f"  - First survey sample: {survey_data['periodic_surveys'][0] if survey_data['periodic_surveys'] else 'empty'}")
+        else:
+            logger.warning("  - NO SURVEY DATA RECEIVED!")
+        
+        # Get periodic survey questions from environment
+        periodic_survey_questions = []
+        question_num = 1
+        while True:
+            question = os.getenv(f"Q{question_num}")
+            if question:
+                periodic_survey_questions.append(question.strip())
+                question_num += 1
+            else:
+                break
+        
+        logger.info(f"  - Periodic survey questions loaded: {len(periodic_survey_questions)}")
+        
+        if survey_data and survey_data.get('periodic_surveys'):
+            logger.info(f"  - Processing {len(survey_data.get('periodic_surveys', []))} periodic surveys...")
             
-            'periodic_surveys': survey_data,
-            'survey_ai_history_context': extract_survey_ai_history_summary(session_log, survey_data)
-        }
+            periodic_surveys_data = [
+                {
+                    'occurrence': survey.get('occurrence', idx + 1),
+                    'timestamp': survey.get('timestamp'),
+                    'status': survey.get('status', 'completed'),
+                    'triggered_at_analysis_count': survey.get('analysisCount'),
+                    'is_final': survey.get('is_final', False),
+                    'triggered_at_submission': survey.get('triggered_at_submission', False),
+                    
+                    # STORE THE QUESTIONS that were asked
+                    'questions': periodic_survey_questions,
+                    
+                    # Store responses with context
+                    'responses': [
+                        {
+                            'question': resp.get('question'),
+                            'response': resp.get('response')
+                        } for resp in survey.get('responses', [])
+                    ],
+                    
+                    # AI history captured when this survey was shown
+                    'ai_history_at_survey_time': survey.get('ai_history_at_survey', {})
+                }
+                for idx, survey in enumerate(survey_data.get('periodic_surveys', []))
+            ]
         
-        # Rest of your existing Firebase save code continues...
-        # (Keep your existing code for logs_data, activity_log_data, etc.)
-        
+        # ===== PREPARE AI LOGS =====
         logs_data = {
             'ai_guesses': {
                 str(i): {
@@ -2290,21 +2350,67 @@ async def save_session_to_firebase(
                 } for i, entry in enumerate(session_log.suggestions_only_history, 1)
             }
         
+        # ===== PREPARE ACTIVITY LOG =====
         activity_log_data = {
             'entries': [entry.dict() for entry in session_log.activity_log],
             'summary': session_log.activity_summary.dict()
         }
         
+        # ===== BUILD FINAL USER DATA WITH SEPARATE SURVEYS =====
         user_data = {
-            'summary': summary_data,
+            'session_metadata': session_metadata,
             'logs': logs_data,
             'activity_log': activity_log_data
         }
         
+        # Add surveys as separate top-level entries
+        if pre_survey:
+            user_data['pre_survey'] = pre_survey
+        
+        if post_survey:
+            user_data['post_survey'] = post_survey
+        
+        if periodic_surveys_data:
+            user_data['periodic_surveys'] = {
+                'metadata': {
+                    'total_occurrences': survey_data.get('total_occurrences', len(periodic_surveys_data)),
+                    'survey_interval': survey_data.get('survey_interval', 4),
+                    'questions_asked': periodic_survey_questions  # Store questions for reference
+                },
+                'occurrences': {
+                    f"occurrence_{survey['occurrence']}": {
+                        'occurrence_number': survey['occurrence'],
+                        'timestamp': survey['timestamp'],
+                        'triggered_at_analysis_count': survey['triggered_at_analysis_count'],
+                        'is_final': survey['is_final'],
+                        'triggered_at_submission': survey.get('triggered_at_submission', False),
+                        'questions': survey['questions'],
+                        'responses': survey['responses'],
+                        'ai_history_at_survey_time': survey['ai_history_at_survey_time']
+                    } for survey in periodic_surveys_data
+                }
+            }
+        
+        # ===== SAVE TO FIREBASE =====
         user_ref = firebase_db.child(f'{condition_path}/{session_log.assignment_id}/{session_log.user_id}')
         user_ref.set(user_data)
         
-        logger.info(f"Session with surveys saved to Firebase: {condition_path}/{session_log.assignment_id}/{session_log.user_id}")
+        logger.info(f"Session with separated surveys saved to Firebase: {condition_path}/{session_log.assignment_id}/{session_log.user_id}")
+        logger.info(f"  - Session metadata: {len(str(session_metadata))} bytes")
+        logger.info(f"  - Pre-survey: {'saved' if pre_survey else 'not present'}")
+        logger.info(f"  - Post-survey: {'saved' if post_survey else 'not present'}")
+        
+        if periodic_surveys_data:
+            logger.info(f"  - Periodic surveys: {len(periodic_surveys_data)} occurrences")
+            for survey in periodic_surveys_data:
+                occurrence_type = "FINAL" if survey['is_final'] else f"#{survey['occurrence']}"
+                logger.info(f"    • Occurrence {occurrence_type}: {survey['triggered_at_analysis_count']} analyses, {len(survey['responses'])} responses")
+        else:
+            logger.info(f"  - Periodic surveys: none")
+            
+        logger.info(f"  - AI logs: {len(logs_data.get('ai_guesses', {}))} AI analyses")
+        logger.info(f"  - Activity log: {len(session_log.activity_log)} entries")
+        
         return True
         
     except Exception as e:
