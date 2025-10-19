@@ -500,7 +500,7 @@
 
         <div class="info-section" style="display: none;" id="infoSection">
             <div class="info-text">
-                Your responses are securely stored and used for research purposes only.
+                All questions must be completed to submit the survey. Your responses are securely stored and used for research purposes only.
             </div>
             <div class="security-badge">
                 🔒 Secure Research Survey
@@ -560,9 +560,10 @@
                     throw new Error('Invalid survey type');
                 }
 
-                // Update header
+                // Update header - add mandatory message
                 document.getElementById('surveyTitle').textContent = this.surveyConfig.title || `${this.surveyType.toUpperCase()} Survey`;
-                document.getElementById('surveyDescription').textContent = this.surveyConfig.description || '';
+                const descriptionText = this.surveyConfig.description || '';
+                document.getElementById('surveyDescription').textContent = descriptionText + (descriptionText ? ' ' : '') + 'All questions are mandatory.';
             }
 
             renderSurvey() {
@@ -576,6 +577,8 @@
                 });
 
                 document.getElementById('buttonGroup').style.display = 'flex';
+                // Disable submit button initially - will be enabled when all questions answered
+                document.getElementById('submitBtn').disabled = true;
                 this.updateProgress();
             }
 
@@ -586,7 +589,8 @@
 
                 const label = document.createElement('label');
                 label.className = 'question-label';
-                label.innerHTML = `${index + 1}. ${question.question} ${question.required ? '<span class="required">*</span>' : ''}`;
+                // ALL questions are mandatory - always show red asterisk
+                label.innerHTML = `${index + 1}. ${question.question} <span class="required">*</span>`;
                 div.appendChild(label);
 
                 if (question.type === 'likert') {
@@ -682,7 +686,17 @@
                 textarea.className = 'text-input';
                 textarea.placeholder = question.placeholder || 'Enter your response here...';
                 textarea.maxLength = question.max_length || 1000;
-                textarea.addEventListener('input', (e) => this.handleResponse(question.id, e.target.value));
+                textarea.addEventListener('input', (e) => {
+                    const value = e.target.value.trim();
+                    // Only count as answered if there's actual content
+                    if (value.length > 0) {
+                        this.handleResponse(question.id, value);
+                    } else {
+                        // Remove from responses if empty
+                        delete this.responses[question.id];
+                        this.updateProgress();
+                    }
+                });
 
                 return textarea;
             }
@@ -698,6 +712,12 @@
                 const progress = (answeredQuestions / totalQuestions) * 100;
 
                 document.getElementById('progressFill').style.width = `${progress}%`;
+                
+                // Enable submit button only when ALL questions are answered
+                const submitBtn = document.getElementById('submitBtn');
+                if (submitBtn) {
+                    submitBtn.disabled = answeredQuestions < totalQuestions;
+                }
             }
 
             async updateSurveyStatus(status) {
@@ -724,12 +744,13 @@
             }
 
             async submitSurvey() {
-                // Validate required questions
-                const requiredQuestions = this.surveyConfig.questions.filter(q => q.required);
-                const missingRequired = requiredQuestions.filter(q => !this.responses[q.id]);
+                // Validate ALL questions are answered (all questions are mandatory)
+                const totalQuestions = this.surveyConfig.questions.length;
+                const answeredQuestions = Object.keys(this.responses).length;
+                const unansweredCount = totalQuestions - answeredQuestions;
 
-                if (missingRequired.length > 0) {
-                    this.showError(`Please answer all required questions (${missingRequired.length} remaining)`);
+                if (unansweredCount > 0) {
+                    this.showError(`Please answer all questions (${unansweredCount} remaining). All questions are required.`);
                     return;
                 }
 
@@ -759,11 +780,11 @@
                                 max_length: q.max_length
                             },
                             answer: this.responses[q.id] || null,
-                            required: q.required
+                            required: true  // All questions are now mandatory
                         })),
                         timestamp: new Date().toISOString(),
                         total_questions: this.surveyConfig.questions.length,
-                        required_questions: requiredQuestions.length,
+                        required_questions: this.surveyConfig.questions.length,  // All questions are required
                         completion_time_seconds: completionTime
                     };
 
