@@ -3381,9 +3381,6 @@ async function submitFinalSurvey() {
         
         await saveSurveyResponses(responses, 'final');
         
-        // Occurrence count already incremented when survey was shown
-        // (No need to increment again)
-        
         // MERGE into periodic surveys array (not separate finalSurveyResponse)
         surveyData.surveyResponses.push({
             occurrence: surveyData.periodicSurveyOccurrenceCount,
@@ -3391,7 +3388,7 @@ async function submitFinalSurvey() {
             analysisCount: surveyData.analysisCount,
             responses: responses,
             ai_history_at_survey: finalAISnapshot,
-            is_final: true,  // ADD FLAG to identify this is the final one
+            is_final: true,
             triggered_at_submission: true
         });
         
@@ -3401,7 +3398,7 @@ async function submitFinalSurvey() {
             responses: responses
         };
         
-        // ✅ NEW: Save to sessionStorage before navigating away
+        // ✅ Save to sessionStorage before navigating away
         savePeriodicSurveysToStorage();
         
         // Hide the modal
@@ -3420,6 +3417,18 @@ async function submitFinalSurvey() {
         addTerminalOutput('Final periodic survey completed!', 'success');
         addTerminalOutput(`Final AI History: ${aiHistoryCount} total analyses captured`, 'info');
         
+        // ✅✅✅ NEW: DOWNLOAD CODE AUTOMATICALLY ✅✅✅
+        addTerminalOutput('📥 Downloading your code...', 'info');
+        const downloadSuccess = downloadCodeFile();
+        
+        if (downloadSuccess) {
+            addTerminalOutput('✅ Code file downloaded successfully!', 'success');
+            // Small delay to ensure download completes
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        } else {
+            addTerminalOutput('⚠️ Code download encountered an issue, but submission will continue', 'warning');
+        }
+        
         // Now check for post-survey
         await checkAndShowPostSurvey();
         
@@ -3430,7 +3439,66 @@ async function submitFinalSurvey() {
     }
 }
 
-
+function downloadCodeFile() {
+    try {
+        const code = window.editor.getValue();
+        if (!code || code.trim().length === 0) {
+            console.warn('No code to download');
+            return false;
+        }
+        
+        // Determine file extension based on programming language
+        const languageExtensions = {
+            'javascript': '.js',
+            'python': '.py',
+            'c': '.c',
+            'cpp': '.cpp',
+            'java': '.java',
+            'csharp': '.cs',
+            'html': '.html',
+            'css': '.css',
+            'sql': '.sql'
+        };
+        
+        const language = currentSession.programmingLanguage || 'javascript';
+        const extension = languageExtensions[language] || '.txt';
+        
+        // Create filename with user and assignment info
+        const fileName = `${currentSession.userId}_${currentSession.assignmentKey}_code${extension}`;
+        
+        // Create blob and download
+        const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        
+        // Trigger download
+        document.body.appendChild(link);
+        link.click();
+        
+        // Cleanup
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        console.log(`✅ Code downloaded as: ${fileName}`);
+        addTerminalOutput(`✅ Code downloaded as: ${fileName}`, 'success');
+        
+        // Log the download activity
+        logActivity('code_download', {
+            file_name: fileName,
+            language: language,
+            code_length: code.length,
+            download_trigger: 'final_survey_completion'
+        });
+        
+        return true;
+    } catch (error) {
+        console.error('❌ Code download failed:', error);
+        addTerminalOutput('⚠️ Code download failed, but submission will continue', 'warning');
+        return false;
+    }
+}
 
 function collectSurveyResponses(modalId) {
     const modal = document.getElementById(modalId);
