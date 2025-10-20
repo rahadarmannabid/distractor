@@ -525,7 +525,7 @@ async def execute_c_code(code: str, timeout: int = 10):
             # Wait for compilation with timeout
             compile_stdout, compile_stderr = await asyncio.wait_for(
                 compile_process.communicate(), 
-                timeout=5
+                timeout=10
             )
             
             compile_stderr_str = compile_stderr.decode('utf-8', errors='replace')

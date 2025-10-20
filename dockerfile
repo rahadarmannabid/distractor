@@ -4,6 +4,14 @@ FROM python:3.11-slim
 # Set work directory
 WORKDIR /app
 
+# Install compilers and build tools
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    default-jdk \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy requirements file
 COPY requirements.txt .
 
