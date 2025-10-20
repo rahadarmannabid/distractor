@@ -32,6 +32,7 @@ from enum import Enum
 import json
 from pathlib import Path
 from fastapi.responses import FileResponse
+from admin import router as admin_router  # ADD THIS LINE
 
 
 
@@ -712,6 +713,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(admin_router)  # ADD THIS LINE
 
 
 
@@ -2433,6 +2436,12 @@ async def serve_survey(request: Request):
         "survey_type": survey_type
     })
 
+
+@app.get("/admin-panel", response_class=HTMLResponse)
+@app.get("/admin-panel.html", response_class=HTMLResponse)
+async def serve_admin_panel(request: Request):
+    """Serve the admin panel page"""
+    return templates.TemplateResponse("admin_client.html", {"request": request})
 
 @app.get("/download-assignment/{assignment_key}")
 async def download_assignment(assignment_key: str):
