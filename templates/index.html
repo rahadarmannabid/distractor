@@ -1175,6 +1175,47 @@
     to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
 }
 
+/* Active Session Warning Banner */
+.session-warning-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(135deg, #2d2d30, #3e3e42);
+    color: #d4d4d4;
+    padding: 10px 20px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 500;
+    z-index: 9999;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    font-family: 'Consolas', 'Menlo', 'Ubuntu Mono', monospace;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    border-bottom: 1px solid #569cd6;
+}
+
+.session-warning-banner .warning-icon {
+    font-size: 16px;
+    color: #f59e0b;
+}
+
+.session-warning-banner .warning-text {
+    flex: 1;
+    max-width: 800px;
+}
+
+.session-warning-banner .warning-text strong {
+    color: #569cd6;
+}
+
+/* Adjust main app when banner is shown */
+.with-warning-banner {
+    margin-top: 48px !important;
+}
+
 /* AI History Section in Survey */
 .ai-history-section {
     margin-bottom: 25px;
@@ -1251,6 +1292,16 @@
     </style>
 </head>
 <body>
+    <!-- Active Session Warning Banner -->
+    <div id="sessionWarningBanner" class="session-warning-banner hidden">
+        <span class="warning-icon">⚠️</span>
+        <div class="warning-text">
+            <strong>ACTIVE SECURE SESSION:</strong> Do not close or refresh this page! 
+            Submit your code to the database before leaving to save your work.
+        </div>
+        <span class="warning-icon">⚠️</span>
+    </div>
+
     <!-- Loading Screen -->
     <div class="loading-screen" id="loadingScreen">
         <div class="loading-container">
@@ -2021,23 +2072,6 @@ async function initializeFromURL() {
         
         updateLoadingMessage('Finalizing setup...');
         showMainApp();
-
-        // Check if we're returning from post-survey to submit code
-        const urlParams = new URLSearchParams(window.location.search);
-        const shouldSubmitCode = urlParams.get('submit_code') === 'true';
-
-        if (shouldSubmitCode) {
-            // Remove the parameter from URL
-            window.history.replaceState({}, document.title, window.location.pathname + 
-                `?session=${urlParams.get('session')}&user=${urlParams.get('user')}`);
-            
-            // Trigger code submission after a brief delay
-            setTimeout(async () => {
-                addTerminalOutput('Post-survey completed! Proceeding with code submission...', 'success');
-                await proceedWithActualSubmission();
-            }, 1000);
-        }
-        
         
         // Add welcome messages
         setTimeout(() => {

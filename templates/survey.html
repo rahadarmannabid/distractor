@@ -839,16 +839,73 @@
                             // Clear the flag
                             sessionStorage.removeItem('postSurveySubmissionPending');
                             
-                            // Show success message
-                            submitBtn.textContent = 'Post-Survey Complete!';
-                            this.showError('Survey completed! Returning to IDE to submit your code...', 'success');
+                            // ===== SUBMIT CODE DIRECTLY FROM HERE =====
+                            submitBtn.textContent = 'Submitting Your Code...';
                             
-                            await new Promise(resolve => setTimeout(resolve, 2000));
+                            try {
+                                // Retrieve cached submission data
+                                const cachedData = this.retrieveCachedSubmissionData();
+                                
+                                if (!cachedData) {
+                                    throw new Error('Could not find submission data. Please return to IDE and submit again.');
+                                }
+                                
+                                // Restore periodic surveys from storage
+                                const periodicSurveysData = this.restorePeriodicSurveysFromStorage();
+                                
+                                // Submit code to database
+                                const codeResponse = await fetch('/submit', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                    },
+                                    body: JSON.stringify({
+                                        code: cachedData.code,
+                                        user_id: cachedData.session.userId,
+                                        assignment_key: cachedData.session.assignmentKey,
+                                        session_id: cachedData.session.sessionId,
+                                        programming_language: cachedData.session.programmingLanguage,
+                                        timestamp: new Date().toISOString(),
+                                        suggestion_clicked: cachedData.metrics.suggestionClicks,
+                                        compiler_clicked: cachedData.metrics.compilerClicks,
+                                        session_metadata: cachedData.session,
+                                        activity_logs: cachedData.activity.allActivityLogs,
+                                        activity_summary: cachedData.metrics,
+                                        survey_data: periodicSurveysData || cachedData.surveys
+                                    })
+                                });
+                                
+                                if (!codeResponse.ok) {
+                                    throw new Error('Code submission failed');
+                                }
+                                
+                                const result = await codeResponse.json();
+                                
+                                // Clear cached data after successful submission
+                                this.clearCachedSubmissionData();
+                                this.clearPeriodicSurveysFromStorage();
+                                
+                                // Clear auth data
+                                sessionStorage.removeItem('authData');
+                                
+                                // Show success message
+                                submitBtn.textContent = '✅ All Data Submitted!';
+                                this.showError(`Survey and code submitted successfully!\n\nSubmission ID: ${result.submission_id}\nDatabase Status: ${result.firebase_status}`, 'success');
+                                
+                                await new Promise(resolve => setTimeout(resolve, 3000));
+                                
+                                // Redirect to home/login
+                                window.location.href = '/home.html';
+                                
+                            } catch (error) {
+                                console.error('Code submission error:', error);
+                                this.showError('Code submission failed: ' + error.message);
+                                submitBtn.disabled = false;
+                                submitBtn.textContent = 'Retry Submission';
+                            }
                             
-                            // Redirect back to IDE with flag to trigger submission
-                            window.location.href = `/index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}&submit_code=true`;
                         } else {
-                            // Post-survey completed outside submission flow (shouldn't happen normally)
+                            // Post-survey completed outside submission flow
                             window.location.href = `/index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
                         }
                     }
@@ -861,11 +918,74 @@
                 }
             }
 
-            showError(message) {
+            retrieveCachedSubmissionData() {
+                try {
+                    const cached = sessionStorage.getItem('pendingSubmissionData');
+                    if (cached) {
+                        return JSON.parse(cached);
+                    }
+                    return null;
+                } catch (error) {
+                    console.error('Failed to retrieve cached data:', error);
+                    return null;
+                }
+            }
+
+            clearCachedSubmissionData() {
+                try {
+                    sessionStorage.removeItem('pendingSubmissionData');
+                } catch (error) {
+                    console.error('Failed to clear cached data:', error);
+                }
+            }
+
+            restorePeriodicSurveysFromStorage() {
+                try {
+                    const storageKey = `periodicSurveys_${this.sessionId}`;
+                    const savedData = sessionStorage.getItem(storageKey);
+                    
+                    if (savedData) {
+                        const parsedData = JSON.parse(savedData);
+                        return {
+                            periodic_surveys: parsedData.surveyResponses || [],
+                            total_occurrences: parsedData.periodicSurveyOccurrenceCount || 0,
+                            total_analyses: parsedData.analysisCount || 0,
+                            survey_interval: parsedData.surveyInterval || 4
+                        };
+                    }
+                    return null;
+                } catch (error) {
+                    console.error('Failed to restore periodic surveys:', error);
+                    return null;
+                }
+            }
+
+            clearPeriodicSurveysFromStorage() {
+                try {
+                    const storageKey = `periodicSurveys_${this.sessionId}`;
+                    sessionStorage.removeItem(storageKey);
+                } catch (error) {
+                    console.error('Failed to clear surveys:', error);
+                }
+            }
+
+            showError(message, type = 'error') {
                 const errorDiv = document.getElementById('errorMessage');
                 errorDiv.textContent = message;
                 errorDiv.style.display = 'block';
-                setTimeout(() => errorDiv.style.display = 'none', 5000);
+                
+                // Change color for success messages
+                if (type === 'success') {
+                    errorDiv.style.borderColor = '#22c55e';
+                    errorDiv.style.background = 'linear-gradient(135deg, #0e2f1e, #1a4d2e)';
+                    errorDiv.style.color = '#22c55e';
+                } else {
+                    errorDiv.style.borderColor = '#ef4444';
+                    errorDiv.style.background = 'linear-gradient(135deg, #2d1b1b, #3d2222)';
+                    errorDiv.style.color = '#ef4444';
+                }
+                
+                setTimeout(() => errorDiv.style.display = 'none', 8000);
             }
         }
 
