@@ -1,0 +1,5 @@
+```markdown
+Write a Python program that takes a list of bands and their genres and groups them by genre. 
+The program should organize the bands into a dictionary where each genre is a key and the value is a list of bands that belong to that genre. 
+Each list of bands must be sorted alphabetically. The program should include all genres that appear in the input and ensure that the final dictionary correctly reflects the bands categorized under each genre.
+```

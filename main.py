@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 import uuid
 import json
+import mimetypes 
 from datetime import datetime
 from typing import List, Dict, Optional
 import firebase_admin
@@ -135,21 +136,27 @@ def get_assignment_base_key(assignment_key):
     """
     Extract the base key from assignment key for file reading
     Returns the base prefix that matches the assignment key
+    CASE-INSENSITIVE: 'proteus', 'Proteus', 'PROTEUS' all return 'proteus'
     """
     if not assignment_key:
         return None
     
     condition_1_keys, condition_2_keys, condition_3_keys = get_condition_keys()
     all_keys = condition_1_keys + condition_2_keys + condition_3_keys
-    assignment_key = assignment_key.strip()
+    # ✅ CHANGED: Convert to lowercase for case-insensitive comparison
+    assignment_key_lower = assignment_key.strip().lower()
+    
+    # Convert all keys to lowercase for comparison
+    all_keys_lower = [key.lower() for key in all_keys]
     
     # Check for exact match first
-    if assignment_key in all_keys:
-        return assignment_key
+    if assignment_key_lower in all_keys_lower:
+        # Return the lowercase version for file paths
+        return assignment_key_lower
     
-    # Check for prefix match and return the matching base key
-    for base_key in all_keys:
-        if assignment_key.startswith(base_key):
+    # Check for prefix match and return the matching base key (lowercase)
+    for base_key in all_keys_lower:
+        if assignment_key_lower.startswith(base_key):
             return base_key
     
     return None
@@ -158,12 +165,19 @@ def get_assignment_condition(assignment_key):
     """
     Determine which condition the assignment key belongs to
     Returns: 1 for full UI, 2 for partial UI (guess only), 3 for suggestions only, None for invalid
+    CASE-INSENSITIVE: 'proteus', 'Proteus', 'PROTEUS' all work the same
     """
     if not assignment_key:
         return None
     
     condition_1_keys, condition_2_keys, condition_3_keys = get_condition_keys()
-    assignment_key = assignment_key.strip()
+    # ✅ CHANGED: Convert to lowercase for case-insensitive comparison
+    assignment_key = assignment_key.strip().lower()
+    
+    # Convert all condition keys to lowercase for comparison
+    condition_1_keys = [key.lower() for key in condition_1_keys]
+    condition_2_keys = [key.lower() for key in condition_2_keys]
+    condition_3_keys = [key.lower() for key in condition_3_keys]
     
     # Check for exact match in condition 1 keys
     if assignment_key in condition_1_keys:
@@ -199,11 +213,13 @@ def get_assignment_file_path(assignment_key):
     """
     Get the correct assignment file path based on assignment key
     Returns Path object or None if not found
+    CASE-INSENSITIVE: Looks for lowercase filename
     """
     base_key = get_assignment_base_key(assignment_key)
     if not base_key:
         return None
     
+    # ✅ CHANGED: base_key is now always lowercase, so file path will be lowercase
     assignment_file = Path("assignment") / f"{base_key}.txt"
     return assignment_file if assignment_file.exists() else None
 
@@ -2476,6 +2492,134 @@ async def download_assignment(assignment_key: str):
         logger.error(f"Error downloading assignment PDF: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to download assignment: {str(e)}")
 
+
+@app.get("/survey-images/{image_filename}")
+async def get_survey_image(image_filename: str):
+    """
+    Serve survey images from the surveys/images directory
+    Security: Only serve images from surveys/images folder
+    """
+    try:
+        # Security: Prevent directory traversal attacks
+        if '..' in image_filename or '/' in image_filename or '\\' in image_filename:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        
+        # Whitelist allowed extensions
+        allowed_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp'}
+        file_ext = Path(image_filename).suffix.lower()
+        
+        if file_ext not in allowed_extensions:
+            raise HTTPException(status_code=400, detail="File type not allowed")
+        
+        # Construct safe path
+        image_path = Path("surveys") / "images" / image_filename
+        
+        # Check if file exists
+        if not image_path.exists():
+            logger.warning(f"Survey image not found: {image_filename}")
+            raise HTTPException(status_code=404, detail="Image not found")
+        
+        # Check if it's actually a file (not a directory)
+        if not image_path.is_file():
+            raise HTTPException(status_code=400, detail="Invalid resource")
+        
+        # Get MIME type
+        import mimetypes
+        mime_type, _ = mimetypes.guess_type(str(image_path))
+        if not mime_type:
+            mime_type = 'application/octet-stream'
+        
+        logger.info(f"Serving survey image: {image_filename}")
+        
+        return FileResponse(
+            path=image_path,
+            media_type=mime_type,
+            filename=image_filename,
+            headers={
+                "Cache-Control": "public, max-age=3600",  # Cache for 1 hour
+                "Content-Disposition": f"inline; filename={image_filename}"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving survey image {image_filename}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to serve image")
+
+
+@app.get("/validate-survey-images/{assignment_key}")
+async def validate_survey_images(assignment_key: str):
+    """
+    Validate that all images referenced in survey config exist
+    Useful for testing and debugging
+    """
+    try:
+        base_key = get_assignment_base_key(assignment_key)
+        if not base_key:
+            raise HTTPException(status_code=400, detail="Invalid assignment key")
+        
+        survey_file = Path("surveys") / f"{base_key}.json"
+        
+        if not survey_file.exists():
+            raise HTTPException(status_code=404, detail="Survey config not found")
+        
+        with open(survey_file, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        
+        missing_images = []
+        found_images = []
+        
+        # Check all survey sections
+        for survey_type in ['pre_survey', 'post_survey']:
+            if survey_type in config:
+                survey = config[survey_type]
+                
+                # Check header image
+                if 'header_image' in survey and 'src' in survey['header_image']:
+                    img_src = survey['header_image']['src']
+                    img_path = Path("surveys") / "images" / img_src
+                    if img_path.exists():
+                        found_images.append(img_src)
+                    else:
+                        missing_images.append(img_src)
+                
+                # Check question images
+                for question in survey.get('questions', []):
+                    # Single image
+                    if 'image' in question and 'src' in question['image']:
+                        img_src = question['image']['src']
+                        img_path = Path("surveys") / "images" / img_src
+                        if img_path.exists():
+                            found_images.append(img_src)
+                        else:
+                            missing_images.append(img_src)
+                    
+                    # Multiple images
+                    if 'images' in question:
+                        for img in question['images']:
+                            if 'src' in img:
+                                img_src = img['src']
+                                img_path = Path("surveys") / "images" / img_src
+                                if img_path.exists():
+                                    found_images.append(img_src)
+                                else:
+                                    missing_images.append(img_src)
+        
+        return {
+            "assignment_key": assignment_key,
+            "total_images": len(found_images) + len(missing_images),
+            "found": len(found_images),
+            "missing": len(missing_images),
+            "found_images": found_images,
+            "missing_images": missing_images,
+            "status": "valid" if len(missing_images) == 0 else "invalid"
+        }
+        
+    except Exception as e:
+        logger.error(f"Image validation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
 if __name__ == "__main__":
     import uvicorn
     
