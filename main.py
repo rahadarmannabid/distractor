@@ -136,14 +136,14 @@ def get_assignment_base_key(assignment_key):
     """
     Extract the base key from assignment key for file reading
     Returns the base prefix that matches the assignment key
-    CASE-INSENSITIVE: 'proteus', 'Proteus', 'PROTEUS' all return 'proteus'
+    CASE-INSENSITIVE: 'proteus', 'Proteus', 'PROTEUS' all return 'Proteus'
     """
     if not assignment_key:
         return None
     
     condition_1_keys, condition_2_keys, condition_3_keys = get_condition_keys()
     all_keys = condition_1_keys + condition_2_keys + condition_3_keys
-    # ✅ CHANGED: Convert to lowercase for case-insensitive comparison
+    # Convert to lowercase for case-insensitive comparison
     assignment_key_lower = assignment_key.strip().lower()
     
     # Convert all keys to lowercase for comparison
@@ -151,13 +151,13 @@ def get_assignment_base_key(assignment_key):
     
     # Check for exact match first
     if assignment_key_lower in all_keys_lower:
-        # Return the lowercase version for file paths
-        return assignment_key_lower
+        # Return with capital first letter to match filename (Proteus.json)
+        return assignment_key_lower.capitalize()
     
-    # Check for prefix match and return the matching base key (lowercase)
+    # Check for prefix match and return the matching base key with capital first letter
     for base_key in all_keys_lower:
         if assignment_key_lower.startswith(base_key):
-            return base_key
+            return base_key.capitalize()
     
     return None
 
@@ -2130,8 +2130,8 @@ async def authenticate_user(request: AuthRequest):
         if len(user_id) < 3:
             raise HTTPException(status_code=400, detail="User ID must be at least 3 characters")
         
-        if len(assignment_key) < 5:
-            raise HTTPException(status_code=400, detail="Assignment Key must be at least 5 characters")
+        if len(assignment_key) < 4:
+            raise HTTPException(status_code=400, detail="Assignment Key must be at least 4 characters")
         
         condition = get_assignment_condition(assignment_key)
         

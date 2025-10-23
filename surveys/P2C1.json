@@ -93,7 +93,7 @@
         "required": true,
         "placeholder": "Describe factors that increased or reduced your trust (e.g., correctness, clarity, past performance, uncertainty cues).",
         "max_length": 1000,
-        "min_length": 50
+        "min_length": 15
       },
       {
         "id": "post_q3",
@@ -102,7 +102,7 @@
         "required": true,
         "placeholder": "Explain whether your trust increased, decreased, or stayed the same—and why.",
         "max_length": 1000,
-        "min_length": 50
+        "min_length": 15
       },
       {
         "id": "post_q4",
@@ -111,7 +111,7 @@
         "required": true,
         "placeholder": "E.g., clarifying prompts, restructuring code, adding comments/tests, smaller steps, specifying libraries.",
         "max_length": 1000,
-        "min_length": 50
+        "min_length": 15
       },
       {
         "id": "post_q5",
@@ -120,7 +120,7 @@
         "required": true,
         "help_text": "Please refer to the comparison image below showing both conditions",
         "image": {
-          "src": "condition_comparison.png",
+          "src": "both_conditions.png",
           "alt": "Side-by-side comparison of Condition 1 and Condition 2 interfaces",
           "caption": "Figure 1: Comparison of the two conditions",
           "width": "100%",
@@ -139,7 +139,7 @@
         "required": true,
         "placeholder": "Explain your preference and how it supported your work.",
         "max_length": 1000,
-        "min_length": 50
+        "min_length": 15
       },
       {
         "id": "post_q7",
@@ -148,7 +148,7 @@
         "required": true,
         "help_text": "Please refer to Condition 1 shown in the image below",
         "image": {
-          "src": "condition1_interface.png",
+          "src": "guess_and_next_line.png",
           "alt": "Screenshot of Condition 1 interface showing only suggestions",
           "caption": "Condition 1: Suggestions only interface",
           "width": "90%",
@@ -159,7 +159,7 @@
         },
         "placeholder": "Describe your experience with Condition 1.",
         "max_length": 1000,
-        "min_length": 50
+        "min_length": 15
       },
       {
         "id": "post_q8",
@@ -168,7 +168,7 @@
         "required": true,
         "help_text": "Please refer to Condition 2 shown in the image below",
         "image": {
-          "src": "condition2_interface.png",
+          "src": "only_next_line.png",
           "alt": "Screenshot of Condition 2 interface showing AI intent and suggestions",
           "caption": "Condition 2: AI intent + suggestions interface",
           "width": "90%",
@@ -179,7 +179,7 @@
         },
         "placeholder": "Describe your experience with Condition 2.",
         "max_length": 1000,
-        "min_length": 50
+        "min_length": 15
       },
       {
         "id": "post_q9",

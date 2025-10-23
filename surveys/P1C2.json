@@ -93,7 +93,7 @@
         "required": true,
         "placeholder": "Describe factors that increased or reduced your trust (e.g., correctness, clarity, past performance, uncertainty cues).",
         "max_length": 1000,
-        "min_length": 50
+        "min_length": 15
       },
       {
         "id": "post_q3",
@@ -102,7 +102,7 @@
         "required": true,
         "placeholder": "Explain whether your trust increased, decreased, or stayed the same—and why.",
         "max_length": 1000,
-        "min_length": 50
+        "min_length": 15
       },
       {
         "id": "post_q4",
@@ -111,7 +111,7 @@
         "required": true,
         "placeholder": "E.g., clarifying prompts, restructuring code, adding comments/tests, smaller steps, specifying libraries.",
         "max_length": 1000,
-        "min_length": 50
+        "min_length": 15
       }
     ]
   },

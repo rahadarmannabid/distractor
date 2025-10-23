@@ -703,7 +703,7 @@
         class="form-input" 
         placeholder="Enter your assignment access key"
         required
-        minlength="5"
+        minlength="4"
         autocomplete="off"
     >
     <small class="info-text">
@@ -848,8 +848,8 @@
                 return;
             }
 
-            if (assignmentKey.length < 5) {
-                showError('Assignment Key must be at least 5 characters long');
+            if (assignmentKey.length < 4) {
+                showError('Assignment Key must be at least 4 characters long');
                 return;
             }
             

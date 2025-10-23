@@ -1,0 +1,56 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyc
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Data directories (will be created empty in container)
+submissions/*
+!submissions/.gitkeep
+session_logs/*
+!session_logs/.gitkeep
+logs/
+*.log
+user_code_*.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+backend.txt
+frontend.txt
+readme.md
+home.txt
+
+# CRITICAL: EXCLUDE credentials
+*.pem
+*.key
+
+# DO NOT EXCLUDE (these MUST be copied):
+# surveys/
+# surveys/**/*.json
+# surveys/images/
+# templates/
+# assignment/
+# main.py
+# admin.py
+# requirements.txt
