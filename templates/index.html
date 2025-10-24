@@ -348,7 +348,6 @@
             display: block;
             width: 100%;
             text-align: left;
-            white-space: pre-wrap;
             transition: all 0.2s ease;
             margin-top: 8px;
             position: relative;
@@ -417,6 +416,7 @@
         .suggestion-content {
             display: block;
             padding-right: 80px;
+            white-space: pre-wrap;
         }
         .sidebar-section p {
             line-height: 1.4;
@@ -2250,7 +2250,7 @@ async function initializeEditor() {
                             let lastAnalyzedContent = '';
                             
                             if (currentContent !== lastAnalyzedContent && currentContent.length > 0) {
-                                analyzeCurrentCode();
+                                debounceAnalysis(1000);
                                 lastAnalyzedContent = currentContent;
                                 break;
                             }
@@ -2386,7 +2386,10 @@ function debounceAnalysis(delay) {
     }, delay);
 }
 
-    // Analyze current code
+
+let previousCode = ''
+
+// Analyze current code
 async function analyzeCurrentCode() {
     if (!currentSession.sessionId) {
         console.warn('No active session for code analysis');
@@ -2402,8 +2405,12 @@ async function analyzeCurrentCode() {
     const code = window.editor.getValue().trim();
     if (!code || code === '// Start coding here...' || code === '# Start coding here...') return;
 
+    // Don't start new analysis if code hasn't changed
+    if (code === previousCode) return;
+
     // Set analyzing flag
     isAnalyzing = true;
+    previousCode = code;
     // ACTIVITY LOG: AI analysis trigger
 logActivity('ai_analysis_trigger', {
     trigger_reason: 'new_line_added',
@@ -2446,6 +2453,9 @@ logActivity('ai_analysis_complete', {
 
         const problemDescription = data.analysis || "Problem description not available";
         let nextLineCode = data.next_line || "// No suggestions available";
+
+        console.log("analysis complete, data on next line")
+        console.log(data);
         
         let correctNextLineCode = nextLineCode;
         if (currentSession.condition === 1 && data.correct_next_line) {
@@ -2862,9 +2872,7 @@ function insertSuggestion(type) {
     const isAtEndOfLine = position.column > currentLineContent.length;
     const needsNewLine = currentLineContent.trim() !== '' || !isAtEndOfLine;
     
-    let processedSuggestion = processSuggestionWithIndentation(suggestionText, currentIndentation);
-    
-    let textToInsert = needsNewLine ? '\n' + processedSuggestion : processedSuggestion;
+    let textToInsert = needsNewLine ? '\n' + currentIndentation + suggestionText : suggestionText;
     
     if (!needsNewLine && position.column > 1 && !currentLineContent.endsWith(' ')) {
         textToInsert = ' ' + textToInsert;
@@ -3682,46 +3690,6 @@ async function loadSurveyQuestions() {
         ];
     }
 }
-    function processSuggestionWithIndentation(suggestion, baseIndentation) {
-        const lines = suggestion.split('\n');
-        if (lines.length === 1) {
-            return suggestion.trim();
-        }
-
-        const processedLines = [];
-        let additionalIndent = '';
-        for (let i = 0; i < lines.length; i++) {
-           const line = lines[i].trim();
-           if (line === '') {
-               processedLines.push('');
-               continue;
-           }
-
-           if (i === 0) {
-               processedLines.push(baseIndentation + line);
-           } else {
-               const prevLine = lines[i - 1].trim();
-               
-               if (prevLine.endsWith('{') || 
-                   prevLine.endsWith('(') ||
-                   prevLine.includes('if ') ||
-                   prevLine.includes('for ') ||
-                   prevLine.includes('while ') ||
-                   prevLine.includes('function') ||
-                   prevLine.includes('=>')) {
-                   additionalIndent = '    ';
-               }
-               
-               if (line.startsWith('}') || line.startsWith(')')) {
-                   additionalIndent = '';
-               }
-               
-               processedLines.push(baseIndentation + additionalIndent + line);
-           }
-       }
-
-       return processedLines.join('\n');
-   }
 
    // Font size controls
    const increaseFontBtn = document.getElementById('increaseFontBtn');
