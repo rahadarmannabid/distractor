@@ -2258,6 +2258,11 @@ async function initializeEditor() {
                     }
                 });
 
+                // Trigger AI analysis when keypress released, allows for more midline analysis
+                document.addEventListener('keypress', () => {
+                    debounceAnalysis(1000);
+                });
+
                 // ACTIVITY LOGGING: Cursor position tracking (for user interaction only - no logging)
                 window.editor.onDidChangeCursorPosition((e) => {
                     updateUserInteraction();
@@ -2368,6 +2373,17 @@ function showTemporaryPasteNotification() {
             mainApp.style.marginTop = '0px';
         }
     }, 3000);
+}
+
+let debounceTimer; // This will store the ID of the timeout
+
+// Run analysis after debounce
+function debounceAnalysis(delay) {
+    clearTimeout(debounceTimer);
+
+    debounceTimer = setTimeout(() => { 
+      analyzeCurrentCode()
+    }, delay);
 }
 
     // Analyze current code
