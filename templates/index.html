@@ -1288,6 +1288,46 @@
     }
 }
 
+/* Sidebar Toggle Button */
+.sidebar-toggle {
+    position: fixed;
+    right: 30vw;
+    top: 50%;
+    transform: translateY(-50%);
+    background: linear-gradient(135deg, #569cd6, #4a86c7);
+    border: 2px solid #3a76b7;
+    border-radius: 8px 0 0 8px;
+    padding: 12px 8px;
+    color: white;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    z-index: 1000;
+    box-shadow: -2px 0 10px rgba(0,0,0,0.3);
+}
+.sidebar-toggle:hover {
+    background: linear-gradient(135deg, #4a86c7, #3a76b7);
+    transform: translateY(-50%) translateX(-3px);
+    box-shadow: -4px 0 15px rgba(86, 156, 214, 0.5);
+}
+#sidebar {
+    position: relative;
+    transition: all 0.3s ease;
+}
+#sidebar.collapsed {
+    width: 0 !important;
+    min-width: 0;
+    overflow: hidden;
+}
+#sidebar.collapsed > *:not(.sidebar-toggle) {
+    opacity: 0;
+    pointer-events: none;
+}
+#content {
+    transition: all 0.3s ease;
+}
+
 
     </style>
 </head>
@@ -1369,6 +1409,9 @@
 
         <div id="resize-sidebar"></div>
 <div id="sidebar">
+    <button class="sidebar-toggle" id="sidebarToggle" title="Toggle Sidebar">
+        <span id="toggleIcon">◀</span>
+    </button>
     <div class="header">
         <h2>AI Coding Assistant</h2>
     </div>
@@ -1991,8 +2034,16 @@ async function initializeFromURL() {
         const authData = validation.data;
         
         // Initialize session with stored data
+        // Extract prefix from userId (format: prefix_username, e.g., p1c1_john)
+        const extractPrefix = (userId) => {
+            if (!userId) return '';
+            const parts = userId.split('_');
+            return parts.length > 1 ? parts[0] : '';
+        };
+        
         currentSession = {
             userId: authData.userId,
+            prefix: extractPrefix(authData.userId),  // ADD THIS LINE
             assignmentKey: authData.assignmentKey,
             sessionId: authData.sessionId,
             sessionToken: authData.sessionToken,
@@ -2072,6 +2123,9 @@ async function initializeFromURL() {
         
         updateLoadingMessage('Finalizing setup...');
         showMainApp();
+        
+        // Initialize sidebar state based on prefix
+        initializeSidebar();
         
         // Add welcome messages
         setTimeout(() => {
@@ -2244,23 +2298,19 @@ async function initializeEditor() {
                             scheduleCodeEditingEnd();
                         }
                         
-                        // Trigger AI analysis on new lines
+                        // Trigger AI analysis on new lines - fast response
                         if (change.text.includes('\n')) {
-                            const currentContent = window.editor.getValue().trim();
-                            let lastAnalyzedContent = '';
-                            
-                            if (currentContent !== lastAnalyzedContent && currentContent.length > 0) {
-                                debounceAnalysis(1000);
-                                lastAnalyzedContent = currentContent;
-                                break;
-                            }
+                            debounceNewlineAnalysis(300);
+                            break;
                         }
                     }
                 });
 
                 // Trigger AI analysis when keypress released, allows for more midline analysis
-                document.addEventListener('keypress', () => {
-                    debounceAnalysis(1000);
+                document.addEventListener('keypress', (e) => {
+                    if (e.key !== 'Enter') {
+                        debounceGeneralAnalysis(1500);
+                    }
                 });
 
                 // ACTIVITY LOGGING: Cursor position tracking (for user interaction only - no logging)
@@ -2375,14 +2425,22 @@ function showTemporaryPasteNotification() {
     }, 3000);
 }
 
-let debounceTimer; // This will store the ID of the timeout
+let debounceTimerNewline; // For Enter key - fast response
+let debounceTimerGeneral; // For general typing - slower
 
-// Run analysis after debounce
-function debounceAnalysis(delay) {
-    clearTimeout(debounceTimer);
+// Quick response for Enter key
+function debounceNewlineAnalysis(delay = 300) {
+    clearTimeout(debounceTimerNewline);
+    debounceTimerNewline = setTimeout(() => { 
+        analyzeCurrentCode()
+    }, delay);
+}
 
-    debounceTimer = setTimeout(() => { 
-      analyzeCurrentCode()
+// Slower background analysis for general typing
+function debounceGeneralAnalysis(delay = 1500) {
+    clearTimeout(debounceTimerGeneral);
+    debounceTimerGeneral = setTimeout(() => { 
+        analyzeCurrentCode()
     }, delay);
 }
 
@@ -4451,6 +4509,39 @@ document.addEventListener('visibilitychange', function() {
     
     isTabVisible = newVisibilityState === 'visible';
 });
+
+
+// Sidebar toggle functionality
+const sidebarToggle = document.getElementById('sidebarToggle');
+const sidebar = document.getElementById('sidebar');
+const toggleIcon = document.getElementById('toggleIcon');
+let sidebarCollapsed = false;
+
+// Check if sidebar should be hidden on load based on prefix
+function shouldHideSidebar() {
+    const hiddenPrefixes = "{{ side_panel_hidden }}".toLowerCase().split(',').map(p => p.trim());
+    const currentPrefix = currentSession.prefix ? currentSession.prefix.toLowerCase() : '';
+    return hiddenPrefixes.includes(currentPrefix);
+}
+
+// Initialize sidebar state
+function initializeSidebar() {
+    if (shouldHideSidebar()) {
+        sidebarCollapsed = true;
+        sidebar.classList.add('collapsed');
+        toggleIcon.textContent = '▶';
+        sidebarToggle.style.right = '0px';
+    }
+}
+
+sidebarToggle.addEventListener('click', () => {
+    sidebarCollapsed = !sidebarCollapsed;
+    sidebar.classList.toggle('collapsed');
+    toggleIcon.textContent = sidebarCollapsed ? '▶' : '◀';
+    sidebarToggle.style.right = sidebarCollapsed ? '0px' : '30vw';
+    sidebarToggle.style.borderRadius = sidebarCollapsed ? '8px 0 0 8px' : '8px 0 0 8px';
+});
+
 </script>
 
 </body>

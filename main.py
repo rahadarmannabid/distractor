@@ -789,6 +789,10 @@ if not API_KEY:
 
 client = OpenAI(api_key=API_KEY)
 
+# Sidebar hidden prefixes
+SIDE_PANEL_HIDDEN = os.getenv("SIDE_PANEL_HIDDEN", "").lower().split(",")
+SIDE_PANEL_HIDDEN = [prefix.strip() for prefix in SIDE_PANEL_HIDDEN if prefix.strip()]
+
 def get_response(prompt):
     """Get response from OpenAI GPT model with error handling"""
     try:
