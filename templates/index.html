@@ -231,6 +231,91 @@
             text-align: center;
         }
 
+        /* Auto-Save Indicator */
+        .autosave-indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(64, 64, 64, 0.3);
+            padding: 4px 10px;
+            border-radius: 4px;
+            margin-left: 10px;
+            font-size: 11px;
+            color: #888;
+            transition: all 0.3s ease;
+        }
+        .autosave-indicator.saving {
+            color: #f59e0b;
+        }
+        .autosave-indicator.saved {
+            color: #22c55e;
+        }
+        .autosave-indicator.error {
+            color: #ef4444;
+        }
+        .autosave-icon {
+            font-size: 14px;
+            animation: none;
+        }
+        .autosave-indicator.saving .autosave-icon {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .restore-banner {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            color: white;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            z-index: 10000;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            animation: slideDown 0.3s ease;
+        }
+        @keyframes slideDown {
+            from { transform: translateY(-100%); }
+            to { transform: translateY(0); }
+        }
+        .restore-banner-content {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .restore-banner-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .restore-btn {
+            background: white;
+            color: #2563eb;
+            border: none;
+            padding: 6px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 12px;
+            transition: all 0.2s ease;
+        }
+        .restore-btn:hover {
+            background: #f0f9ff;
+            transform: translateY(-1px);
+        }
+        .dismiss-btn {
+            background: transparent;
+            color: white;
+            border: 1px solid white;
+        }
+        .dismiss-btn:hover {
+            background: rgba(255,255,255,0.1);
+        }
+
         /* Terminal Output Styling */
         .terminal {
             display: flex;
@@ -1370,6 +1455,10 @@
             <div id="header" class="header">
                 <h2>Code Editor</h2>
                 <div class="url-display" id="urlDisplay">Loading...</div>
+                <div class="autosave-indicator" id="autosaveIndicator">
+                    <span class="autosave-icon">💾</span>
+                    <span class="autosave-text">Not saved</span>
+                </div>
                 <div class="font-controls">
                     <button class="font-button" id="decreaseFontBtn">A-</button>
                     <span class="font-size-display" id="fontSizeDisplay">14px</span>
@@ -1498,8 +1587,332 @@
 
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs/loader.min.js"></script>
+
 <script>
 // Global session management
+// ============================================
+// AUTO-SAVE FUNCTIONALITY
+// ============================================
+
+const AUTOSAVE_KEY_PREFIX = 'ide_autosave_';
+const AUTOSAVE_INTERVAL = 15000;
+let autosaveTimer = null;
+let lastSaveTime = null;
+
+function getAutosaveKey() {
+    if (!currentSession.userId || !currentSession.sessionId) return null;
+    return `${AUTOSAVE_KEY_PREFIX}${currentSession.userId}_${currentSession.sessionId}`;
+}
+
+function updateAutosaveIndicator(status, message) {
+    const indicator = document.getElementById('autosaveIndicator');
+    if (!indicator) return;
+    const icon = indicator.querySelector('.autosave-icon');
+    const text = indicator.querySelector('.autosave-text');
+    
+    indicator.className = 'autosave-indicator ' + status;
+    
+    switch(status) {
+        case 'saving':
+            icon.textContent = '⏳';
+            text.textContent = 'Saving...';
+            break;
+        case 'saved':
+            icon.textContent = '✓';
+            const now = new Date();
+            text.textContent = `Saved at ${now.toLocaleTimeString()}`;
+            lastSaveTime = now;
+            break;
+        case 'error':
+            icon.textContent = '⚠️';
+            text.textContent = message || 'Save failed';
+            break;
+        default:
+            icon.textContent = '💾';
+            text.textContent = 'Not saved';
+    }
+}
+
+function saveProgress() {
+    const key = getAutosaveKey();
+    if (!key) return;
+    
+    try {
+        updateAutosaveIndicator('saving');
+        
+        const progressData = {
+            timestamp: Date.now(),
+            session: {
+                userId: currentSession.userId,
+                sessionId: currentSession.sessionId,
+                assignmentKey: currentSession.assignmentKey,
+                condition: currentSession.condition,
+                prefix: currentSession.prefix
+            },
+            editor: {
+                code: editor ? editor.getValue() : '',
+                language: currentSession.programmingLanguage,
+                cursorPosition: editor ? editor.getPosition() : null,
+                scrollPosition: editor ? editor.getScrollTop() : 0
+            },
+            terminal: {
+                output: document.getElementById('terminalOutput') ? document.getElementById('terminalOutput').innerHTML : ''
+            },
+            ai: {
+                guessHistory: currentSession.guessHistory || [],
+                descHistory: currentSession.descHistory || [],
+                suggestionsHistory: currentSession.suggestionsHistory || [],
+                currentGuess: document.getElementById('analysis') ? document.getElementById('analysis').innerHTML : '',
+                currentSuggestion: document.getElementById('suggestionGuess') ? document.getElementById('suggestionGuess').innerHTML : ''
+            },
+            ui: {
+                fontSize: currentFontSize,
+                sidebarCollapsed: sidebarCollapsed
+            },
+            counters: {
+                guessLogCount: currentSession.guessLogCount || 0,
+                descLogCount: currentSession.descLogCount || 0,
+                suggestionsLogCount: currentSession.suggestionsLogCount || 0,
+                suggestionClickCount: currentSession.suggestionClickCount || 0,
+                compilerClickCount: currentSession.compilerClickCount || 0
+            },
+            activityBuffer: activityBuffer || []
+        };
+        
+        const compressed = JSON.stringify(progressData);
+        localStorage.setItem(key, compressed);
+        
+        updateAutosaveIndicator('saved');
+        
+        logActivity('autosave', {
+            data_size: compressed.length,
+            code_length: progressData.editor.code.length,
+            timestamp: progressData.timestamp
+        });
+        
+    } catch (error) {
+        console.error('Auto-save failed:', error);
+        updateAutosaveIndicator('error', 'Save failed');
+        
+        if (error.name === 'QuotaExceededError') {
+            addTerminalOutput('⚠️ Storage quota exceeded. Consider clearing browser cache.', 'warning');
+        }
+    }
+}
+
+function restoreProgress() {
+    const key = getAutosaveKey();
+    if (!key) return null;
+    
+    try {
+        const saved = localStorage.getItem(key);
+        if (!saved) return null;
+        
+        const progressData = JSON.parse(saved);
+        
+        if (!progressData.timestamp || !progressData.session) {
+            console.warn('Invalid saved data structure');
+            return null;
+        }
+        
+        if (progressData.session.userId !== currentSession.userId ||
+            progressData.session.sessionId !== currentSession.sessionId) {
+            console.warn('Saved data is from a different session');
+            return null;
+        }
+        
+        const ageInHours = (Date.now() - progressData.timestamp) / (1000 * 60 * 60);
+        if (ageInHours > 24) {
+            console.warn('Saved data is too old');
+            clearProgress();
+            return null;
+        }
+        
+        return progressData;
+        
+    } catch (error) {
+        console.error('Failed to restore progress:', error);
+        return null;
+    }
+}
+
+function applyRestoredProgress(progressData) {
+    try {
+        if (progressData.editor && editor) {
+            if (progressData.editor.code) {
+                editor.setValue(progressData.editor.code);
+            }
+            if (progressData.editor.cursorPosition) {
+                editor.setPosition(progressData.editor.cursorPosition);
+            }
+            if (progressData.editor.scrollPosition) {
+                editor.setScrollTop(progressData.editor.scrollPosition);
+            }
+        }
+        
+        if (progressData.terminal && progressData.terminal.output) {
+            const terminalOutput = document.getElementById('terminalOutput');
+            if (terminalOutput) {
+                terminalOutput.innerHTML = progressData.terminal.output;
+            }
+        }
+        
+        if (progressData.ai) {
+            currentSession.guessHistory = progressData.ai.guessHistory || [];
+            currentSession.descHistory = progressData.ai.descHistory || [];
+            currentSession.suggestionsHistory = progressData.ai.suggestionsHistory || [];
+            
+            if (progressData.ai.currentGuess) {
+                const analysisEl = document.getElementById('analysis');
+                if (analysisEl) analysisEl.innerHTML = progressData.ai.currentGuess;
+            }
+            
+            if (progressData.ai.currentSuggestion) {
+                const suggestionEl = document.getElementById('suggestionGuess');
+                if (suggestionEl) suggestionEl.innerHTML = progressData.ai.currentSuggestion;
+            }
+        }
+        
+        if (progressData.ui) {
+            if (progressData.ui.fontSize && typeof updateFontSize === 'function') {
+                updateFontSize(progressData.ui.fontSize);
+            }
+            if (progressData.ui.sidebarCollapsed !== undefined && progressData.ui.sidebarCollapsed !== sidebarCollapsed) {
+                const toggleBtn = document.getElementById('sidebarToggle');
+                if (toggleBtn) toggleBtn.click();
+            }
+        }
+        
+        if (progressData.counters) {
+            currentSession.guessLogCount = progressData.counters.guessLogCount || 0;
+            currentSession.descLogCount = progressData.counters.descLogCount || 0;
+            currentSession.suggestionsLogCount = progressData.counters.suggestionsLogCount || 0;
+            currentSession.suggestionClickCount = progressData.counters.suggestionClickCount || 0;
+            currentSession.compilerClickCount = progressData.counters.compilerClickCount || 0;
+            
+            const guessCount = document.getElementById('guessLogCount');
+            const descCount = document.getElementById('descLogCount');
+            const suggestionsCount = document.getElementById('suggestionsLogCount');
+            if (guessCount) guessCount.textContent = currentSession.guessLogCount;
+            if (descCount) descCount.textContent = currentSession.descLogCount;
+            if (suggestionsCount) suggestionsCount.textContent = currentSession.suggestionsLogCount;
+        }
+        
+        if (progressData.activityBuffer && Array.isArray(progressData.activityBuffer)) {
+            activityBuffer = progressData.activityBuffer;
+        }
+        
+        const savedTime = new Date(progressData.timestamp);
+        addTerminalOutput(`✅ Progress restored from ${savedTime.toLocaleString()}`, 'success');
+        addTerminalOutput(`📝 Restored ${progressData.editor.code.length} characters of code`, 'info');
+        
+        logActivity('progress_restored', {
+            saved_timestamp: progressData.timestamp,
+            code_length: progressData.editor.code.length,
+            age_minutes: Math.round((Date.now() - progressData.timestamp) / (1000 * 60))
+        });
+        
+        updateAutosaveIndicator('saved');
+        
+    } catch (error) {
+        console.error('Failed to apply restored progress:', error);
+        addTerminalOutput('⚠️ Some progress could not be restored', 'warning');
+    }
+}
+
+function showRestoreBanner(progressData) {
+    const banner = document.createElement('div');
+    banner.className = 'restore-banner';
+    banner.id = 'restoreBanner';
+    
+    const savedTime = new Date(progressData.timestamp);
+    const ageMinutes = Math.round((Date.now() - progressData.timestamp) / (1000 * 60));
+    const timeAgo = ageMinutes < 60 ? `${ageMinutes} minutes ago` : 
+                    `${Math.round(ageMinutes / 60)} hours ago`;
+    
+    banner.innerHTML = `
+        <div class="restore-banner-content">
+            <span style="font-size: 20px;">💾</span>
+            <div>
+                <strong>Previous work found!</strong><br>
+                <small>Saved ${timeAgo} (${savedTime.toLocaleString()}) • ${progressData.editor.code.length} characters</small>
+            </div>
+        </div>
+        <div class="restore-banner-buttons">
+            <button class="restore-btn" onclick="handleRestoreProgress()">Restore</button>
+            <button class="restore-btn dismiss-btn" onclick="handleDismissRestore()">Start Fresh</button>
+        </div>
+    `;
+    
+    document.body.insertBefore(banner, document.body.firstChild);
+}
+
+function handleRestoreProgress() {
+    const banner = document.getElementById('restoreBanner');
+    if (banner) banner.remove();
+    
+    const progressData = restoreProgress();
+    if (progressData) {
+        applyRestoredProgress(progressData);
+    }
+}
+
+function handleDismissRestore() {
+    const banner = document.getElementById('restoreBanner');
+    if (banner) banner.remove();
+    
+    clearProgress();
+    addTerminalOutput('Started with fresh state', 'info');
+}
+
+function clearProgress() {
+    const key = getAutosaveKey();
+    if (key) {
+        try {
+            localStorage.removeItem(key);
+            console.log('Progress cleared');
+        } catch (error) {
+            console.error('Failed to clear progress:', error);
+        }
+    }
+}
+
+function startAutoSave() {
+    if (autosaveTimer) {
+        clearInterval(autosaveTimer);
+    }
+    
+    autosaveTimer = setInterval(() => {
+        if (currentSession.sessionId && editor) {
+            saveProgress();
+        }
+    }, AUTOSAVE_INTERVAL);
+    
+    console.log('Auto-save started (every 15 seconds)');
+}
+
+function stopAutoSave() {
+    if (autosaveTimer) {
+        clearInterval(autosaveTimer);
+        autosaveTimer = null;
+    }
+}
+
+let editorChangeTimeout = null;
+function onEditorChange() {
+    if (editorChangeTimeout) {
+        clearTimeout(editorChangeTimeout);
+    }
+    
+    editorChangeTimeout = setTimeout(() => {
+        saveProgress();
+    }, 3000);
+}
+
+// ============================================
+// END AUTO-SAVE FUNCTIONALITY
+// ============================================
+
 let currentSession = {
     userId: null,
     assignmentKey: null,
@@ -2127,6 +2540,20 @@ async function initializeFromURL() {
         // Initialize sidebar state based on prefix
         initializeSidebar();
         
+        // Check for saved progress
+        setTimeout(() => {
+            const savedProgress = restoreProgress();
+            if (savedProgress) {
+                const ageMinutes = (Date.now() - savedProgress.timestamp) / (1000 * 60);
+                if (ageMinutes < 30) {
+                    applyRestoredProgress(savedProgress);
+                } else {
+                    showRestoreBanner(savedProgress);
+                }
+            }
+            startAutoSave();
+        }, 500);
+        
         // Add welcome messages
         setTimeout(() => {
             addTerminalOutput(`Secure session restored successfully!`, 'success');
@@ -2254,6 +2681,7 @@ async function initializeEditor() {
                 // Enhanced Monaco Editor event handlers with time tracking
                 window.editor.onDidChangeModelContent((e) => {
                     updateUserInteraction();
+                    onEditorChange();
                     
                     const changes = e.changes;
                     const model = window.editor.getModel();
@@ -4250,6 +4678,9 @@ async function proceedWithActualSubmission() {
         submitButton.innerHTML = 'Submit & Logout';
         isSubmissionInProgress = false;
     }
+    
+    clearProgress();
+    stopAutoSave();
 }
     
 
@@ -4258,6 +4689,8 @@ async function proceedWithActualSubmission() {
    function endSession() {
        if (confirm('Are you sure you want to end this session? Any unsaved code will be lost.')) {
            addTerminalOutput('Session ended by user', 'warning');
+           clearProgress();
+           stopAutoSave();
            showSuccessMessage('Session ended. Redirecting to login...', 2);
        }
    }
@@ -4406,6 +4839,9 @@ if (historySuggestionsButton) {
 // Prevent accidental page close
 window.addEventListener('beforeunload', (e) => {
     if (currentSession.sessionId) {
+        // Save progress before leaving
+        saveProgress();
+        
         // ACTIVITY LOG: Page unload attempt
         logActivity('page_unload_attempt', {
             unload_reason: 'beforeunload_triggered',
@@ -4541,6 +4977,10 @@ sidebarToggle.addEventListener('click', () => {
     sidebarToggle.style.right = sidebarCollapsed ? '0px' : '30vw';
     sidebarToggle.style.borderRadius = sidebarCollapsed ? '8px 0 0 8px' : '8px 0 0 8px';
 });
+
+// Make restore functions globally accessible
+window.handleRestoreProgress = handleRestoreProgress;
+window.handleDismissRestore = handleDismissRestore;
 
 </script>
 
