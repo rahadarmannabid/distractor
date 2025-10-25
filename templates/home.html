@@ -867,7 +867,8 @@
                     },
                     body: JSON.stringify({ 
                         user_id: userId,
-                        assignment_key: assignmentKey
+                        assignment_key: assignmentKey,
+                        programming_language: selectedLanguage
                     })
                 });
 
@@ -895,7 +896,8 @@
                     consentTimestamp: new Date().toISOString(),
                     pasteAllowed: data.paste_allowed !== undefined ? data.paste_allowed : 1,
                     hasPreSurvey: data.has_pre_survey || false,
-                    hasPostSurvey: data.has_post_survey || false
+                    hasPostSurvey: data.has_post_survey || false,
+                    starterCode: data.starter_code || null
                 }));
                 
                 // Check if pre-survey is required and redirect accordingly

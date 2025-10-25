@@ -132,6 +132,72 @@ def get_condition_keys():
     return condition_1_keys, condition_2_keys, condition_3_keys
 
 
+# Starter code directory
+STARTER_CODE_DIR = os.getenv("STARTER_CODE_DIR", "starter_code")
+
+def get_starter_code(prefix, language):
+    """
+    Get starter code for a given prefix and programming language
+    Returns None if file not found
+    """
+    if not prefix or not language:
+        return None
+    
+    # Map language to file extension
+    language_extensions = {
+        'javascript': 'js',
+        'python': 'py',
+        'c': 'c'
+    }
+    
+    extension = language_extensions.get(language.lower())
+    if not extension:
+        logger.warning(f"Unknown language: {language}")
+        return None
+    
+    # Construct file path (case-insensitive prefix matching)
+    starter_code_path = Path(STARTER_CODE_DIR)
+    
+    if not starter_code_path.exists():
+        logger.warning(f"Starter code directory does not exist: {starter_code_path}")
+        return None
+    
+    # Try exact match first
+    file_path = starter_code_path / f"{prefix}.{extension}"
+    
+    if file_path.exists():
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                logger.info(f"Loaded starter code from: {file_path}")
+                return content
+        except Exception as e:
+            logger.error(f"Error reading starter code file {file_path}: {e}")
+            return None
+    
+    # Try case-insensitive match
+    try:
+        for file in starter_code_path.iterdir():
+            if file.is_file() and file.stem.lower() == prefix.lower() and file.suffix == f".{extension}":
+                with open(file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    logger.info(f"Loaded starter code from: {file} (case-insensitive match)")
+                    return content
+    except Exception as e:
+        logger.error(f"Error searching for starter code: {e}")
+    
+    logger.info(f"No starter code found for prefix '{prefix}' with language '{language}'")
+    return None
+
+
+def get_side_panel_hidden_prefixes():
+    """Get prefixes that should have sidebar hidden by default"""
+    hidden_prefixes = os.getenv("SIDE_PANEL_HIDDEN", "").lower().split(",")
+    # Clean up the prefixes (remove spaces and empty strings)
+    hidden_prefixes = [prefix.strip() for prefix in hidden_prefixes if prefix.strip()]
+    return ",".join(hidden_prefixes)  # Return as comma-separated string for template
+
+
 def get_assignment_base_key(assignment_key):
     """
     Extract the base key from assignment key for file reading
@@ -621,6 +687,7 @@ async def execute_c_code(code: str, timeout: int = 10):
 class AuthRequest(BaseModel):
     user_id: str
     assignment_key: str
+    programming_language: str = "javascript"
 
 class AuthResponse(BaseModel):
     status: str
@@ -629,8 +696,10 @@ class AuthResponse(BaseModel):
     problem_description: str | None = None
     session_id: str
     paste_allowed: int = 1
-    has_pre_survey: bool = False   # ADD THIS
-    has_post_survey: bool = False  # ADD THIS
+    has_pre_survey: bool = False
+    has_post_survey: bool = False
+    programming_language: str = "javascript"
+    starter_code: str | None = None
 
 class ActivityEntry(BaseModel):
     timestamp: str
@@ -1403,7 +1472,8 @@ async def serve_ide(request: Request):
     return templates.TemplateResponse("index.html", {
         "request": request,
         "session_token": session_token,
-        "user_id": user_id
+        "user_id": user_id,
+        "side_panel_hidden": get_side_panel_hidden_prefixes()
     })
 
 @app.get("/health")
@@ -2130,6 +2200,7 @@ async def authenticate_user(request: AuthRequest):
     try:
         user_id = request.user_id.strip()
         assignment_key = request.assignment_key.strip()
+        programming_language = request.programming_language or "javascript"
         
         if len(user_id) < 3:
             raise HTTPException(status_code=400, detail="User ID must be at least 3 characters")
@@ -2160,8 +2231,13 @@ async def authenticate_user(request: AuthRequest):
                 logger.error(f"Error reading assignment file for {assignment_key}: {e}")
                 problem_description = f"Error loading assignment description: {str(e)}"
         
-        # ===== ADD THIS SECTION TO CHECK FOR SURVEYS =====
+        # Get base key from assignment_key (used for starter code and surveys)
         base_key = get_assignment_base_key(assignment_key)
+        
+        # Get starter code if available
+        starter_code = get_starter_code(base_key, programming_language)
+        
+        # ===== ADD THIS SECTION TO CHECK FOR SURVEYS =====
         survey_file = Path("surveys") / f"{base_key}.json"
         has_surveys = survey_file.exists()
         
@@ -2198,7 +2274,7 @@ async def authenticate_user(request: AuthRequest):
         active_sessions[session_id] = session_log
         save_session_to_local(session_log)
         
-        logger.info(f"Authentication successful: {user_id} -> Condition {condition}, Session: {session_id}")
+        logger.info(f"Authentication successful: {user_id} -> Condition {condition}, Session: {session_id}, Language: {programming_language}")
         
         paste_allowed = int(os.getenv("PASTE_CONTROL", "1"))
         
@@ -2209,8 +2285,10 @@ async def authenticate_user(request: AuthRequest):
             problem_description=problem_description,
             session_id=session_id,
             paste_allowed=paste_allowed,
-            has_pre_survey=has_pre,   # ADD THIS
-            has_post_survey=has_post  # ADD THIS
+            has_pre_survey=has_pre,
+            has_post_survey=has_post,
+            programming_language=programming_language,
+            starter_code=starter_code
         )
         
     except HTTPException:

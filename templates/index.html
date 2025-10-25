@@ -1922,7 +1922,8 @@ let currentSession = {
     problemDescription: null,
     programmingLanguage: 'javascript',
     startTime: null,
-    pasteAllowed: 1,  // ADD THIS LINE
+    pasteAllowed: 1,
+    starterCode: null,
     guessLogCount: 0,
     descLogCount: 0,
     suggestionsLogCount: 0,
@@ -2456,13 +2457,14 @@ async function initializeFromURL() {
         
         currentSession = {
             userId: authData.userId,
-            prefix: extractPrefix(authData.userId),  // ADD THIS LINE
+            prefix: extractPrefix(authData.userId),
             assignmentKey: authData.assignmentKey,
             sessionId: authData.sessionId,
             sessionToken: authData.sessionToken,
             condition: authData.condition,
             problemDescription: authData.problemDescription,
             programmingLanguage: authData.programmingLanguage || 'javascript',
+            starterCode: authData.starterCode || null,
             startTime: authData.timestamp,
             pasteAllowed: authData.pasteAllowed !== undefined ? authData.pasteAllowed : 1,
             guessLogCount: 0,
@@ -2661,10 +2663,19 @@ async function initializeEditor() {
                 };
 
                 const selectedLanguage = currentSession.programmingLanguage || 'javascript';
-                const defaultCode = languageDefaults[selectedLanguage] || '// Start coding here...\n';
+                
+                // Check if starter code is available from session
+                let initialCode;
+                if (currentSession.starterCode) {
+                    initialCode = currentSession.starterCode;
+                    console.log('Using starter code from session');
+                } else {
+                    initialCode = languageDefaults[selectedLanguage] || '// Start coding here...\n';
+                    console.log('Using default placeholder code');
+                }
 
                 window.editor = monaco.editor.create(editorContainer, {
-                    value: defaultCode,
+                    value: initialCode,
                     language: selectedLanguage,
                     theme: 'vs-dark',
                     automaticLayout: true,
