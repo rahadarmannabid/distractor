@@ -1924,6 +1924,11 @@ let currentSession = {
     startTime: null,
     pasteAllowed: 1,
     starterCode: null,
+    periodicSurveyEnabled: false,
+    periodicSurveyStart: 5,
+    periodicSurveyInterval: 10,
+    nextPeriodicSurveyAt: null,
+    periodicSurveysCompleted: 0,
     guessLogCount: 0,
     descLogCount: 0,
     suggestionsLogCount: 0,
@@ -2467,6 +2472,11 @@ async function initializeFromURL() {
             starterCode: authData.starterCode || null,
             startTime: authData.timestamp,
             pasteAllowed: authData.pasteAllowed !== undefined ? authData.pasteAllowed : 1,
+            periodicSurveyEnabled: authData.periodicSurveyEnabled || false,
+            periodicSurveyStart: authData.periodicSurveyStart || 5,
+            periodicSurveyInterval: 10,
+            nextPeriodicSurveyAt: authData.periodicSurveyStart || 5,
+            periodicSurveysCompleted: 0,
             guessLogCount: 0,
             descLogCount: 0,
             suggestionsLogCount: 0,
@@ -3329,6 +3339,9 @@ function insertSuggestion(type) {
     }
 
     currentSession.suggestionClickCount++;
+    
+    // Check if periodic survey should be shown
+    checkSuggestionBasedPeriodicSurvey();
 
     let suggestionText = '';
     if (type === 'guess') {
@@ -3464,10 +3477,46 @@ function incrementAnalysisCount() {
     surveyData.analysisCount++;
     console.log(`Analysis count: ${surveyData.analysisCount}`);
     
-    // Check if survey should be shown - BUT NOT during submission process
-    if (surveyData.analysisCount % surveyData.surveyInterval === 0 && 
-        !surveyData.pendingSurvey && 
-        !isSubmissionInProgress) {
+    // OLD TRIGGER: Check if survey should be shown based on analysisCount
+    // This is now disabled in favor of suggestion-based triggers
+    // if (surveyData.analysisCount % surveyData.surveyInterval === 0 && 
+    //     !surveyData.pendingSurvey && 
+    //     !isSubmissionInProgress) {
+    //     showPeriodicSurvey();
+    // }
+}
+
+// NEW: Check if periodic survey should be shown based on suggestion clicks
+function checkSuggestionBasedPeriodicSurvey() {
+    if (!currentSession.periodicSurveyEnabled) {
+        console.log('Periodic surveys not enabled for this assignment');
+        return;
+    }
+    
+    if (!currentSession.nextPeriodicSurveyAt) {
+        console.log('No periodic survey scheduled');
+        return;
+    }
+    
+    if (surveyData.pendingSurvey || isSubmissionInProgress) {
+        console.log('Survey already pending or submission in progress');
+        return;
+    }
+    
+    const totalSuggestions = currentSession.suggestionClickCount || 0;
+    
+    console.log(`Periodic Survey Check: ${totalSuggestions} suggestions, next survey at ${currentSession.nextPeriodicSurveyAt}`);
+    
+    if (totalSuggestions >= currentSession.nextPeriodicSurveyAt) {
+        console.log(`✅ Triggering periodic survey at ${totalSuggestions} suggestions`);
+        
+        // Update next survey trigger
+        currentSession.nextPeriodicSurveyAt = totalSuggestions + currentSession.periodicSurveyInterval;
+        currentSession.periodicSurveysCompleted++;
+        
+        console.log(`Next periodic survey scheduled at: ${currentSession.nextPeriodicSurveyAt} suggestions`);
+        
+        // Show the survey
         showPeriodicSurvey();
     }
 }

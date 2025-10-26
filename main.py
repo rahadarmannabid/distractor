@@ -197,6 +197,21 @@ def get_side_panel_hidden_prefixes():
     hidden_prefixes = [prefix.strip() for prefix in hidden_prefixes if prefix.strip()]
     return ",".join(hidden_prefixes)  # Return as comma-separated string for template
 
+def get_periodic_survey_config():
+    """Get periodic survey configuration from environment variables"""
+    periodic_prefixes = os.getenv("PERIODIC_SURVEY", "").lower().split(",")
+    periodic_prefixes = [prefix.strip() for prefix in periodic_prefixes if prefix.strip()]
+    
+    start_after = os.getenv("PERIODIC_SURVEY_START", "5")
+    try:
+        start_after = int(start_after)
+    except ValueError:
+        start_after = 5  # Default to 5 if invalid
+    
+    return {
+        "enabled_prefixes": periodic_prefixes,
+        "start_after_suggestions": start_after
+    }
 
 def get_assignment_base_key(assignment_key):
     """
@@ -700,6 +715,8 @@ class AuthResponse(BaseModel):
     has_post_survey: bool = False
     programming_language: str = "javascript"
     starter_code: str | None = None
+    periodic_survey_enabled: bool = False
+    periodic_survey_start: int = 5
 
 class ActivityEntry(BaseModel):
     timestamp: str
@@ -2278,6 +2295,10 @@ async def authenticate_user(request: AuthRequest):
         
         paste_allowed = int(os.getenv("PASTE_CONTROL", "1"))
         
+        # Check if periodic surveys are enabled for this assignment
+        periodic_config = get_periodic_survey_config()
+        periodic_enabled = base_key.lower() in periodic_config["enabled_prefixes"] if base_key else False
+        
         return AuthResponse(
             status="success",
             message="Authentication successful",
@@ -2288,7 +2309,9 @@ async def authenticate_user(request: AuthRequest):
             has_pre_survey=has_pre,
             has_post_survey=has_post,
             programming_language=programming_language,
-            starter_code=starter_code
+            starter_code=starter_code,
+            periodic_survey_enabled=periodic_enabled,
+            periodic_survey_start=periodic_config["start_after_suggestions"]
         )
         
     except HTTPException:
@@ -2296,6 +2319,49 @@ async def authenticate_user(request: AuthRequest):
     except Exception as e:
         logger.error(f"Authentication error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Authentication failed: {str(e)}")
+
+
+@app.post("/log-periodic-survey")
+async def log_periodic_survey(request: Request):
+    """Log periodic survey responses during coding session"""
+    try:
+        data = await request.json()
+        session_id = data.get('session_id')
+        survey_data = data.get('survey_data')
+        
+        if not session_id or not survey_data:
+            raise HTTPException(status_code=400, detail="Missing required data")
+        
+        # Log to Firebase if available
+        if firebase_db:
+            try:
+                session_ref = firebase_db.child('sessions').child(session_id)
+                
+                # Get existing periodic surveys or create new array
+                existing = session_ref.child('periodic_surveys').get() or []
+                if not isinstance(existing, list):
+                    existing = []
+                
+                existing.append(survey_data)
+                session_ref.child('periodic_surveys').set(existing)
+                
+                logger.info(f"Periodic survey #{survey_data.get('survey_number')} logged for session {session_id}")
+            except Exception as e:
+                logger.error(f"Error logging to Firebase: {e}")
+        
+        # Also log locally
+        if session_id in active_sessions:
+            session_log = active_sessions[session_id]
+            if not hasattr(session_log, 'periodic_surveys'):
+                session_log.periodic_surveys = []
+            session_log.periodic_surveys.append(survey_data)
+            save_session_to_local(session_log)
+        
+        return {"status": "success", "message": "Periodic survey logged"}
+        
+    except Exception as e:
+        logger.error(f"Error logging periodic survey: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 async def save_session_to_firebase(

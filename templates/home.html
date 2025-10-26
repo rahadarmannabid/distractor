@@ -882,7 +882,7 @@
                 // Generate unique session URL
                 const sessionToken = generateSessionToken(userId, assignmentKey);
                 
-                // Store credentials and consent status in sessionStorage for the IDE page
+// Store credentials and consent status in sessionStorage for the IDE page
                 sessionStorage.setItem('authData', JSON.stringify({
                     userId: userId,
                     assignmentKey: assignmentKey,
@@ -897,7 +897,9 @@
                     pasteAllowed: data.paste_allowed !== undefined ? data.paste_allowed : 1,
                     hasPreSurvey: data.has_pre_survey || false,
                     hasPostSurvey: data.has_post_survey || false,
-                    starterCode: data.starter_code || null
+                    starterCode: data.starter_code || null,
+                    periodicSurveyEnabled: data.periodic_survey_enabled || false,
+                    periodicSurveyStart: data.periodic_survey_start || 5
                 }));
                 
                 // Check if pre-survey is required and redirect accordingly
