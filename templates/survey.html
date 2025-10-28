@@ -1260,37 +1260,6 @@
 
                 // ===== Handle Pre-Survey and Post-Survey Differently =====
                 if (this.surveyType === 'pre') {
-                    submitBtn.textContent = 'Downloading Assignment...';
-                    
-                    try {
-                        // Trigger PDF download using fetch for better error handling
-                        const downloadResponse = await fetch(`/download-assignment/${this.assignmentKey}`);
-                        
-                        if (downloadResponse.ok) {
-                            const blob = await downloadResponse.blob();
-                            const url = URL.createObjectURL(blob);
-                            const link = document.createElement('a');
-                            link.href = url;
-                            link.download = `${this.assignmentKey}.pdf`;
-                            document.body.appendChild(link);
-                            link.click();
-                            document.body.removeChild(link);
-                            
-                            // Clean up
-                            setTimeout(() => URL.revokeObjectURL(url), 100);
-                            
-                            submitBtn.textContent = '✅ Downloaded!';
-                            await new Promise(resolve => setTimeout(resolve, 1500));
-                        } else {
-                            throw new Error('Download failed');
-                        }
-                        
-                    } catch (downloadError) {
-                        console.error('PDF download error:', downloadError);
-                        this.showError('Assignment download failed, but you can continue to the IDE', 'warning');
-                        await new Promise(resolve => setTimeout(resolve, 2000));
-                    }
-                    
                     // Redirect to IDE after pre-survey
                     allowNavigation = true;  // Allow navigation without warning
                     window.location.href = `/index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
