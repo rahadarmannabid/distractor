@@ -706,6 +706,9 @@
 
     <script>
         // Survey Manager - ALL JavaScript INLINE
+        
+        // Navigation control flag to prevent warning during legitimate redirects
+        let allowNavigation = false;
         class SurveyManager {
             constructor() {
                 this.surveyType = new URLSearchParams(window.location.search).get('type');
@@ -1157,6 +1160,11 @@
 
                 // Prevent accidental navigation
                 window.addEventListener('beforeunload', (e) => {
+                    // Allow navigation if it's a legitimate redirect
+                    if (allowNavigation) {
+                        return undefined;  // Don't show warning
+                    }
+                    
                     if (Object.keys(this.responses).length > 0) {
                         e.preventDefault();
                         e.returnValue = '';
@@ -1284,6 +1292,7 @@
                     }
                     
                     // Redirect to IDE after pre-survey
+                    allowNavigation = true;  // Allow navigation without warning
                     window.location.href = `/index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
                     
                 } else if (this.surveyType === 'post') {
@@ -1350,6 +1359,7 @@
                             await new Promise(resolve => setTimeout(resolve, 3000));
                             
                             // Redirect to home/login
+                            allowNavigation = true;  // Allow navigation without warning
                             window.location.href = '/home.html';
                             
                         } catch (error) {
@@ -1361,6 +1371,7 @@
                         
                     } else {
                         // Post-survey completed outside submission flow
+                        allowNavigation = true;  // Allow navigation without warning
                         window.location.href = `/index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
                     }
                 }

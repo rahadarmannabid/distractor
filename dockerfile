@@ -23,29 +23,39 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# Copy .env file (will be included in image)
+COPY --chown=appuser:appuser .env .env
+
 # Copy application code
 COPY --chown=appuser:appuser . .
 
-# CRITICAL: Explicitly verify surveys directory was copied
+# CRITICAL: Explicitly verify all critical files and directories
 RUN echo "=== VERIFYING CRITICAL DIRECTORIES ===" && \
     echo "Current directory:" && pwd && \
     echo "" && \
     echo "Contents of /app:" && ls -la /app/ && \
     echo "" && \
+    echo "=== Checking .env file ===" && \
+    test -f /app/.env && echo "✅ .env file exists" || echo "❌ .env file missing" && \
+    ls -la /app/.env && \
+    echo "" && \
     echo "=== Checking surveys/ ===" && \
     ls -la /app/surveys/ && \
     echo "" && \
     echo "=== Checking surveys JSON files ===" && \
-    ls -la /app/surveys/*.json && \
+    ls -la /app/surveys/*.json 2>/dev/null || echo "No JSON files found" && \
     echo "" && \
     echo "=== Checking surveys/images/ ===" && \
-    ls -la /app/surveys/images/ && \
+    ls -la /app/surveys/images/ 2>/dev/null || echo "No images directory" && \
     echo "" && \
     echo "=== Checking templates/ ===" && \
     ls -la /app/templates/ && \
     echo "" && \
     echo "=== Checking assignment/ ===" && \
-    ls -la /app/assignment/ && \
+    ls -la /app/assignment/ 2>/dev/null || echo "No assignment directory" && \
+    echo "" && \
+    echo "=== Checking starter_code/ ===" && \
+    ls -la /app/starter_code/ 2>/dev/null || echo "No starter_code directory" && \
     echo "" && \
     echo "✅ All critical directories verified!"
 

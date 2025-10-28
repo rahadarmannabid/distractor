@@ -1,79 +1,25 @@
-version: '3.8'
-
 services:
-  ai-assistant:
+  guessing_ide:
     build: .
-    container_name: ai-code-assistant-local
+    container_name: guessing_ide
+    image: guessing_ide:latest
     ports:
       - "8000:8000"
-    environment:
-      # OpenAI Configuration
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      
-      # API Configuration
-      - API_HOST=0.0.0.0
-      - API_PORT=8000
-      - API_RELOAD=False
-      - LOG_LEVEL=info
-      
-      # Security Settings
-      - CORS_ORIGINS=*
-      - MAX_CODE_LENGTH=10000
-      - MAX_SUBMISSION_LENGTH=15000
-      - EXECUTION_TIMEOUT=10
-      
-      # Application Settings
-      - APP_TITLE=AI Code Assistant API
-      - SUBMISSIONS_DIR=submissions
-      
-      # Teacher Access
-      - TEACHER_ACCESS_CODE=${TEACHER_ACCESS_CODE}
-      
-      # Conditions
-      - CONDITION_1_PREFIXES=P1C3,P2C3
-      - CONDITION_2_PREFIXES=Proteus,Phobos
-      - CONDITION_3_PREFIXES=Nereid,Deimos
-      
-      # Paste Control
-      - PASTE_CONTROL=0
-      
-      # Survey Settings
-      - FEEDBACK_INTERVAL=10
-      - Q1=I can trust the AI system
-      - Q2=I am suspicious of the AI systems intent, action, or outputs.
-      - Q3=I am confident in the AI system.
-      - Q4=The AI system is reliable.
-      
-      # Firebase Configuration
-      - FIREBASE_API_KEY=${FIREBASE_API_KEY}
-      - FIREBASE_AUTH_DOMAIN=${FIREBASE_AUTH_DOMAIN}
-      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
-      - FIREBASE_STORAGE_BUCKET=${FIREBASE_STORAGE_BUCKET}
-      - FIREBASE_MESSAGING_SENDER_ID=${FIREBASE_MESSAGING_SENDER_ID}
-      - FIREBASE_APP_ID=${FIREBASE_APP_ID}
-      - FIREBASE_MEASUREMENT_ID=${FIREBASE_MEASUREMENT_ID}
-      - FIREBASE_DATABASE_URL=${FIREBASE_DATABASE_URL}
-      
-      # Firebase Admin SDK
-      - FIREBASE_PRIVATE_KEY_ID=${FIREBASE_PRIVATE_KEY_ID}
-      - FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
-      - FIREBASE_CLIENT_EMAIL=${FIREBASE_CLIENT_EMAIL}
-      - FIREBASE_CLIENT_ID=${FIREBASE_CLIENT_ID}
-      - FIREBASE_CLIENT_CERT_URL=${FIREBASE_CLIENT_CERT_URL}
-      
-      # Email Configuration
-      - EMAIL_ENABLED=${EMAIL_ENABLED}
-      - SMTP_SERVER=${SMTP_SERVER}
-      - SMTP_PORT=${SMTP_PORT}
-      - EMAIL_ADDRESS=${EMAIL_ADDRESS}
-      - EMAIL_PASSWORD=${EMAIL_PASSWORD}
-      - NOTIFICATION_EMAIL=${NOTIFICATION_EMAIL}
     
     volumes:
-      # Persist data outside container
+      # Persistent data volumes (read-write)
       - ./submissions:/app/submissions
       - ./session_logs:/app/session_logs
       - ./logs:/app/logs
+      
+      # Configuration volumes (read-only)
+      - ./starter_code:/app/starter_code:ro
+      - ./surveys:/app/surveys:ro
+      - ./assignment:/app/assignment:ro
+      - ./templates:/app/templates:ro
+    
+    networks:
+      - guessing_ide_network
     
     restart: unless-stopped
     
@@ -83,3 +29,14 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  guessing_ide_network:
+    driver: bridge
+    name: guessing_ide_network

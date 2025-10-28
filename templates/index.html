@@ -1591,6 +1591,11 @@
 <script>
 // Global session management
 // ============================================
+// NAVIGATION CONTROL FLAG
+// ============================================
+let allowNavigation = false;  // Flag to allow legitimate navigation without warning
+
+// ============================================
 // AUTO-SAVE FUNCTIONALITY
 // ============================================
 
@@ -2390,6 +2395,9 @@ async function uploadActivityBatch() {
     }
 
     function goToLogin() {
+        // Allow navigation without warning
+        allowNavigation = true;
+        
         // Clear any stored session data
         sessionStorage.removeItem('authData');
         localStorage.removeItem('authData');
@@ -3272,8 +3280,8 @@ function showHistoryInline(type) {
         } else {
             historyHTML = `<div style="max-height: 300px; overflow-y: auto; font-size: 12px;">`;
             
-            const entriesToShow = Math.min(5, history.length);
-            for (let i = history.length - 1; i >= history.length - entriesToShow; i--) {
+            const entriesToShow = history.length;
+            for (let i = history.length - 1; i >= 0; i--) {
                 const entry = history[i];
                 const timeStr = new Date(entry.timestamp).toLocaleTimeString();
                 
@@ -3308,8 +3316,8 @@ function showHistoryInline(type) {
                 }
             }
             
-            if (history.length > 5) {
-                historyHTML += `<div style="text-align: center; color: #888; font-size: 10px; font-style: italic;">Showing last 5 of ${history.length} entries</div>`;
+            if (history.length > 0) {
+                historyHTML += `<div style="text-align: center; color: #888; font-size: 10px; font-style: italic;">Showing all ${history.length} entries</div>`;
             }
             
             historyHTML += `</div>`;
@@ -3646,23 +3654,31 @@ function generateSurveyHTML(questions) {
             <div class="likert-scale">
                 <div class="likert-option">
                     <input type="radio" id="q${index}_1" name="question_${index}" value="1">
-                    <label for="q${index}_1">Strongly<br>Disagree</label>
+                    <label for="q${index}_1">Not at<br>all</label>
                 </div>
                 <div class="likert-option">
                     <input type="radio" id="q${index}_2" name="question_${index}" value="2">
-                    <label for="q${index}_2">Disagree</label>
+                    <label for="q${index}_2">Slightly</label>
                 </div>
                 <div class="likert-option">
                     <input type="radio" id="q${index}_3" name="question_${index}" value="3">
-                    <label for="q${index}_3">Neutral</label>
+                    <label for="q${index}_3">Somewhat</label>
                 </div>
                 <div class="likert-option">
                     <input type="radio" id="q${index}_4" name="question_${index}" value="4">
-                    <label for="q${index}_4">Agree</label>
+                    <label for="q${index}_4">Moderately</label>
                 </div>
                 <div class="likert-option">
                     <input type="radio" id="q${index}_5" name="question_${index}" value="5">
-                    <label for="q${index}_5">Strongly<br>Agree</label>
+                    <label for="q${index}_5">Very</label>
+                </div>
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_6" name="question_${index}" value="6">
+                    <label for="q${index}_6">Quite</label>
+                </div>
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_7" name="question_${index}" value="7">
+                    <label for="q${index}_7">Extremely</label>
                 </div>
             </div>
         </div>
@@ -3703,10 +3719,10 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
     
     // CONDITION 1: Show AI analysis + correct descriptions
     if (condition === 1) {
-        const recentInteractions = aiHistoryContext.ai_guess_history.slice(-2);
+        const recentInteractions = aiHistoryContext.ai_guess_history.slice(-5);
         
         // Show AI Problem Guess
-        historyHTML += `<h4 style="color: #f97316; font-size: 12px; margin-bottom: 10px;">AI Problem Guess (Last 2)</h4>`;
+        historyHTML += `<h4 style="color: #f97316; font-size: 12px; margin-bottom: 10px;">AI Problem Guess (Last 5)</h4>`;
         recentInteractions.forEach((interaction, index) => {
             const timeStr = new Date(interaction.timestamp).toLocaleTimeString();
             const analysisNumber = aiHistoryContext.ai_guess_history.length - recentInteractions.length + index + 1;
@@ -3732,10 +3748,10 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
         if (aiHistoryContext.correct_description_history && aiHistoryContext.correct_description_history.length > 0) {
             historyHTML += `
                 <div style="border-top: 2px solid #22c55e; margin-top: 15px; padding-top: 15px;">
-                    <h4 style="color: #22c55e; font-size: 12px; margin-bottom: 10px;">Correct Problem Suggestions (Last 2)</h4>
+                    <h4 style="color: #22c55e; font-size: 12px; margin-bottom: 10px;">Correct Problem Suggestions (Last 5)</h4>
             `;
             
-            const recentCorrect = aiHistoryContext.correct_description_history.slice(-2);
+            const recentCorrect = aiHistoryContext.correct_description_history.slice(-5);
             recentCorrect.forEach((interaction, index) => {
                 const timeStr = new Date(interaction.timestamp).toLocaleTimeString();
                 const analysisNumber = aiHistoryContext.correct_description_history.length - recentCorrect.length + index + 1;
@@ -3758,7 +3774,7 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
     
     // CONDITION 2: Show only AI problem analysis
     else if (condition === 2) {
-        const recentInteractions = aiHistoryContext.ai_guess_history.slice(-3);
+        const recentInteractions = aiHistoryContext.ai_guess_history.slice(-5);
         
         recentInteractions.forEach((interaction, index) => {
             const timeStr = new Date(interaction.timestamp).toLocaleTimeString();
@@ -3786,7 +3802,7 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
     // CONDITION 3: Show only AI code suggestions (no problem analysis)
     else if (condition === 3) {
         if (aiHistoryContext.suggestions_only_history && aiHistoryContext.suggestions_only_history.length > 0) {
-            const recentSuggestions = aiHistoryContext.suggestions_only_history.slice(-4);
+            const recentSuggestions = aiHistoryContext.suggestions_only_history.slice(-5);
             
             recentSuggestions.forEach((interaction, index) => {
                 const timeStr = new Date(interaction.timestamp).toLocaleTimeString();
@@ -3811,7 +3827,7 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
     const totalCount = condition === 3 ? 
         (aiHistoryContext.suggestions_only_history?.length || 0) : 
         aiHistoryContext.ai_guess_history.length;
-    const showingCount = condition === 1 ? 2 : condition === 2 ? 3 : 4;
+    const showingCount = 5;
     
     if (totalCount > showingCount) {
         historyHTML += `
@@ -4606,6 +4622,7 @@ async function checkAndShowPostSurvey() {
                     
                     // Redirect to survey page with session preserved
                     setTimeout(() => {
+                        allowNavigation = true;  // Allow navigation without warning
                         window.location.href = `/survey.html?type=post&session=${sessionToken}&user=${encodeURIComponent(userId)}`;
                     }, 1500);
                     return;
@@ -4748,6 +4765,7 @@ async function proceedWithActualSubmission() {
 
    function endSession() {
        if (confirm('Are you sure you want to end this session? Any unsaved code will be lost.')) {
+           allowNavigation = true;  // Allow navigation without warning
            addTerminalOutput('Session ended by user', 'warning');
            clearProgress();
            stopAutoSave();
@@ -4898,6 +4916,11 @@ if (historySuggestionsButton) {
 
 // Prevent accidental page close
 window.addEventListener('beforeunload', (e) => {
+    // Allow navigation if it's a legitimate redirect (after submission/logout)
+    if (allowNavigation) {
+        return undefined;  // Don't show warning
+    }
+    
     if (currentSession.sessionId) {
         // Save progress before leaving
         saveProgress();
