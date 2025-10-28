@@ -2784,7 +2784,7 @@ async function initializeEditor() {
                 // Trigger AI analysis when keypress released, allows for more midline analysis
                 document.addEventListener('keypress', (e) => {
                     if (e.key !== 'Enter') {
-                        debounceGeneralAnalysis(1500);
+                        debounceGeneralAnalysis(2500);
                     }
                 });
 
@@ -2911,16 +2911,19 @@ function debounceNewlineAnalysis(delay = 300) {
     }, delay);
 }
 
+let previousCode = '';
+
 // Slower background analysis for general typing
-function debounceGeneralAnalysis(delay = 1500) {
+function debounceGeneralAnalysis(delay = 2500) {
     clearTimeout(debounceTimerGeneral);
     debounceTimerGeneral = setTimeout(() => { 
-        analyzeCurrentCode()
+        const code = window.editor.getValue().trim();
+        // Run if significant change since last analysis
+        if (Math.abs(previousCode.length - code.length) > 5){
+            analyzeCurrentCode();
+        }
     }, delay);
 }
-
-
-let previousCode = ''
 
 // Analyze current code
 async function analyzeCurrentCode() {
