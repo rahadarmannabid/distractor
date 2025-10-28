@@ -1,0 +1,5 @@
+```markdown
+1.Print the numbers 1 through a number N in a for loop, separated by new lines.
+2.Print the character ‘*’ a number N amount of times on one line.
+3.Print whether a number N is even or odd.
+```
