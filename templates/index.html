@@ -1626,19 +1626,13 @@
 </div>
 
 
-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs/loader.min.js"></script>
 
 <script>
 // Global session management
-// ============================================
 // NAVIGATION CONTROL FLAG
-// ============================================
 let allowNavigation = false;  // Flag to allow legitimate navigation without warning
-
-// ============================================
 // AUTO-SAVE FUNCTIONALITY
-// ============================================
 
 const AUTOSAVE_KEY_PREFIX = 'ide_autosave_';
 const AUTOSAVE_INTERVAL = 15000;
@@ -1916,7 +1910,6 @@ function clearProgress() {
     if (key) {
         try {
             localStorage.removeItem(key);
-            console.log('Progress cleared');
         } catch (error) {
             console.error('Failed to clear progress:', error);
         }
@@ -1954,10 +1947,7 @@ function onEditorChange() {
         saveProgress();
     }, 3000);
 }
-
-// ============================================
 // END AUTO-SAVE FUNCTIONALITY
-// ============================================
 
 let currentSession = {
     userId: null,
@@ -2132,9 +2122,6 @@ function resetIdleTimer() {
     }, 30000); // 30 seconds
 }
 
-
-// ===== NEW FUNCTIONS FOR SESSIONSTORAGE PERSISTENCE =====
-
 function savePeriodicSurveysToStorage() {
     try {
         const storageKey = `periodicSurveys_${currentSession.sessionId}`;
@@ -2147,7 +2134,6 @@ function savePeriodicSurveysToStorage() {
         };
         
         sessionStorage.setItem(storageKey, JSON.stringify(dataToSave));
-        console.log(`✅ Saved ${surveyData.surveyResponses.length} periodic surveys to sessionStorage`);
     } catch (error) {
         console.error('❌ Failed to save periodic surveys to sessionStorage:', error);
     }
@@ -2164,12 +2150,8 @@ function restorePeriodicSurveysFromStorage() {
             surveyData.periodicSurveyOccurrenceCount = parsedData.periodicSurveyOccurrenceCount || 0;
             surveyData.analysisCount = parsedData.analysisCount || 0;
             surveyData.surveyInterval = parsedData.surveyInterval || 4;
-            
-            console.log(`✅ Restored ${surveyData.surveyResponses.length} periodic surveys from sessionStorage`);
-            console.log(`   Saved at: ${parsedData.savedAt}`);
             return true;
         } else {
-            console.log('ℹ️ No periodic surveys found in sessionStorage');
             return false;
         }
     } catch (error) {
@@ -2182,16 +2164,10 @@ function clearPeriodicSurveysFromStorage() {
     try {
         const storageKey = `periodicSurveys_${currentSession.sessionId}`;
         sessionStorage.removeItem(storageKey);
-        console.log('✅ Cleared periodic surveys from sessionStorage');
     } catch (error) {
         console.error('❌ Failed to clear periodic surveys from sessionStorage:', error);
     }
 }
-
-// ===== END NEW FUNCTIONS =====
-
-
-// ===== SUBMISSION DATA CACHING FUNCTIONS =====
 
 function captureAllSubmissionData() {
     try {
@@ -2247,11 +2223,6 @@ function captureAllSubmissionData() {
         };
         
         sessionStorage.setItem('pendingSubmissionData', JSON.stringify(submissionData));
-        console.log('✅ Captured all submission data to sessionStorage');
-        console.log('   Code length:', code.length);
-        console.log('   Line count:', submissionData.lineCount);
-        console.log('   Activity logs:', activityLog.length);
-        
         return submissionData;
         
     } catch (error) {
@@ -2265,12 +2236,8 @@ function retrieveCachedSubmissionData() {
         const cached = sessionStorage.getItem('pendingSubmissionData');
         if (cached) {
             const data = JSON.parse(cached);
-            console.log('✅ Retrieved cached submission data');
-            console.log('   Captured at:', data.capturedAt);
-            console.log('   Code length:', data.code.length);
             return data;
         }
-        console.log('ℹ️ No cached submission data found');
         return null;
     } catch (error) {
         console.error('❌ Failed to retrieve cached data:', error);
@@ -2281,7 +2248,6 @@ function retrieveCachedSubmissionData() {
 function clearCachedSubmissionData() {
     try {
         sessionStorage.removeItem('pendingSubmissionData');
-        console.log('✅ Cleared cached submission data');
     } catch (error) {
         console.error('❌ Failed to clear cached data:', error);
     }
@@ -2365,7 +2331,6 @@ async function uploadActivityBatch() {
         });
         
         if (response.ok) {
-            console.log(`Uploaded ${activityBuffer.length} activities`);
             activityBuffer = [];
         } else {
             const errorData = await response.json().catch(() => ({}));
@@ -2485,15 +2450,11 @@ async function uploadActivityBatch() {
 // Initialize application from URL parameters
 // Initialize application from URL parameters
 async function initializeFromURL() {
-    console.log('Starting initialization...');
     updateLoadingMessage('Validating session parameters...');
-    console.log('Current URL:', window.location.href);
     console.log('SessionStorage data:', sessionStorage.getItem('authData'));
     
     try {
         const validation = validateSessionFromURL();
-        console.log('Validation result:', validation);
-            
         if (!validation.success) {
             showAccessDenied(validation.error);
             return;
@@ -2542,12 +2503,6 @@ async function initializeFromURL() {
         restorePeriodicSurveysFromStorage();
         
         // ✅ DEBUG: Log final survey configuration
-        console.log('🔍 Final Survey Configuration:', {
-            assignmentKey: authData.assignmentKey,
-            finalSurveyDisabled: authData.finalSurveyDisabled,
-            willShowFinalSurvey: !authData.finalSurveyDisabled
-        });
-        
         // Update UI
         userDisplay.textContent = `User: ${authData.userId}`;
         sessionIndicator.textContent = `Session: ${authData.sessionId.substring(0, 16)}...`;
@@ -2560,7 +2515,6 @@ async function initializeFromURL() {
         
         // ✅ CHECK FOR PRE-SURVEY REQUIREMENT (FLEXIBLE)
         if (authData.hasPreSurvey) {
-            console.log('🔍 Pre-survey check: Assignment has pre-survey configured');
             try {
                 const statusResponse = await fetch(`/survey-status/${currentSession.sessionId}`);
                 if (statusResponse.ok) {
@@ -2568,7 +2522,6 @@ async function initializeFromURL() {
                     
                     // If pre-survey is required but not completed, redirect to survey
                     if (statusData.pre_survey_status !== 'completed') {
-                        console.log('⚠️ Pre-survey not completed - redirecting...');
                         updateLoadingMessage('Pre-survey required before accessing IDE...');
                         
                         // Get session parameters for redirect
@@ -2594,7 +2547,6 @@ async function initializeFromURL() {
                         }, 2000);
                         return; // Stop initialization here
                     } else {
-                        console.log('✅ Pre-survey already completed - IDE access granted');
                     }
                 } else {
                     console.warn('⚠️ Could not fetch survey status:', statusResponse.status);
@@ -2605,7 +2557,6 @@ async function initializeFromURL() {
                 // Continue with IDE initialization if check fails (fallback)
             }
         } else {
-            console.log('ℹ️ No pre-survey required for this assignment');
         }
         
         // Add paste status indicator
@@ -2649,11 +2600,8 @@ async function initializeFromURL() {
         }
 
         // Initialize editor with timeout protection
-        console.log('Initializing Monaco Editor...');
         updateLoadingMessage('Loading code editor (this may take a few seconds)...');
         await initializeEditor();
-        console.log('Monaco Editor initialized successfully');
-        
         updateLoadingMessage('Finalizing setup...');
         showMainApp();
         
@@ -2709,8 +2657,6 @@ async function initializeFromURL() {
             sessionStartTime = Date.now();
             isTabVisible = !document.hidden;
             lastFocusTime = sessionStartTime;
-
-            // Log session start
             logActivity('session_start', {
                 user_id: authData.userId,
                 condition: authData.condition,
@@ -2735,8 +2681,6 @@ async function initializeFromURL() {
             document.addEventListener('click', updateUserInteraction);
             document.addEventListener('keypress', updateUserInteraction);
             document.addEventListener('scroll', updateUserInteraction);
-            
-            console.log('Enhanced activity tracking initialized');
         }, 200);
         
     } catch (error) {
@@ -2759,7 +2703,6 @@ async function initializeEditor() {
                 window.editor.dispose();
                 window.editor = null;
             } catch (e) {
-                console.log('Previous editor cleanup:', e);
             }
         }
         
@@ -2793,10 +2736,8 @@ async function initializeEditor() {
                 let initialCode;
                 if (currentSession.starterCode) {
                     initialCode = currentSession.starterCode;
-                    console.log('Using starter code from session');
                 } else {
                     initialCode = languageDefaults[selectedLanguage] || '// Start coding here...\n';
-                    console.log('Using default placeholder code');
                 }
 
                 window.editor = monaco.editor.create(editorContainer, {
@@ -2921,8 +2862,6 @@ async function initializeEditor() {
                             showTemporaryPasteNotification();
                         }
                     });
-                    
-                    console.log('Paste control active - all paste operations blocked');
                 }
                 
                 updateFontSize(currentFontSize);
@@ -3020,7 +2959,6 @@ async function analyzeCurrentCode() {
     
     // Prevent race conditions - don't start new analysis if one is in progress
     if (isAnalyzing) {
-        console.log('Analysis already in progress, skipping...');
         return;
     }
     
@@ -3077,8 +3015,6 @@ logActivity('ai_analysis_complete', {
         let nextLineCode = data.next_line || "// No suggestions available";
 
         console.log("analysis complete, data on next line")
-        console.log(data);
-        
         let correctNextLineCode = nextLineCode;
         if (currentSession.condition === 1 && data.correct_next_line) {
             correctNextLineCode = data.correct_next_line;
@@ -3330,8 +3266,6 @@ function showHistoryInline(type) {
         
     const isShowingHistory = targetElement.getAttribute('data-showing-history') === 'true';
     const action = isShowingHistory ? 'hide_history' : 'show_history';
-    
-    // Log with proper start/end timestamps
     logActivity('history_interaction', {
         start_time: new Date(historyStartTime).toISOString(),
         end_time: new Date().toISOString(),
@@ -3471,8 +3405,6 @@ function insertSuggestion(type) {
         suggestionText.includes('Based on correct problem...') ||
         suggestionText.includes('No suggestions available') ||
         suggestionText.includes('spinner')) {
-        
-        // Log failed suggestion interaction
         logActivity('suggestion_interaction', {
             start_time: new Date(suggestionStartTime).toISOString(),
             end_time: new Date().toISOString(),
@@ -3528,8 +3460,6 @@ function insertSuggestion(type) {
             window.editor.getAction('editor.action.formatDocument')?.run();
         }, 100);
     }
-
-// Log suggestion interaction with proper timestamps
     logActivity('suggestion_interaction', {
         start_time: new Date(suggestionStartTime).toISOString(),
         end_time: new Date().toISOString(),
@@ -3587,8 +3517,6 @@ function loadSurveyConfig() {
 
 function incrementAnalysisCount() {
     surveyData.analysisCount++;
-    console.log(`Analysis count: ${surveyData.analysisCount}`);
-    
     // OLD TRIGGER: Check if survey should be shown based on analysisCount
     // This is now disabled in favor of suggestion-based triggers
     // if (surveyData.analysisCount % surveyData.surveyInterval === 0 && 
@@ -3610,34 +3538,23 @@ function incrementAnalysisCount() {
 function checkSuggestionBasedPeriodicSurvey() {
     // New behavior: periodic surveys are triggered by AI analyses (analysisCount)
     if (!currentSession.periodicSurveyEnabled) {
-        console.log('Periodic surveys not enabled for this assignment');
         return;
     }
 
     if (!currentSession.nextPeriodicSurveyAt) {
-        console.log('No periodic survey scheduled');
         return;
     }
 
     if (surveyData.pendingSurvey || isSubmissionInProgress) {
-        console.log('Survey already pending or submission in progress');
         return;
     }
 
     // Prefer the explicit analysis counter if available, otherwise fall back to guess history length
     const totalAnalyses = (typeof surveyData.analysisCount === 'number' ? surveyData.analysisCount : (currentSession.guessHistory ? currentSession.guessHistory.length : 0)) || 0;
-
-    console.log(`Periodic Survey Check: ${totalAnalyses} AI analyses, next survey at ${currentSession.nextPeriodicSurveyAt}`);
-
     if (totalAnalyses >= currentSession.nextPeriodicSurveyAt) {
-        console.log(`✅ Triggering periodic survey at ${totalAnalyses} AI analyses`);
-
         // Update next survey trigger (use analyses count)
         currentSession.nextPeriodicSurveyAt = totalAnalyses + currentSession.periodicSurveyInterval;
         currentSession.periodicSurveysCompleted++;
-
-        console.log(`Next periodic survey scheduled at: ${currentSession.nextPeriodicSurveyAt} analyses`);
-
         // Show the survey
         showPeriodicSurvey();
     }
@@ -3991,11 +3908,7 @@ function setupSurveyEventListeners(modalId, submitButtonId, submitFunction) {
 }
 
 async function submitPeriodicSurvey() {
-    console.log('=== PERIODIC SURVEY SUBMISSION START ===');
     const responses = collectSurveyResponses('surveyModal');
-    
-    console.log('Responses collected:', responses.length, 'of', surveyData.questions.length);
-    
     if (responses.length !== surveyData.questions.length) {
         alert('Please answer all questions before submitting.');
         console.error('Incomplete survey - missing answers');
@@ -4003,7 +3916,6 @@ async function submitPeriodicSurvey() {
     }
     
     try {
-        console.log('Saving survey responses to backend...');
         await saveSurveyResponses(responses, 'periodic');
         
         // Use the AI snapshot captured when survey was shown
@@ -4016,15 +3928,10 @@ async function submitPeriodicSurvey() {
             responses: responses,
             ai_history_at_survey: aiSnapshot
         };
-        
-        console.log('Adding survey to array:', surveyEntry);
         surveyData.surveyResponses.push(surveyEntry);
         
         // ✅ NEW: Save to sessionStorage immediately
         savePeriodicSurveysToStorage();
-        
-        console.log('Total periodic surveys now:', surveyData.surveyResponses.length);
-        
         // Clear the snapshot
         surveyData.currentSurveyAISnapshot = null;
         
@@ -4045,9 +3952,6 @@ async function submitPeriodicSurvey() {
         const aiHistoryCount = currentSession.guessHistory.length;
         addTerminalOutput('Survey completed successfully - you can continue coding!', 'success');
         addTerminalOutput(`AI History: ${aiHistoryCount} analyses captured with survey`, 'info');
-        
-        console.log('=== PERIODIC SURVEY SUBMISSION SUCCESS ===');
-        
     } catch (error) {
         console.error('Survey submission error:', error);
         console.error('Error stack:', error.stack);
@@ -4168,11 +4072,7 @@ function downloadCodeFile() {
         // Cleanup
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
-        
-        console.log(`✅ Code downloaded as: ${fileName}`);
         addTerminalOutput(`✅ Code downloaded as: ${fileName}`, 'success');
-        
-        // Log the download activity
         logActivity('code_download', {
             file_name: fileName,
             language: language,
@@ -4262,9 +4162,6 @@ async function saveSurveyResponses(responses, surveyType) {
         }
 
         const result = await response.json();
-        console.log('Survey with AI history saved successfully:', result);
-        
-        // Log the AI history capture
         logActivity('survey_ai_history_captured', {
             survey_type: surveyType,
             ai_entries_captured: aiHistoryContext.ai_guess_history.length,
@@ -4318,8 +4215,6 @@ function blockEditor(block) {
 let originalSubmitToDatabase = null;
 
 
-
-
 async function loadSurveyQuestions() {
     try {
         const response = await fetch('/survey-config', {
@@ -4333,7 +4228,6 @@ async function loadSurveyQuestions() {
             const config = await response.json();
             surveyData.questions = config.questions;
             surveyData.surveyInterval = config.feedback_interval;
-            console.log('Survey config loaded:', config);
         } else {
             console.warn('Failed to load survey config, using defaults');
             surveyData.questions = [
@@ -4658,9 +4552,6 @@ async function submitToDatabase() {
         alert('Please complete the pending survey before submitting your code.');
         return;
     }
-
-    console.log('=== CODE SUBMISSION START ===');
-    
     // ✅ CRITICAL FIX: Capture ALL data RIGHT NOW before any redirects
     const capturedData = captureAllSubmissionData();
     if (!capturedData) {
@@ -4701,13 +4592,6 @@ async function submitToDatabase() {
     }
 
     // Check if final periodic survey is needed
-    console.log('🔍 Final Survey Check:', {
-        hasQuestions: surveyData.questions.length > 0,
-        alreadyCompleted: !!surveyData.finalSurveyResponse,
-        disabled: currentSession.finalSurveyDisabled,
-        willShow: surveyData.questions.length > 0 && !surveyData.finalSurveyResponse && !currentSession.finalSurveyDisabled
-    });
-    
     if (surveyData.questions.length > 0 && 
         !surveyData.finalSurveyResponse && 
         !currentSession.finalSurveyDisabled) {
@@ -4716,7 +4600,6 @@ async function submitToDatabase() {
         return; // Will continue after final survey
     } else if (currentSession.finalSurveyDisabled) {
         addTerminalOutput('✅ Final periodic survey skipped (disabled for this assignment)', 'success');
-        console.log('✅ Skipping final survey - disabled by configuration');
     }
     
     // Check for post-survey
@@ -4862,8 +4745,6 @@ async function proceedWithActualSubmission() {
             addTerminalOutput(`Database save failed but data preserved locally - logging out...`, 'warning');
             
             // ✅ NEW: Keep data in storage if submission failed (for retry)
-            console.log('⚠️ Keeping periodic surveys in sessionStorage due to submission failure');
-            
             setTimeout(() => {
                 showSuccessMessage(
                     'Submission completed with local backup.\nSession ended for security.', 
@@ -4885,7 +4766,6 @@ async function proceedWithActualSubmission() {
     stopAutoSave();
 }
     
-
 
 
    function endSession() {
@@ -5077,7 +4957,6 @@ let isInitialized = false;
 
 async function safeInitialize() {
     if (isInitializing || isInitialized) {
-        console.log('Initialization already in progress or completed');
         return;
     }
     
@@ -5102,7 +4981,6 @@ async function safeInitialize() {
 
 // Prevent closing modal by clicking outside
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('DOM loaded, starting initialization...');
     safeInitialize();
     
     // Setup modal protection
@@ -5127,7 +5005,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Backup initialization if DOM already loaded
 if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    console.log('DOM already ready, initializing immediately...');
     safeInitialize();
 }
 
@@ -5206,21 +5083,17 @@ function initializeSidebar() {
     }
     
     const shouldHide = shouldHideSidebar();
-    console.log(`🎯 Initializing sidebar - Should hide: ${shouldHide}, Prefix: "${currentSession.prefix}"`);
-    
     if (shouldHide) {
         sidebarCollapsed = true;
         sidebar.classList.add('collapsed');
         toggleIcon.textContent = '▶';
         sidebarToggle.style.right = '0px';
-        console.log(`✅ Sidebar HIDDEN for prefix: "${currentSession.prefix}"`);
         addTerminalOutput(`Sidebar hidden by default (warmup mode)`, 'info');
     } else {
         sidebarCollapsed = false;
         sidebar.classList.remove('collapsed');
         toggleIcon.textContent = '◀';
         sidebarToggle.style.right = '30vw';
-        console.log(`✅ Sidebar VISIBLE for prefix: "${currentSession.prefix}"`);
     }
 }
 

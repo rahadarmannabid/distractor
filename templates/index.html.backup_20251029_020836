@@ -1,0 +1,5255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Code Assistant - Research IDE</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+        
+        body {
+            font-family: 'Consolas', 'Menlo', 'Ubuntu Mono', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+
+        /* Flex Container */
+        #application {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #content {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #editor {
+            flex: 1;
+            min-height: 0;
+            position: relative;
+        }
+        #terminal {
+            height: 35vh;
+            min-height: 200px;
+            max-height: 50vh;
+        }
+        #sidebar {
+            width: 30vw;
+            min-width: 250px;
+            max-width: 60vw;
+        }
+
+        /* Resizing */
+        #resize-sidebar {
+            width: 5px;
+            background-color: darkgray;
+            cursor: ew-resize;
+        }
+        #resize-terminal {
+            height: 5px;
+            background-color: darkgray;
+            cursor: ns-resize;
+        }
+
+        /* Dark Theme Scrollbar */
+        *::-webkit-scrollbar {
+            width: 8px;
+        }
+        *::-webkit-scrollbar-track {
+            background: #1e1e1e;
+        }
+        *::-webkit-scrollbar-thumb {
+            background: #404040;
+            border-radius: 4px;
+        }
+        *::-webkit-scrollbar-thumb:hover {
+            background: #505050;
+        }
+
+        /* Header Styling */
+        .header {
+            display: flex;
+            align-items: center;
+            background: linear-gradient(135deg, #2d2d30, #3e3e42);
+            padding: 8px 15px;
+            border-bottom: 1px solid #333;
+            gap: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            white-space: nowrap;
+            overflow: hidden;
+            height: 40px;
+            flex-shrink: 0;
+        }
+
+        /* Header Button Styling */
+        .user-info {
+            margin-left: auto;
+            color: #cccccc;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .logout-btn {
+            background: #ef4444;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            color: white;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+        .logout-btn:hover {
+            background: #dc2626;
+        }
+        .terminal-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-left: auto;
+        }
+        .run-button {
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            border: none;
+            border-radius: 4px;
+            padding: 6px 12px;
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .run-button:hover {
+            background: linear-gradient(135deg, #16a34a, #15803d);
+            transform: translateY(-1px);
+            box-shadow: 0 3px 8px rgba(34, 197, 94, 0.4);
+        }
+        .run-button:disabled {
+            background: #404040;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .clear-button {
+            background: #404040;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 12px;
+            color: #cccccc;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .submit-button {
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            border: none;
+            border-radius: 4px;
+            padding: 6px 12px;
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .submit-button:hover {
+            background: linear-gradient(135deg, #ea580c, #dc2626);
+            transform: translateY(-1px);
+            box-shadow: 0 3px 8px rgba(249, 115, 22, 0.4);
+        }
+        .submit-button:disabled {
+            background: #404040;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* Font Size Controls */
+        .font-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(64, 64, 64, 0.3);
+            padding: 4px 8px;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+        .font-button {
+            background: #569cd6;
+            border: none;
+            border-radius: 3px;
+            padding: 4px 8px;
+            color: white;
+            font-size: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            min-width: 24px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .font-button:hover {
+            background: #4a86c7;
+            transform: translateY(-1px);
+        }
+        .font-button:active {
+            transform: translateY(0);
+        }
+        .font-size-display {
+            color: #cccccc;
+            font-size: 10px;
+            font-weight: 500;
+            min-width: 30px;
+            text-align: center;
+        }
+
+        /* Auto-Save Indicator */
+        .autosave-indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(64, 64, 64, 0.3);
+            padding: 4px 10px;
+            border-radius: 4px;
+            margin-left: 10px;
+            font-size: 11px;
+            color: #888;
+            transition: all 0.3s ease;
+        }
+        .autosave-indicator.saving {
+            color: #f59e0b;
+        }
+        .autosave-indicator.saved {
+            color: #22c55e;
+        }
+        .autosave-indicator.error {
+            color: #ef4444;
+        }
+        .autosave-icon {
+            font-size: 14px;
+            animation: none;
+        }
+        .autosave-indicator.saving .autosave-icon {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .restore-banner {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            color: white;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            z-index: 10000;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            animation: slideDown 0.3s ease;
+        }
+        @keyframes slideDown {
+            from { transform: translateY(-100%); }
+            to { transform: translateY(0); }
+        }
+        .restore-banner-content {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .restore-banner-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .restore-btn {
+            background: white;
+            color: #2563eb;
+            border: none;
+            padding: 6px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 12px;
+            transition: all 0.2s ease;
+        }
+        .restore-btn:hover {
+            background: #f0f9ff;
+            transform: translateY(-1px);
+        }
+        .dismiss-btn {
+            background: transparent;
+            color: white;
+            border: 1px solid white;
+        }
+        .dismiss-btn:hover {
+            background: rgba(255,255,255,0.1);
+        }
+
+        /* Terminal Output Styling */
+        .terminal {
+            display: flex;
+            flex-direction: column;
+            background: #1e1e1e;
+            border-top: 1px solid #333;
+        }
+        .terminal-output {
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            padding: 12px 16px;
+            overflow-y: auto;
+            word-break: break-word;
+            background: #1e1e1e;
+            flex: 1;
+        }
+        .output-line {
+            margin: 2px 0;
+        }
+        .output-prompt {
+            color: #f97316;
+            font-weight: bold;
+        }
+        .output-success {
+            color: #22c55e;
+        }
+        .output-error {
+            color: #ff6b6b;
+        }
+        .output-info {
+            color: #74c0fc;
+        }
+        .output-warning {
+            color: #ffd43b;
+        }
+        .execution-time {
+            color: #868e96;
+            font-size: 12px;
+            font-style: italic;
+            margin-top: 5px;
+        }
+        .terminal-loading {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #f59e0b;
+            margin: 10px 0;
+        }
+        .terminal-spinner {
+            width: 12px;
+            height: 12px;
+            border: 2px solid #333;
+            border-radius: 50%;
+            border-top-color: #f59e0b;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        /* Sidebar Styling */
+        #sidebar {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background: #252526;
+            border-left: 1px solid #333;
+        }
+        .sidebar-content {
+            overflow-y: auto;
+            flex: 1;
+            min-height: 0;
+        }
+        .sidebar-section {
+            padding: 16px;
+            border-bottom: 1px solid #333;
+            font-family: 'Consolas', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+        .sidebar-section .green-box {
+            background: linear-gradient(135deg, #0e2f1e, #1a4d2e);
+            border: 2px solid #22c55e;
+            border-radius: 8px;
+            padding: 20px;
+            line-height: 2;
+            color: #4ade80;
+            box-shadow: 0 4px 15px rgba(34, 197, 94, 0.2);
+        }
+        .sidebar-section .red-box {
+            background: linear-gradient(135deg, #2d1b0e, #3d2616);
+            border: 2px solid #f97316;
+            border-radius: 8px;
+            padding: 20px;
+            line-height: 2;
+            color: #f97316;
+            box-shadow: 0 4px 15px rgba(249, 115, 22, 0.2);
+        }
+        .sidebar-section code {
+            white-space: pre-wrap;
+            background: #2d2d2d;
+            padding: 3px 8px;
+            border-radius: 4px;
+            color: #f8f8f2;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            border: 1px solid #404040;
+            display: block;
+        }
+        .suggestion-button {
+            background: linear-gradient(135deg, #1e1e1e, #2d2d2d);
+            border: 1px solid #404040;
+            border-radius: 4px;
+            padding: 12px 16px;
+            color: #d4d4d4;
+            font-family: 'Consolas', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
+            cursor: pointer;
+            display: block;
+            width: 100%;
+            text-align: left;
+            transition: all 0.2s ease;
+            margin-top: 8px;
+            position: relative;
+            overflow: hidden;
+            line-height: 1.5;
+            min-height: 40px;
+            word-break: break-word;
+        }
+        .suggestion-button:hover {
+            background: linear-gradient(135deg, #2d2d2d, #3d3d3d);
+            border-color: #569cd6;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .suggestion-button:active {
+            transform: translateY(0);
+        }
+        .suggestion-button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #569cd6, transparent);
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        .suggestion-button:hover::before {
+            opacity: 1;
+        }
+        .suggestion-button::after {
+            content: 'Click to insert';
+            position: absolute;
+            top: 4px;
+            right: 8px;
+            font-size: 10px;
+            color: #888;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            pointer-events: none;
+        }
+        .suggestion-button:hover::after {
+            opacity: 1;
+        }
+        .suggestion-button.red-theme {
+            border-left: 3px solid #ea580c;
+        }
+        .suggestion-button.red-theme:hover {
+            border-left-color: #f97316;
+            box-shadow: 0 4px 12px rgba(234, 88, 12, 0.2);
+        }
+        .suggestion-button.red-theme::before {
+            background: linear-gradient(90deg, transparent, #ea580c, transparent);
+        }
+        .suggestion-button.green-theme {
+            border-left: 3px solid #4ade80;
+        }
+        .suggestion-button.green-theme:hover {
+            border-left-color: #22c55e;
+            box-shadow: 0 4px 12px rgba(74, 222, 128, 0.2);
+        }
+        .suggestion-button.green-theme::before {
+            background: linear-gradient(90deg, transparent, #4ade80, transparent);
+        }
+        .suggestion-content {
+            display: block;
+            padding-right: 80px;
+            white-space: pre-wrap;
+        }
+        .sidebar-section p {
+            line-height: 1.4;
+            font-size: 12px;
+        }
+        .sidebar-header {
+            display: flex;
+            flex-direction: row;
+        }
+        h2, h3 {
+            flex: 1;
+        }
+        
+        /* Different colors for different sections */
+        #aiGuessSection h3 {
+            color: #f97316;
+            text-shadow: 0 0 5px rgba(249, 115, 22, 0.3);
+        }
+        
+        #problemDescSection h3 {
+            color: #22c55e;
+            text-shadow: 0 0 5px rgba(34, 197, 94, 0.3);
+        }
+        
+        #suggestionsOnlySection h3 {
+            color: #e9d5ff;
+            text-shadow: 0 0 8px rgba(139, 92, 246, 0.5);
+            font-weight: 600;
+        }
+        .history-button {
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #333;
+            border-radius: 50%;
+            border-top-color: #f8f8f2;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Hidden class for showing/hiding screens */
+        .hidden {
+            display: none !important;
+        }
+        
+        /* Access denied screen styles */
+        .access-denied-screen {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #1e1e1e, #2d2d30);
+        }
+        .access-denied-container {
+            background: linear-gradient(135deg, #252526, #2d2d30);
+            border: 2px solid #ef4444;
+            border-radius: 12px;
+            padding: 40px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            width: 400px;
+            max-width: 90vw;
+            text-align: center;
+        }
+        .access-denied-title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #ef4444;
+            margin-bottom: 20px;
+        }
+        .access-denied-message {
+            color: #cccccc;
+            font-size: 14px;
+            font-family: 'Segoe UI', sans-serif;
+            line-height: 1.5;
+            margin-bottom: 30px;
+        }
+        .back-to-login-btn {
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            border: none;
+            border-radius: 6px;
+            padding: 12px 20px;
+            color: white;
+            font-family: 'Segoe UI', sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .back-to-login-btn:hover {
+            background: linear-gradient(135deg, #ea580c, #dc2626);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(249, 115, 22, 0.4);
+        }
+        
+        .condition-indicator {
+            background: linear-gradient(135deg, #1e3a8a, #3b82f6);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .condition-2 .condition-indicator {
+            background: linear-gradient(135deg, #7c2d12, #ea580c);
+        }
+
+        .condition-3 .condition-indicator {
+            background: linear-gradient(135deg, #581c87, #7c3aed);
+        }
+
+        /* Session indicator */
+        .session-indicator {
+            background: linear-gradient(135deg, #059669, #10b981);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Success message styles for logout */
+        .success-message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: linear-gradient(135deg, #059669, #10b981);
+            color: white;
+            padding: 20px 30px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            z-index: 9999;
+            min-width: 300px;
+        }
+
+        .success-message .countdown {
+            font-size: 14px;
+            margin-top: 10px;
+            opacity: 0.9;
+        }
+
+        /* Markdown formatting styles for problem description */
+        #problemDescriptionDisplay {
+            white-space: normal;
+            line-height: 1.4;
+            font-size: 12px;
+        }
+
+        #problemDescriptionDisplay h1, 
+        #problemDescriptionDisplay h2, 
+        #problemDescriptionDisplay h3 {
+            color: #4ade80;
+            margin: 10px 0 5px 0;
+            font-size: 13px;
+        }
+
+        #problemDescriptionDisplay p {
+            margin: 8px 0;
+            font-size: 12px;
+        }
+
+        #problemDescriptionDisplay code {
+            background: #2d2d2d;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+        }
+
+        #problemDescriptionDisplay pre {
+            background: #2d2d2d;
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin: 10px 0;
+            font-size: 12px;
+        }
+
+        #problemDescriptionDisplay ul, 
+        #problemDescriptionDisplay ol {
+            padding-left: 20px;
+            margin: 8px 0;
+            font-size: 12px;
+        }
+
+        #problemDescriptionDisplay li {
+            margin: 4px 0;
+            font-size: 12px;
+        }
+
+        /* URL display in header */
+        .url-display {
+            background: rgba(64, 64, 64, 0.3);
+            color: #888;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-family: 'Consolas', monospace;
+            margin-right: 10px;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Loading screen */
+        .loading-screen {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #1e1e1e, #2d2d30);
+        }
+        .loading-container {
+            text-align: center;
+            color: #cccccc;
+        }
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #333;
+            border-radius: 50%;
+            border-top-color: #f97316;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        .loading-text {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        .loading-detail {
+            font-size: 14px;
+            opacity: 0.8;
+        }
+
+/* AI Thinking Overlay - Editor Only */
+/* ADD this new CSS for mini AI thinking animation in sidebar */
+.mini-ai-thinking {
+    text-align: center;
+    padding: 15px 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    box-sizing: border-box;
+}
+
+.mini-ai-loader {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    position: relative;
+    margin: 0 auto 15px;
+    background: linear-gradient(45deg, #9333ea, #a855f7, #c084fc);
+    animation: ai-spin-zoom 3s ease-in-out infinite;
+    box-shadow: 0 0 30px rgba(147, 51, 234, 0.6);
+}
+
+.mini-ai-loader::before,
+.mini-ai-loader::after {
+    content: "";
+    position: absolute;
+    border: 3px solid transparent;
+    border-top: 3px solid #a855f7;
+    border-right: 3px solid #c084fc;
+    border-radius: 50%;
+    top: -3px;
+    left: -3px;
+    right: -3px;
+    bottom: -3px;
+    animation: ai-spin-fast 1.5s linear infinite;
+}
+
+.mini-ai-loader::after {
+    border-top: 3px solid #c084fc;
+    border-right: 3px solid #e879f9;
+    animation: ai-spin-slow 2.5s linear infinite reverse;
+    top: -6px;
+    left: -6px;
+    right: -6px;
+    bottom: -6px;
+}
+
+@keyframes ai-spin-zoom {
+    0%, 100% {
+        transform: scale(0.8) rotate(0deg);
+        box-shadow: 0 0 20px rgba(147, 51, 234, 0.4);
+        background: linear-gradient(45deg, #9333ea, #a855f7);
+    }
+    25% {
+        transform: scale(1.2) rotate(90deg);
+        box-shadow: 0 0 40px rgba(168, 85, 247, 0.8);
+        background: linear-gradient(45deg, #a855f7, #c084fc);
+    }
+    50% {
+        transform: scale(1.0) rotate(180deg);
+        box-shadow: 0 0 50px rgba(192, 132, 252, 0.9);
+        background: linear-gradient(45deg, #c084fc, #e879f9);
+    }
+    75% {
+        transform: scale(1.3) rotate(270deg);
+        box-shadow: 0 0 35px rgba(168, 85, 247, 0.7);
+        background: linear-gradient(45deg, #a855f7, #c084fc);
+    }
+}
+
+@keyframes ai-spin-fast {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes ai-spin-slow {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(-360deg); }
+}
+
+.mini-ai-text {
+    font-size: 12px;
+    font-weight: 600;
+    color: #a855f7;
+    animation: ai-text-glow 2s ease-in-out infinite;
+    text-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
+}
+
+.ai-thinking-glow {
+    animation: box-thinking-glow 2s ease-in-out infinite;
+}
+
+@keyframes box-thinking-glow {
+    0%, 100% { 
+        box-shadow: 0 4px 8px rgba(0,0,0,0.3); 
+    }
+    50% { 
+        box-shadow: 0 4px 20px rgba(147, 51, 234, 0.6), 
+                    0 0 30px rgba(147, 51, 234, 0.4),
+                    inset 0 0 10px rgba(147, 51, 234, 0.2); 
+    }
+}
+
+/* Box Shake Animation */
+@keyframes shake-attention {
+    0%, 100% { transform: translateX(0); }
+    10%, 30%, 50%, 70%, 90% { transform: translateX(-3px); }
+    20%, 40%, 60%, 80% { transform: translateX(3px); }
+}
+
+@keyframes ai-text-glow {
+    0%, 100% {
+        opacity: 0.7;
+        transform: scale(1);
+        color: #a855f7;
+        text-shadow: 0 0 5px rgba(168, 85, 247, 0.3);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.05);
+        color: #c084fc;
+        text-shadow: 0 0 20px rgba(192, 132, 252, 0.8);
+    }
+}
+
+.shake-attention {
+    animation: shake-attention 0.6s ease-in-out 3;
+}
+
+/* Typing Animation */
+.typing-animation {
+    overflow: hidden;
+    white-space: nowrap;
+    border-right: 2px solid;
+    animation: typing-cursor 1s infinite;
+}
+
+@keyframes typing-cursor {
+    0%, 50% { border-color: transparent; }
+    51%, 100% { border-color: currentColor; }
+}
+
+/* Box Glow Effect */
+@keyframes attention-glow {
+    0%, 100% { box-shadow: 0 4px 8px rgba(0,0,0,0.3); }
+    50% { 
+        box-shadow: 0 4px 20px rgba(147, 51, 234, 0.6), 
+                    0 0 30px rgba(147, 51, 234, 0.4),
+                    inset 0 0 10px rgba(147, 51, 234, 0.2); 
+    }
+}
+
+/* AI Analysis and History Text Font Size */
+        #analysis {
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        
+        /* History display font size */
+        .sidebar-section [data-showing-history="true"] {
+            font-size: 12px;
+        }
+        
+        .sidebar-section [data-showing-history="true"] div {
+            font-size: 12px;
+        }
+        
+        .sidebar-section [data-showing-history="true"] span {
+            font-size: 12px;
+        }
+
+        /* Enhanced Problem Description Visibility */
+        #problemDescriptionDisplay {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0.05));
+            border: 1px solid rgba(34, 197, 94, 0.2);
+            border-radius: 6px;
+            padding: 16px;
+            margin: 10px 0;
+        }
+        
+        #problemDescriptionDisplay h1,
+        #problemDescriptionDisplay h2, 
+        #problemDescriptionDisplay h3 {
+            color: #22c55e !important;
+            font-weight: 600;
+        }
+        
+        /* AI Analysis Text Color */
+        #analysis {
+            color: #fbbf24;
+            font-weight: 500;
+        }
+        
+        /* Make suggestion text more visible */
+        .suggestion-content {
+            color: #e5e7eb;
+            font-weight: 500;
+        }
+        
+        #suggestionGuess {
+            color: #fbbf24 !important;
+        }
+        
+        #suggestionDesc {
+            color: #22c55e !important;
+        }
+        
+        #suggestionOnly {
+            color: #f3f4f6 !important;
+            font-weight: 600 !important;
+        }
+
+/* Survey Modal Styles */
+.survey-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    backdrop-filter: blur(8px);
+    animation: modalFadeIn 0.3s ease-out;
+}
+
+@keyframes modalFadeIn {
+    from { opacity: 0; backdrop-filter: blur(0); }
+    to { opacity: 1; backdrop-filter: blur(8px); }
+}
+
+.survey-container {
+    background: #1e1e1e;
+    border: 1px solid #3c3c3c;
+    border-radius: 8px;
+    padding: 32px;
+    max-width: 1000px;
+    width: 95%;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 
+        0 25px 50px rgba(0,0,0,0.9),
+        0 0 0 1px rgba(255,255,255,0.05),
+        inset 0 1px 0 rgba(255,255,255,0.1);
+    animation: modalSlideIn 0.4s ease-out;
+}
+
+@keyframes modalSlideIn {
+    from { transform: translateY(-50px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+.survey-header {
+    text-align: center;
+    margin-bottom: 25px;
+}
+
+.survey-header h2 {
+    color: #569cd6;
+    margin-bottom: 10px;
+    font-size: 24px;
+}
+
+.survey-header p {
+    color: #cccccc;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.survey-question {
+    margin-bottom: 24px;
+    padding: 24px;
+    background: linear-gradient(135deg, #252526, #2d2d30);
+    border: 1px solid #3c3c3c;
+    border-radius: 6px;
+    border-left: 3px solid #007acc;
+    transition: all 0.2s ease;
+}
+
+.survey-question:hover {
+    border-left-color: #1177bb;
+    background: linear-gradient(135deg, #2a2a2b, #323234);
+}
+
+.survey-question-text {
+    color: #cccccc;
+    font-size: 12px;
+    font-weight: 500;
+    margin-bottom: 15px;
+    line-height: 1.4;
+}
+
+.likert-scale {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(72px, 1fr)); /* 7 options */
+    gap: 10px;
+    width: 100%;
+}
+
+.likert-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1 1 auto;       /* allow shrinking */
+    min-width: 0;         /* prevent overflow */
+    max-width: none;
+}
+
+
+.likert-option input[type="radio"] {
+    appearance: none;
+    width: 25px;
+    height: 25px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+/* Option 1: Not at all - Dark Red */
+.likert-option:nth-child(1) input[type="radio"] {
+    background: linear-gradient(135deg, #dc2626, #ef4444);
+}
+
+/* Option 2: Slightly - Red-Orange */
+.likert-option:nth-child(2) input[type="radio"] {
+    background: linear-gradient(135deg, #ea580c, #f97316);
+}
+
+/* Option 3: Somewhat - Orange */
+.likert-option:nth-child(3) input[type="radio"] {
+    background: linear-gradient(135deg, #f59e0b, #fbbf24);
+}
+
+/* Option 4: Moderately - Yellow (Middle) */
+.likert-option:nth-child(4) input[type="radio"] {
+    background: linear-gradient(135deg, #fbbf24, #facc15);
+}
+
+/* Option 5: Very - Yellow-Green */
+.likert-option:nth-child(5) input[type="radio"] {
+    background: linear-gradient(135deg, #a3e635, #84cc16);
+}
+
+/* Option 6: Quite - Light Green (NEW!) */
+.likert-option:nth-child(6) input[type="radio"] {
+    background: linear-gradient(135deg, #4ade80, #22c55e);
+}
+
+/* Option 7: Extremely - Dark Green (NEW!) */
+.likert-option:nth-child(7) input[type="radio"] {
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+}
+
+.likert-option input[type="radio"]:checked {
+    border-color: #ffffff;
+    box-shadow: 0 0 10px rgba(255,255,255,0.5);
+    transform: scale(1.1);
+}
+
+.likert-option input[type="radio"]:hover {
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+.likert-option input[type="radio"]:checked::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 12px;
+    height: 12px;
+    background: white;
+    border-radius: 50%;
+}
+
+.likert-option label {
+    color: #cccccc;
+    font-size: 10px;
+    text-align: center;
+    line-height: 1.3;
+    cursor: pointer;
+    white-space: normal;   /* allow wrapping under the dot */
+}
+
+
+@media (max-width: 768px) {
+  .likert-scale {
+    grid-template-columns: repeat(3, minmax(64px, 1fr)); /* 3 per row */
+  }
+  .likert-option input[type="radio"] {
+    width: 22px;
+    height: 22px;
+  }
+}
+
+@media (max-width: 480px) {
+  .likert-scale {
+    grid-template-columns: repeat(2, minmax(64px, 1fr)); /* 2 per row */
+    gap: 8px;
+  }
+  .likert-option label {
+    font-size: 9px;
+  }
+}
+
+/* Safety: if any earlier rule still forces nowrap, override it */
+.likert-scale { flex-wrap: wrap !important; }
+
+.survey-controls {
+    text-align: center;
+    margin-top: 30px;
+}
+
+.survey-submit-btn {
+    background: linear-gradient(135deg, #569cd6, #4a86c7);
+    border: none;
+    border-radius: 6px;
+    padding: 12px 30px;
+    color: white;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-bottom: 10px;
+}
+
+.survey-submit-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, #4a86c7, #3a76b7);
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(86, 156, 214, 0.4);
+}
+
+.survey-submit-btn:disabled {
+    background: #404040;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.survey-note {
+    color: #ffd43b;
+    font-size: 12px;
+    margin: 0;
+    font-style: italic;
+}
+
+/* Editor blocking overlay */
+.editor-blocked {
+    pointer-events: none;
+    opacity: 0.5;
+}
+
+.editor-block-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    color: #ffd43b;
+    font-size: 18px;
+    font-weight: bold;
+    text-align: center;
+}
+
+/* Fix for Condition 3 suggestions */
+        #suggestionsOnlySection .suggestion-button {
+            background: linear-gradient(135deg, #2d1b69, #3d2777);
+            border: 1px solid #8b5cf6;
+            color: #f3f4f6;
+            font-weight: 600;
+        }
+        
+        #suggestionsOnlySection .suggestion-button:hover {
+            background: linear-gradient(135deg, #3d2777, #4d3587);
+            border-color: #a855f7;
+            color: #ffffff;
+        }
+        
+        /* Ensure consistent heights across all conditions */
+        .suggestion-content {
+            display: block;
+            padding-right: 60px;
+            min-height: 20px;
+            overflow-wrap: break-word;
+        }
+
+        /* Temporary paste banner */
+.paste-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(135deg, #dc2626, #ef4444);
+    color: white;
+    padding: 8px 20px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: bold;
+    z-index: 10000;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    font-family: 'Segoe UI', sans-serif;
+    animation: bannerSlideDown 0.3s ease-out;
+}
+
+@keyframes bannerSlideDown {
+    from { transform: translateY(-100%); }
+    to { transform: translateY(0); }
+}
+
+/* Temporary paste notification */
+.paste-notification {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: linear-gradient(135deg, #dc2626, #ef4444);
+    color: white;
+    padding: 20px 30px;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    z-index: 10001;
+    min-width: 400px;
+    animation: notificationSlideIn 0.3s ease-out;
+}
+
+@keyframes notificationSlideIn {
+    from { transform: translate(-50%, -50%) scale(0.8); opacity: 0; }
+    to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+
+/* Active Session Warning Banner */
+.session-warning-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(135deg, #2d2d30, #3e3e42);
+    color: #d4d4d4;
+    padding: 10px 20px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 500;
+    z-index: 9999;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    font-family: 'Consolas', 'Menlo', 'Ubuntu Mono', monospace;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    border-bottom: 1px solid #569cd6;
+}
+
+.session-warning-banner .warning-icon {
+    font-size: 16px;
+    color: #f59e0b;
+}
+
+.session-warning-banner .warning-text {
+    flex: 1;
+    max-width: 800px;
+}
+
+.session-warning-banner .warning-text strong {
+    color: #569cd6;
+}
+
+/* Adjust main app when banner is shown */
+.with-warning-banner {
+    margin-top: 48px !important;
+}
+
+/* AI History Section in Survey */
+.ai-history-section {
+    margin-bottom: 25px;
+    padding: 20px;
+    background: linear-gradient(135deg, #1a1a1a, #252525);
+    border: 1px solid #3c3c3c;
+    border-radius: 8px;
+    border-left: 4px solid #569cd6;
+}
+
+.ai-history-section h3 {
+    color: #569cd6 !important;
+    font-size: 16px;
+    margin-bottom: 15px;
+    text-align: center;
+}
+
+.ai-history-section h4 {
+    color: #22c55e !important;
+    font-size: 13px;
+    margin-bottom: 10px;
+}
+
+/* Side-by-side survey layout */
+.survey-content-container {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+}
+
+.ai-history-panel {
+    flex: 0 0 35%;
+    max-width: 35%;
+}
+
+.survey-questions-panel {
+    flex: 0 0 65%;
+    max-width: 65%;
+    min-width: 0;
+}
+
+/* Update existing AI History Section for side panel */
+.ai-history-section {
+    margin-bottom: 0;
+    padding: 20px;
+    background: linear-gradient(135deg, #1a1a1a, #252525);
+    border: 1px solid #3c3c3c;
+    border-radius: 8px;
+    border-left: 4px solid #569cd6;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Responsive design for smaller screens */
+@media (max-width: 900px) {
+    .survey-content-container {
+        flex-direction: column;
+    }
+    
+    .ai-history-panel {
+        flex: none;
+        max-width: none;
+        width: 100%;
+    }
+    
+    .ai-history-section {
+        position: static;
+        margin-bottom: 20px;
+    }
+}
+
+/* Sidebar Toggle Button */
+.sidebar-toggle {
+    position: fixed;
+    right: 30vw;
+    top: 50%;
+    transform: translateY(-50%);
+    background: linear-gradient(135deg, #569cd6, #4a86c7);
+    border: 2px solid #3a76b7;
+    border-radius: 8px 0 0 8px;
+    padding: 12px 8px;
+    color: white;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    z-index: 1000;
+    box-shadow: -2px 0 10px rgba(0,0,0,0.3);
+}
+.sidebar-toggle:hover {
+    background: linear-gradient(135deg, #4a86c7, #3a76b7);
+    transform: translateY(-50%) translateX(-3px);
+    box-shadow: -4px 0 15px rgba(86, 156, 214, 0.5);
+}
+#sidebar {
+    position: relative;
+    transition: all 0.3s ease;
+}
+#sidebar.collapsed {
+    width: 0 !important;
+    min-width: 0;
+    overflow: hidden;
+}
+#sidebar.collapsed > *:not(.sidebar-toggle) {
+    opacity: 0;
+    pointer-events: none;
+}
+#content {
+    transition: all 0.3s ease;
+}
+
+
+    </style>
+</head>
+<body>
+    <!-- Active Session Warning Banner -->
+    <div id="sessionWarningBanner" class="session-warning-banner hidden">
+        <span class="warning-icon">⚠️</span>
+        <div class="warning-text">
+            <strong>ACTIVE SECURE SESSION:</strong> Do not close or refresh this page! 
+            Submit your code to the database before leaving to save your work.
+        </div>
+        <span class="warning-icon">⚠️</span>
+    </div>
+
+    <!-- Loading Screen -->
+    <div class="loading-screen" id="loadingScreen">
+        <div class="loading-container">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Initializing AI Code Assistant</div>
+            <div class="loading-detail" id="loadingDetail">Validating session and loading IDE...</div>
+        </div>
+    </div>
+
+    <!-- Access Denied Screen -->
+    <div class="access-denied-screen hidden" id="accessDeniedScreen">
+        <div class="access-denied-container">
+            <div class="access-denied-title">Access Denied</div>
+            <div class="access-denied-message" id="accessDeniedMessage">
+                Invalid session or direct access detected. Please log in through the proper authentication system.
+            </div>
+            <button class="back-to-login-btn" onclick="goToLogin()">
+                Go to Login Page
+            </button>
+        </div>
+    </div>
+
+    <!-- Main App (Initially Hidden) -->
+    <div id="application" class="hidden">
+        <div id="content">
+            <div id="header" class="header">
+                <h2>Code Editor</h2>
+                <div class="url-display" id="urlDisplay">Loading...</div>
+                <div class="autosave-indicator" id="autosaveIndicator">
+                    <span class="autosave-icon">💾</span>
+                    <span class="autosave-text">Not saved</span>
+                </div>
+                <div class="font-controls">
+                    <button class="font-button" id="decreaseFontBtn">A-</button>
+                    <span class="font-size-display" id="fontSizeDisplay">14px</span>
+                    <button class="font-button" id="increaseFontBtn">A+</button>
+                </div>
+                <div class="user-info">
+                    <span class="session-indicator" id="sessionIndicator">Session: --</span>
+                    <span class="condition-indicator" id="conditionIndicator">Condition ?</span>
+                    <span id="userDisplay">User: --</span>
+                    <button class="logout-btn" id="logoutBtn">End Session</button>
+                </div>
+            </div>
+            <div id="editor"></div>
+            <div id="resize-terminal"></div>
+            <div class="terminal" id="terminal">
+                <div class="header">
+                    <h2>Terminal</h2>
+                    <div class="terminal-controls">
+                        <button class="run-button" id="runButton">Run</button>
+                        <button class="clear-button" id="clearButton">Clear</button>
+                        <button class="submit-button" id="submitButton">Submit & Logout</button>
+                    </div>
+                </div>
+                <div class="terminal-output" id="terminalOutput">
+                    <div class="output-line">
+                        <span class="output-info">Secure Database-Integrated Code Assistant Terminal</span>
+                    </div>
+                    <div class="output-line">
+                        <span class="output-info">All coding activity is logged. Automatic logout after submission.</span>
+                    </div>
+                    <div class="output-line">
+                        <span class="output-prompt">>>> </span><span class="output-info">Ready to start coding!</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="resize-sidebar"></div>
+<div id="sidebar">
+    <button class="sidebar-toggle" id="sidebarToggle" title="Toggle Sidebar">
+        <span id="toggleIcon">◀</span>
+    </button>
+    <div class="header">
+        <h2>AI Coding Assistant</h2>
+    </div>
+    <div class="sidebar-content">
+        <!-- AI Problem Guess Section (Conditions 1 & 2) -->
+        <div class="sidebar-section" id="aiGuessSection">
+            <div class="red-box">
+                <div class="sidebar-header">
+                    <h3>AI Problem Guess</h3>
+                    <div id="history-guess" class="history-button">View History</div>
+                </div>
+                <p id="analysis"><span class="spinner"></span> Waiting for code...</p>
+                <h3>Next Line Suggestion</h3>
+                <button class="suggestion-button red-theme" id="suggestionGuessBtn" onclick="insertSuggestion('guess')">
+                    <span class="suggestion-content" id="suggestionGuess"><span class="spinner"></span> Start coding...</span>
+                </button>
+                <small style="color: #888; display: block; margin-top: 10px;">
+                    Local entries: <span id="guessLogCount">0</span>
+                </small>
+            </div>
+        </div>
+        
+        <!-- Problem Description Section (Condition 1 only) -->
+        <div class="sidebar-section hidden" id="problemDescSection">
+            <div class="green-box">
+                <div class="sidebar-header">
+                    <h3>Original Problem Description</h3>
+                    <div id="history-desc" class="history-button">View History</div>
+                </div>
+                <div id="problemDescriptionDisplay" style="line-height: 1.6;">Loading problem description...</div>
+                <h3>Next Line Suggestion</h3>
+                <button class="suggestion-button green-theme" id="suggestionDescBtn" onclick="insertSuggestion('desc')">
+                    <span class="suggestion-content" id="suggestionDesc">Based on correct problem...</span>
+                </button>
+                <small style="color: #888; display: block; margin-top: 10px;">
+                    Local entries: <span id="descLogCount">0</span>
+                </small>
+            </div>
+        </div>
+        
+        <!-- AI Suggestions Only Section (Condition 3 only) -->
+        <div class="sidebar-section hidden" id="suggestionsOnlySection">
+        <div class="violet-box" style="background: linear-gradient(135deg, #2d1b69, #3d2777); border: 2px solid #8b5cf6; border-radius: 8px; padding: 20px; line-height: 2; color: #e9d5ff; box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);">
+
+                <div class="sidebar-header">
+                    <h3>AI Code Suggestions</h3>
+                    <div id="history-suggestions" class="history-button">View History</div>
+                </div>
+                <h3>Next Line Suggestion</h3>
+                <button class="suggestion-button" id="suggestionOnlyBtn" onclick="insertSuggestion('suggestions')" style="border-left: 3px solid #7c3aed;">
+                    <span class="suggestion-content" id="suggestionOnly"><span class="spinner"></span> Start coding...</span>
+                </button>
+                <small style="color: #888; display: block; margin-top: 10px;">
+                    AI suggestions: <span id="suggestionsLogCount">0</span>
+                </small>
+            </div>
+        </div>
+    </div>
+</div>
+    </div>
+
+    <!-- Survey Modal -->
+<div id="surveyModal" class="survey-modal hidden">
+    <div class="survey-container">
+        <div class="survey-header">
+            <h2>Quick Survey</h2>
+            <p>Please rate your agreement with the following statements:</p>
+        </div>
+        
+        <div class="survey-content">
+            <div class="survey-content-container">
+                <div class="ai-history-panel" id="surveyAIHistory"></div>
+                <div class="survey-questions-panel" id="surveyQuestions"></div>
+            </div>
+            
+            <div class="survey-controls">
+                <button id="submitSurvey" class="survey-submit-btn" disabled>Submit Survey</button>
+                <p class="survey-note">You must answer all questions to continue coding.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs/loader.min.js"></script>
+
+<script>
+// Global session management
+// ============================================
+// NAVIGATION CONTROL FLAG
+// ============================================
+let allowNavigation = false;  // Flag to allow legitimate navigation without warning
+
+// ============================================
+// AUTO-SAVE FUNCTIONALITY
+// ============================================
+
+const AUTOSAVE_KEY_PREFIX = 'ide_autosave_';
+const AUTOSAVE_INTERVAL = 15000;
+let autosaveTimer = null;
+let lastSaveTime = null;
+
+function getAutosaveKey() {
+    if (!currentSession.userId || !currentSession.sessionId) return null;
+    return `${AUTOSAVE_KEY_PREFIX}${currentSession.userId}_${currentSession.sessionId}`;
+}
+
+function updateAutosaveIndicator(status, message) {
+    const indicator = document.getElementById('autosaveIndicator');
+    if (!indicator) return;
+    const icon = indicator.querySelector('.autosave-icon');
+    const text = indicator.querySelector('.autosave-text');
+    
+    indicator.className = 'autosave-indicator ' + status;
+    
+    switch(status) {
+        case 'saving':
+            icon.textContent = '⏳';
+            text.textContent = 'Saving...';
+            break;
+        case 'saved':
+            icon.textContent = '✓';
+            const now = new Date();
+            text.textContent = `Saved at ${now.toLocaleTimeString()}`;
+            lastSaveTime = now;
+            break;
+        case 'error':
+            icon.textContent = '⚠️';
+            text.textContent = message || 'Save failed';
+            break;
+        default:
+            icon.textContent = '💾';
+            text.textContent = 'Not saved';
+    }
+}
+
+function saveProgress() {
+    const key = getAutosaveKey();
+    if (!key) return;
+    
+    try {
+        updateAutosaveIndicator('saving');
+        
+        const progressData = {
+            timestamp: Date.now(),
+            session: {
+                userId: currentSession.userId,
+                sessionId: currentSession.sessionId,
+                assignmentKey: currentSession.assignmentKey,
+                condition: currentSession.condition,
+                prefix: currentSession.prefix
+            },
+            editor: {
+                code: editor ? editor.getValue() : '',
+                language: currentSession.programmingLanguage,
+                cursorPosition: editor ? editor.getPosition() : null,
+                scrollPosition: editor ? editor.getScrollTop() : 0
+            },
+            terminal: {
+                output: document.getElementById('terminalOutput') ? document.getElementById('terminalOutput').innerHTML : ''
+            },
+            ai: {
+                guessHistory: currentSession.guessHistory || [],
+                descHistory: currentSession.descHistory || [],
+                suggestionsHistory: currentSession.suggestionsHistory || [],
+                currentGuess: document.getElementById('analysis') ? document.getElementById('analysis').innerHTML : '',
+                currentSuggestion: document.getElementById('suggestionGuess') ? document.getElementById('suggestionGuess').innerHTML : ''
+            },
+            ui: {
+                fontSize: currentFontSize,
+                sidebarCollapsed: sidebarCollapsed
+            },
+            counters: {
+                guessLogCount: currentSession.guessLogCount || 0,
+                descLogCount: currentSession.descLogCount || 0,
+                suggestionsLogCount: currentSession.suggestionsLogCount || 0,
+                suggestionClickCount: currentSession.suggestionClickCount || 0,
+                compilerClickCount: currentSession.compilerClickCount || 0
+            },
+            activityBuffer: activityBuffer || []
+        };
+        
+        const compressed = JSON.stringify(progressData);
+        localStorage.setItem(key, compressed);
+        
+        updateAutosaveIndicator('saved');
+        
+        logActivity('autosave', {
+            data_size: compressed.length,
+            code_length: progressData.editor.code.length,
+            timestamp: progressData.timestamp
+        });
+        
+    } catch (error) {
+        console.error('Auto-save failed:', error);
+        updateAutosaveIndicator('error', 'Save failed');
+        
+        if (error.name === 'QuotaExceededError') {
+            addTerminalOutput('⚠️ Storage quota exceeded. Consider clearing browser cache.', 'warning');
+        }
+    }
+}
+
+function restoreProgress() {
+    const key = getAutosaveKey();
+    if (!key) return null;
+    
+    try {
+        const saved = localStorage.getItem(key);
+        if (!saved) return null;
+        
+        const progressData = JSON.parse(saved);
+        
+        if (!progressData.timestamp || !progressData.session) {
+            console.warn('Invalid saved data structure');
+            return null;
+        }
+        
+        if (progressData.session.userId !== currentSession.userId ||
+            progressData.session.sessionId !== currentSession.sessionId) {
+            console.warn('Saved data is from a different session');
+            return null;
+        }
+        
+        const ageInHours = (Date.now() - progressData.timestamp) / (1000 * 60 * 60);
+        if (ageInHours > 24) {
+            console.warn('Saved data is too old');
+            clearProgress();
+            return null;
+        }
+        
+        return progressData;
+        
+    } catch (error) {
+        console.error('Failed to restore progress:', error);
+        return null;
+    }
+}
+
+function applyRestoredProgress(progressData) {
+    try {
+        if (progressData.editor && editor) {
+            if (progressData.editor.code) {
+                editor.setValue(progressData.editor.code);
+            }
+            if (progressData.editor.cursorPosition) {
+                editor.setPosition(progressData.editor.cursorPosition);
+            }
+            if (progressData.editor.scrollPosition) {
+                editor.setScrollTop(progressData.editor.scrollPosition);
+            }
+        }
+        
+        if (progressData.terminal && progressData.terminal.output) {
+            const terminalOutput = document.getElementById('terminalOutput');
+            if (terminalOutput) {
+                terminalOutput.innerHTML = progressData.terminal.output;
+            }
+        }
+        
+        if (progressData.ai) {
+            currentSession.guessHistory = progressData.ai.guessHistory || [];
+            currentSession.descHistory = progressData.ai.descHistory || [];
+            currentSession.suggestionsHistory = progressData.ai.suggestionsHistory || [];
+            
+            if (progressData.ai.currentGuess) {
+                const analysisEl = document.getElementById('analysis');
+                if (analysisEl) analysisEl.innerHTML = progressData.ai.currentGuess;
+            }
+            
+            if (progressData.ai.currentSuggestion) {
+                const suggestionEl = document.getElementById('suggestionGuess');
+                if (suggestionEl) suggestionEl.innerHTML = progressData.ai.currentSuggestion;
+            }
+        }
+        
+        if (progressData.ui) {
+            if (progressData.ui.fontSize && typeof updateFontSize === 'function') {
+                updateFontSize(progressData.ui.fontSize);
+            }
+            if (progressData.ui.sidebarCollapsed !== undefined && progressData.ui.sidebarCollapsed !== sidebarCollapsed) {
+                const toggleBtn = document.getElementById('sidebarToggle');
+                if (toggleBtn) toggleBtn.click();
+            }
+        }
+        
+        if (progressData.counters) {
+            currentSession.guessLogCount = progressData.counters.guessLogCount || 0;
+            currentSession.descLogCount = progressData.counters.descLogCount || 0;
+            currentSession.suggestionsLogCount = progressData.counters.suggestionsLogCount || 0;
+            currentSession.suggestionClickCount = progressData.counters.suggestionClickCount || 0;
+            currentSession.compilerClickCount = progressData.counters.compilerClickCount || 0;
+            
+            const guessCount = document.getElementById('guessLogCount');
+            const descCount = document.getElementById('descLogCount');
+            const suggestionsCount = document.getElementById('suggestionsLogCount');
+            if (guessCount) guessCount.textContent = currentSession.guessLogCount;
+            if (descCount) descCount.textContent = currentSession.descLogCount;
+            if (suggestionsCount) suggestionsCount.textContent = currentSession.suggestionsLogCount;
+        }
+        
+        if (progressData.activityBuffer && Array.isArray(progressData.activityBuffer)) {
+            activityBuffer = progressData.activityBuffer;
+        }
+        
+        const savedTime = new Date(progressData.timestamp);
+        addTerminalOutput(`✅ Progress restored from ${savedTime.toLocaleString()}`, 'success');
+        addTerminalOutput(`📝 Restored ${progressData.editor.code.length} characters of code`, 'info');
+        
+        logActivity('progress_restored', {
+            saved_timestamp: progressData.timestamp,
+            code_length: progressData.editor.code.length,
+            age_minutes: Math.round((Date.now() - progressData.timestamp) / (1000 * 60))
+        });
+        
+        updateAutosaveIndicator('saved');
+        
+    } catch (error) {
+        console.error('Failed to apply restored progress:', error);
+        addTerminalOutput('⚠️ Some progress could not be restored', 'warning');
+    }
+}
+
+function showRestoreBanner(progressData) {
+    const banner = document.createElement('div');
+    banner.className = 'restore-banner';
+    banner.id = 'restoreBanner';
+    
+    const savedTime = new Date(progressData.timestamp);
+    const ageMinutes = Math.round((Date.now() - progressData.timestamp) / (1000 * 60));
+    const timeAgo = ageMinutes < 60 ? `${ageMinutes} minutes ago` : 
+                    `${Math.round(ageMinutes / 60)} hours ago`;
+    
+    banner.innerHTML = `
+        <div class="restore-banner-content">
+            <span style="font-size: 20px;">💾</span>
+            <div>
+                <strong>Previous work found!</strong><br>
+                <small>Saved ${timeAgo} (${savedTime.toLocaleString()}) • ${progressData.editor.code.length} characters</small>
+            </div>
+        </div>
+        <div class="restore-banner-buttons">
+            <button class="restore-btn" onclick="handleRestoreProgress()">Restore</button>
+            <button class="restore-btn dismiss-btn" onclick="handleDismissRestore()">Start Fresh</button>
+        </div>
+    `;
+    
+    document.body.insertBefore(banner, document.body.firstChild);
+}
+
+function handleRestoreProgress() {
+    const banner = document.getElementById('restoreBanner');
+    if (banner) banner.remove();
+    
+    const progressData = restoreProgress();
+    if (progressData) {
+        applyRestoredProgress(progressData);
+    }
+}
+
+function handleDismissRestore() {
+    const banner = document.getElementById('restoreBanner');
+    if (banner) banner.remove();
+    
+    clearProgress();
+    addTerminalOutput('Started with fresh state', 'info');
+}
+
+function clearProgress() {
+    const key = getAutosaveKey();
+    if (key) {
+        try {
+            localStorage.removeItem(key);
+            console.log('Progress cleared');
+        } catch (error) {
+            console.error('Failed to clear progress:', error);
+        }
+    }
+}
+
+function startAutoSave() {
+    if (autosaveTimer) {
+        clearInterval(autosaveTimer);
+    }
+    
+    autosaveTimer = setInterval(() => {
+        if (currentSession.sessionId && editor) {
+            saveProgress();
+        }
+    }, AUTOSAVE_INTERVAL);
+    
+    console.log('Auto-save started (every 15 seconds)');
+}
+
+function stopAutoSave() {
+    if (autosaveTimer) {
+        clearInterval(autosaveTimer);
+        autosaveTimer = null;
+    }
+}
+
+let editorChangeTimeout = null;
+function onEditorChange() {
+    if (editorChangeTimeout) {
+        clearTimeout(editorChangeTimeout);
+    }
+    
+    editorChangeTimeout = setTimeout(() => {
+        saveProgress();
+    }, 3000);
+}
+
+// ============================================
+// END AUTO-SAVE FUNCTIONALITY
+// ============================================
+
+let currentSession = {
+    userId: null,
+    assignmentKey: null,
+    sessionId: null,
+    sessionToken: null,
+    condition: null,
+    problemDescription: null,
+    programmingLanguage: 'javascript',
+    startTime: null,
+    pasteAllowed: 1,
+    starterCode: null,
+    periodicSurveyEnabled: false,
+    periodicSurveyStart: 5,
+    periodicSurveyInterval: 10,
+    nextPeriodicSurveyAt: null,
+    periodicSurveysCompleted: 0,
+    finalSurveyDisabled: false,
+    guessLogCount: 0,
+    descLogCount: 0,
+    suggestionsLogCount: 0,
+    suggestionClickCount: 0,
+    compilerClickCount: 0,
+    guessHistory: [],
+    descHistory: [],
+    suggestionsHistory: [],
+
+};
+
+
+// Activity Logging System
+let activityLog = [];
+let activitySummary = {
+    totalKeystrokes: 0,
+    totalCodeExecutions: 0,
+    totalSuggestionClicks: 0,
+    totalHistoryViews: 0,
+    focusTimeSeconds: 0,
+    awayTimeSeconds: 0,
+    fontChanges: 0,
+    terminalClears: 0,
+    surveysCompleted: 0,
+    peakCodeLines: 0,
+    totalAiAnalyses: 0
+};
+
+let sessionStartTime = Date.now();
+let lastFocusTime = Date.now();
+let isTabVisible = true;
+let activityBuffer = [];
+const ACTIVITY_BATCH_SIZE = 10;
+
+    // Font size management
+    let currentFontSize = 12;    
+    const minFontSize = 10;
+    const maxFontSize = 24;
+    let isAnalyzing = false;
+
+    let surveyData = {
+    analysisCount: 0,
+    surveyInterval: 4,
+    surveyResponses: [],
+    finalSurveyResponse: null,
+    pendingSurvey: false,
+    questions: [],
+    periodicSurveyOccurrenceCount: 0  // ADD THIS LINE
+};
+
+// ADD submission state flag
+let isSubmissionInProgress = false;
+
+    // UI Elements
+    const loadingScreen = document.getElementById('loadingScreen');
+    const accessDeniedScreen = document.getElementById('accessDeniedScreen');
+    const mainApp = document.getElementById('application');
+    const userDisplay = document.getElementById('userDisplay');
+    const conditionIndicator = document.getElementById('conditionIndicator');
+    const sessionIndicator = document.getElementById('sessionIndicator');
+    const problemDescriptionDisplay = document.getElementById('problemDescriptionDisplay');
+    const problemDescSection = document.getElementById('problemDescSection');
+    const guessLogCount = document.getElementById('guessLogCount');
+    const descLogCount = document.getElementById('descLogCount');
+    const analysis = document.getElementById('analysis');
+    const suggestionGuess = document.getElementById('suggestionGuess');
+    const suggestionDesc = document.getElementById('suggestionDesc');
+
+
+    // Enhanced Activity Logging with Time Tracking
+let lastUserInteraction = Date.now();
+let idleTimer = null;
+let userTypingTimer = null;
+let currentEditingActivity = null;
+
+// Core Activity Logging Function
+function logActivity(activityType, activityDetails = {}, sessionContext = {}) {
+    if (!currentSession.sessionId) {
+        console.warn('No session ID available for activity logging');
+        return;
+    }
+    
+    const timestamp = new Date().toISOString();
+    const timeSinceStart = (Date.now() - sessionStartTime) / 1000;
+    
+    // Get current code context if available
+    let currentLines = 0;
+    try {
+        if (window.editor && window.editor.getModel()) {
+            currentLines = window.editor.getModel().getLineCount();
+        }
+    } catch (e) {
+        console.warn('Could not get editor line count:', e);
+        currentLines = 0;
+    }
+    
+    // Ensure all required fields are present and properly typed
+    const activity = {
+        timestamp: timestamp,
+        activity_type: String(activityType),
+        activity_details: {
+            ...Object.fromEntries(
+                Object.entries(activityDetails).map(([key, value]) => [
+                    String(key), 
+                    value !== null && value !== undefined ? value : null
+                ])
+            )
+        },
+        session_context: {
+            total_lines: Number(currentLines) || 0,
+            current_analysis_count: Number(surveyData.analysisCount) || 0,
+            time_since_start: Number(timeSinceStart) || 0,
+            session_id: String(currentSession.sessionId),
+            user_id: String(currentSession.userId || 'unknown'),
+            condition: Number(currentSession.condition) || 0,
+            ...Object.fromEntries(
+                Object.entries(sessionContext).map(([key, value]) => [
+                    String(key), 
+                    value !== null && value !== undefined ? value : null
+                ])
+            )
+        }
+    };
+    
+    if (!activity.timestamp || !activity.activity_type) {
+        console.error('Invalid activity object:', activity);
+        return;
+    }
+    
+    activityLog.push(activity);
+    activityBuffer.push(activity);
+    
+    if (activityBuffer.length >= ACTIVITY_BATCH_SIZE) {
+        uploadActivityBatch();
+    }
+}
+
+// Time-based activity tracking functions
+function updateUserInteraction() {
+    lastUserInteraction = Date.now();
+    resetIdleTimer();
+}
+
+function resetIdleTimer() {
+    if (idleTimer) {
+        clearTimeout(idleTimer);
+    }
+    
+    idleTimer = setTimeout(() => {
+        logActivity('idle', {
+            start_time: new Date().toISOString(),
+            idle_duration: 30000
+        });
+    }, 30000); // 30 seconds
+}
+
+
+// ===== NEW FUNCTIONS FOR SESSIONSTORAGE PERSISTENCE =====
+
+function savePeriodicSurveysToStorage() {
+    try {
+        const storageKey = `periodicSurveys_${currentSession.sessionId}`;
+        const dataToSave = {
+            surveyResponses: surveyData.surveyResponses,
+            periodicSurveyOccurrenceCount: surveyData.periodicSurveyOccurrenceCount,
+            analysisCount: surveyData.analysisCount,
+            surveyInterval: surveyData.surveyInterval,
+            savedAt: new Date().toISOString()
+        };
+        
+        sessionStorage.setItem(storageKey, JSON.stringify(dataToSave));
+        console.log(`✅ Saved ${surveyData.surveyResponses.length} periodic surveys to sessionStorage`);
+    } catch (error) {
+        console.error('❌ Failed to save periodic surveys to sessionStorage:', error);
+    }
+}
+
+function restorePeriodicSurveysFromStorage() {
+    try {
+        const storageKey = `periodicSurveys_${currentSession.sessionId}`;
+        const savedData = sessionStorage.getItem(storageKey);
+        
+        if (savedData) {
+            const parsedData = JSON.parse(savedData);
+            surveyData.surveyResponses = parsedData.surveyResponses || [];
+            surveyData.periodicSurveyOccurrenceCount = parsedData.periodicSurveyOccurrenceCount || 0;
+            surveyData.analysisCount = parsedData.analysisCount || 0;
+            surveyData.surveyInterval = parsedData.surveyInterval || 4;
+            
+            console.log(`✅ Restored ${surveyData.surveyResponses.length} periodic surveys from sessionStorage`);
+            console.log(`   Saved at: ${parsedData.savedAt}`);
+            return true;
+        } else {
+            console.log('ℹ️ No periodic surveys found in sessionStorage');
+            return false;
+        }
+    } catch (error) {
+        console.error('❌ Failed to restore periodic surveys from sessionStorage:', error);
+        return false;
+    }
+}
+
+function clearPeriodicSurveysFromStorage() {
+    try {
+        const storageKey = `periodicSurveys_${currentSession.sessionId}`;
+        sessionStorage.removeItem(storageKey);
+        console.log('✅ Cleared periodic surveys from sessionStorage');
+    } catch (error) {
+        console.error('❌ Failed to clear periodic surveys from sessionStorage:', error);
+    }
+}
+
+// ===== END NEW FUNCTIONS =====
+
+
+// ===== SUBMISSION DATA CACHING FUNCTIONS =====
+
+function captureAllSubmissionData() {
+    try {
+        const code = window.editor ? window.editor.getValue() : '';
+        const model = window.editor ? window.editor.getModel() : null;
+        
+        const submissionData = {
+            // Core code data
+            code: code,
+            lineCount: model ? model.getLineCount() : 0,
+            characterCount: code.length,
+            
+            // Session data
+            session: {
+                sessionId: currentSession.sessionId,
+                userId: currentSession.userId,
+                assignmentKey: currentSession.assignmentKey,
+                sessionToken: currentSession.sessionToken,
+                condition: currentSession.condition,
+                programmingLanguage: currentSession.programmingLanguage,
+                startTime: currentSession.startTime,
+                endTime: new Date().toISOString()
+            },
+            
+            // Activity data
+            activity: {
+                allActivityLogs: [...activityLog],
+                guessHistory: [...currentSession.guessHistory],
+                descHistory: [...currentSession.descHistory],
+                suggestionsHistory: [...currentSession.suggestionsHistory]
+            },
+            
+            // Metrics
+            metrics: {
+                totalKeystrokes: activitySummary.totalKeystrokes,
+                focusTime: activitySummary.focusTimeSeconds,
+                awayTime: activitySummary.awayTimeSeconds,
+                totalAIAnalyses: surveyData.analysisCount,
+                suggestionClicks: currentSession.suggestionClickCount,
+                compilerClicks: currentSession.compilerClickCount,
+                peakCodeLines: activitySummary.peakCodeLines
+            },
+            
+            // Survey data
+            surveys: {
+                periodicSurveys: [...surveyData.surveyResponses],
+                totalOccurrences: surveyData.periodicSurveyOccurrenceCount,
+                totalAnalyses: surveyData.analysisCount
+            },
+            
+            // Timestamp
+            capturedAt: new Date().toISOString()
+        };
+        
+        sessionStorage.setItem('pendingSubmissionData', JSON.stringify(submissionData));
+        console.log('✅ Captured all submission data to sessionStorage');
+        console.log('   Code length:', code.length);
+        console.log('   Line count:', submissionData.lineCount);
+        console.log('   Activity logs:', activityLog.length);
+        
+        return submissionData;
+        
+    } catch (error) {
+        console.error('❌ Failed to capture submission data:', error);
+        return null;
+    }
+}
+
+function retrieveCachedSubmissionData() {
+    try {
+        const cached = sessionStorage.getItem('pendingSubmissionData');
+        if (cached) {
+            const data = JSON.parse(cached);
+            console.log('✅ Retrieved cached submission data');
+            console.log('   Captured at:', data.capturedAt);
+            console.log('   Code length:', data.code.length);
+            return data;
+        }
+        console.log('ℹ️ No cached submission data found');
+        return null;
+    } catch (error) {
+        console.error('❌ Failed to retrieve cached data:', error);
+        return null;
+    }
+}
+
+function clearCachedSubmissionData() {
+    try {
+        sessionStorage.removeItem('pendingSubmissionData');
+        console.log('✅ Cleared cached submission data');
+    } catch (error) {
+        console.error('❌ Failed to clear cached data:', error);
+    }
+}
+
+// Code editing activity tracking
+function startCodeEditingActivity(editType, details = {}) {
+    const now = Date.now();
+    
+    // If we're already in a code editing activity of the same type, extend it
+    if (currentEditingActivity && currentEditingActivity.type === editType) {
+        // Update details for ongoing activity
+        Object.assign(currentEditingActivity.details, details);
+        return;
+    }
+    
+    // End previous editing activity if different type
+    if (currentEditingActivity) {
+        endCodeEditingActivity();
+    }
+    
+    currentEditingActivity = {
+        type: editType,
+        startTime: now,
+        details: {...details}
+    };
+    
+    // Clear any existing timer
+    if (userTypingTimer) {
+        clearTimeout(userTypingTimer);
+    }
+}
+
+function endCodeEditingActivity(finalDetails = {}) {
+    if (!currentEditingActivity) {
+        return;
+    }
+    
+    const now = Date.now();
+    const duration = now - currentEditingActivity.startTime;
+    
+    // Only log if activity lasted more than 100ms (avoid micro-edits)
+    if (duration > 100) {
+        logActivity(currentEditingActivity.type, {
+            start_time: new Date(currentEditingActivity.startTime).toISOString(),
+            end_time: new Date(now).toISOString(),
+            duration: duration,
+            ...currentEditingActivity.details,
+            ...finalDetails
+        });
+    }
+    
+    currentEditingActivity = null;
+}
+
+function scheduleCodeEditingEnd() {
+    if (userTypingTimer) {
+        clearTimeout(userTypingTimer);
+    }
+    
+    // End editing activity after 2 seconds of inactivity
+    userTypingTimer = setTimeout(() => {
+        endCodeEditingActivity();
+    }, 2000);
+}
+
+// Batch upload function
+async function uploadActivityBatch() {
+    if (activityBuffer.length === 0) return;
+    
+    try {
+        const response = await fetch('/log-activities', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                activities: activityBuffer,
+                session_id: currentSession.sessionId
+            })
+        });
+        
+        if (response.ok) {
+            console.log(`Uploaded ${activityBuffer.length} activities`);
+            activityBuffer = [];
+        } else {
+            const errorData = await response.json().catch(() => ({}));
+            console.warn(`Activity upload failed: ${response.status} - ${errorData.message || 'Unknown error'}`);
+            // Keep activities in buffer for retry, but limit buffer size to prevent memory issues
+            if (activityBuffer.length > 100) {
+                activityBuffer = activityBuffer.slice(-50); // Keep only last 50 activities
+            }
+        }
+    } catch (error) {
+        console.error('Activity upload failed:', error);
+        // Keep activities in buffer for retry, but limit buffer size
+        if (activityBuffer.length > 100) {
+            activityBuffer = activityBuffer.slice(-50);
+        }
+    }
+}
+    function updateLoadingMessage(message) {
+    const loadingDetail = document.getElementById('loadingDetail');
+    if (loadingDetail) {
+        loadingDetail.textContent = message;
+    }
+}
+
+    // Authentication and Session Validation
+    function validateSessionFromURL() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionToken = urlParams.get('session');
+        const userParam = urlParams.get('user');
+        
+        // Check for URL parameters
+        if (!sessionToken || !userParam) {
+            return { error: 'Missing session parameters. Please log in through the authentication system.' };
+        }
+        
+        // Check for stored auth data from consent/login flow
+        const storedAuth = sessionStorage.getItem('authData');
+        if (!storedAuth) {
+            return { error: 'No authentication data found. Please complete the consent form and login process.' };
+        }
+        
+        try {
+            const authData = JSON.parse(storedAuth);
+            
+            // Validate stored data matches URL parameters
+            if (authData.userId !== decodeURIComponent(userParam)) {
+                return { error: 'Session mismatch. Please log in again.' };
+            }
+            
+            // Check consent
+            if (!authData.consentGiven) {
+                return { error: 'Consent not given. Please complete the consent form first.' };
+            }
+            
+            // Session is valid - return auth data
+            return { success: true, data: authData };
+            
+        } catch (e) {
+            console.error('Auth validation error:', e);
+            return { error: 'Invalid session data. Please log in again.' };
+        }
+    }
+
+    function showAccessDenied(message) {
+        loadingScreen.classList.add('hidden');
+        document.getElementById('accessDeniedMessage').textContent = message;
+        accessDeniedScreen.classList.remove('hidden');
+        mainApp.classList.add('hidden');
+    }
+
+    function goToLogin() {
+        // Allow navigation without warning
+        allowNavigation = true;
+        
+        // Clear any stored session data
+        sessionStorage.removeItem('authData');
+        localStorage.removeItem('authData');
+        
+        // Redirect to home page
+        window.location.href = '/home.html';
+    }
+
+    function showMainApp() {
+        loadingScreen.classList.add('hidden');
+        accessDeniedScreen.classList.add('hidden');
+        mainApp.classList.remove('hidden');
+    }
+
+    function showSuccessMessage(message, countdown = 3) {
+        const successDiv = document.createElement('div');
+        successDiv.className = 'success-message';
+        successDiv.innerHTML = `
+            <div>${message}</div>
+            <div class="countdown">Redirecting in <span id="countdownNumber">${countdown}</span> seconds...</div>
+        `;
+        document.body.appendChild(successDiv);
+
+        let timeLeft = countdown;
+        const countdownEl = document.getElementById('countdownNumber');
+        
+        const timer = setInterval(() => {
+            timeLeft--;
+            if (countdownEl) countdownEl.textContent = timeLeft;
+            
+            if (timeLeft <= 0) {
+                clearInterval(timer);
+                if (document.body.contains(successDiv)) {
+                    document.body.removeChild(successDiv);
+                }
+                setTimeout(() => {
+                    goToLogin();
+                }, 100);
+            }
+        }, 1000);
+    }
+
+// Initialize application from URL parameters
+// Initialize application from URL parameters
+async function initializeFromURL() {
+    console.log('Starting initialization...');
+    updateLoadingMessage('Validating session parameters...');
+    console.log('Current URL:', window.location.href);
+    console.log('SessionStorage data:', sessionStorage.getItem('authData'));
+    
+    try {
+        const validation = validateSessionFromURL();
+        console.log('Validation result:', validation);
+            
+        if (!validation.success) {
+            showAccessDenied(validation.error);
+            return;
+        }
+        
+        updateLoadingMessage('Loading user session data...');
+        const authData = validation.data;
+        
+        // Initialize session with stored data
+        // Extract prefix from userId (format: prefix_username, e.g., p1c1_john)
+        const extractPrefix = (userId) => {
+            if (!userId) return '';
+            const parts = userId.split('_');
+            return parts.length > 1 ? parts[0] : '';
+        };
+        
+        currentSession = {
+            userId: authData.userId,
+            prefix: extractPrefix(authData.userId),
+            assignmentKey: authData.assignmentKey,
+            sessionId: authData.sessionId,
+            sessionToken: authData.sessionToken,
+            condition: authData.condition,
+            problemDescription: authData.problemDescription,
+            programmingLanguage: authData.programmingLanguage || 'javascript',
+            starterCode: authData.starterCode || null,
+            startTime: authData.timestamp,
+            pasteAllowed: authData.pasteAllowed !== undefined ? authData.pasteAllowed : 1,
+            periodicSurveyEnabled: authData.periodicSurveyEnabled || false,
+            periodicSurveyStart: authData.periodicSurveyStart || 5,
+            periodicSurveyInterval: 10,
+            nextPeriodicSurveyAt: authData.periodicSurveyStart || 5,
+            periodicSurveysCompleted: 0,
+            finalSurveyDisabled: authData.finalSurveyDisabled || false,
+            guessLogCount: 0,
+            descLogCount: 0,
+            suggestionsLogCount: 0,
+            suggestionClickCount: 0,
+            compilerClickCount: 0,
+            guessHistory: [],
+            descHistory: [],
+            suggestionsHistory: []
+        };
+        
+        // ✅ NEW: Restore periodic surveys from sessionStorage if returning from post-survey
+        restorePeriodicSurveysFromStorage();
+        
+        // ✅ DEBUG: Log final survey configuration
+        console.log('🔍 Final Survey Configuration:', {
+            assignmentKey: authData.assignmentKey,
+            finalSurveyDisabled: authData.finalSurveyDisabled,
+            willShowFinalSurvey: !authData.finalSurveyDisabled
+        });
+        
+        // Update UI
+        userDisplay.textContent = `User: ${authData.userId}`;
+        sessionIndicator.textContent = `Session: ${authData.sessionId.substring(0, 16)}...`;
+        conditionIndicator.textContent = `Condition ${authData.condition}`;
+        
+        // Update URL display
+        const urlDisplay = document.getElementById('urlDisplay');
+        const currentURL = window.location.href;
+        urlDisplay.textContent = `URL: ${currentURL.substring(0, 50)}${currentURL.length > 50 ? '...' : ''}`;
+        
+        // ✅ CHECK FOR PRE-SURVEY REQUIREMENT (FLEXIBLE)
+        if (authData.hasPreSurvey) {
+            console.log('🔍 Pre-survey check: Assignment has pre-survey configured');
+            try {
+                const statusResponse = await fetch(`/survey-status/${currentSession.sessionId}`);
+                if (statusResponse.ok) {
+                    const statusData = await statusResponse.json();
+                    
+                    // If pre-survey is required but not completed, redirect to survey
+                    if (statusData.pre_survey_status !== 'completed') {
+                        console.log('⚠️ Pre-survey not completed - redirecting...');
+                        updateLoadingMessage('Pre-survey required before accessing IDE...');
+                        
+                        // Get session parameters for redirect
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const sessionToken = urlParams.get('session');
+                        const userId = urlParams.get('user');
+                        
+                        // Show message in loading screen
+                        setTimeout(() => {
+                            const loadingDetail = document.getElementById('loadingDetail');
+                            if (loadingDetail) {
+                                loadingDetail.innerHTML = `
+                                    <span style="color: #f59e0b;">⚠️ Pre-survey required</span><br>
+                                    <span style="color: #cccccc;">Redirecting in 2 seconds...</span>
+                                `;
+                            }
+                        }, 100);
+                        
+                        // Redirect to pre-survey page with session preserved
+                        setTimeout(() => {
+                            allowNavigation = true;  // Allow navigation without warning
+                            window.location.href = `/survey.html?type=pre&session=${sessionToken}&user=${encodeURIComponent(userId)}`;
+                        }, 2000);
+                        return; // Stop initialization here
+                    } else {
+                        console.log('✅ Pre-survey already completed - IDE access granted');
+                    }
+                } else {
+                    console.warn('⚠️ Could not fetch survey status:', statusResponse.status);
+                    // Continue with IDE initialization if check fails (fallback)
+                }
+            } catch (error) {
+                console.error('❌ Error checking pre-survey status:', error);
+                // Continue with IDE initialization if check fails (fallback)
+            }
+        } else {
+            console.log('ℹ️ No pre-survey required for this assignment');
+        }
+        
+        // Add paste status indicator
+        const pasteStatus = authData.pasteAllowed === 1 ? 'Enabled' : 'Disabled';
+        const pasteIndicator = document.createElement('span');
+        pasteIndicator.className = authData.pasteAllowed === 1 ? 'session-indicator' : 'condition-indicator';
+        pasteIndicator.textContent = `Paste: ${pasteStatus}`;
+        pasteIndicator.style.marginRight = '10px';
+        
+        const conditionIndicatorElement = document.getElementById('conditionIndicator');
+        conditionIndicatorElement.parentNode.insertBefore(pasteIndicator, conditionIndicatorElement);
+
+        // Handle condition-specific UI
+        if (authData.condition === 1) {
+            problemDescSection.classList.remove('hidden');
+            document.getElementById('aiGuessSection').classList.remove('hidden');
+            document.getElementById('suggestionsOnlySection').classList.add('hidden');
+            if (authData.problemDescription) {
+                try {
+                    const parsedMarkdown = marked.parse(authData.problemDescription);
+                    problemDescriptionDisplay.innerHTML = parsedMarkdown;
+                } catch (e) {
+                    console.error('Markdown parsing error:', e);
+                    problemDescriptionDisplay.innerHTML = authData.problemDescription;
+                }
+            }
+            document.body.classList.add('condition-1');
+            document.body.classList.remove('condition-2', 'condition-3');
+        } else if (authData.condition === 2) {
+            problemDescSection.classList.add('hidden');
+            document.getElementById('aiGuessSection').classList.remove('hidden');
+            document.getElementById('suggestionsOnlySection').classList.add('hidden');
+            document.body.classList.add('condition-2');
+            document.body.classList.remove('condition-1', 'condition-3');
+        } else if (authData.condition === 3) {
+            problemDescSection.classList.add('hidden');
+            document.getElementById('aiGuessSection').classList.add('hidden');
+            document.getElementById('suggestionsOnlySection').classList.remove('hidden');
+            document.body.classList.add('condition-3');
+            document.body.classList.remove('condition-1', 'condition-2');
+        }
+
+        // Initialize editor with timeout protection
+        console.log('Initializing Monaco Editor...');
+        updateLoadingMessage('Loading code editor (this may take a few seconds)...');
+        await initializeEditor();
+        console.log('Monaco Editor initialized successfully');
+        
+        updateLoadingMessage('Finalizing setup...');
+        showMainApp();
+        
+        // Initialize sidebar state based on prefix
+        initializeSidebar();
+        
+        // Check for saved progress
+        setTimeout(() => {
+            const savedProgress = restoreProgress();
+            if (savedProgress) {
+                const ageMinutes = (Date.now() - savedProgress.timestamp) / (1000 * 60);
+                if (ageMinutes < 30) {
+                    applyRestoredProgress(savedProgress);
+                } else {
+                    showRestoreBanner(savedProgress);
+                }
+            }
+            startAutoSave();
+        }, 500);
+        
+        // Add welcome messages
+        setTimeout(() => {
+            addTerminalOutput(`Secure session restored successfully!`, 'success');
+            addTerminalOutput(`User ID: ${authData.userId}`, 'info');
+            addTerminalOutput(`Assignment: ${authData.assignmentKey}`, 'info');
+            addTerminalOutput(`Condition: ${authData.condition}`, 'info');
+            addTerminalOutput(`Session ID: ${authData.sessionId}`, 'info');
+            addTerminalOutput(`Database: Ready for logging`, 'info');
+            
+            // ✅ Show final survey status
+            if (authData.finalSurveyDisabled) {
+                addTerminalOutput(`📋 Final Survey: DISABLED for this assignment`, 'warning');
+            } else {
+                addTerminalOutput(`📋 Final Survey: ENABLED (will appear at submission)`, 'info');
+            }
+            
+            if (authData.pasteAllowed === 0 || authData.pasteAllowed === "0") {
+                addTerminalOutput(`⚠️  COPY/PASTE DISABLED: All code must be typed manually`, 'warning');
+                addTerminalOutput(`   This restriction is part of the research study`, 'info');
+            } else {
+                addTerminalOutput(`✅ Copy/paste functionality is enabled`, 'info');
+            }
+            
+            addTerminalOutput(`IMPORTANT: Submitting code will automatically log you out`, 'warning');
+            addTerminalOutput(`TIP: Use A+/A- buttons to adjust font size (Current: 12px)`, 'info');
+            
+            // Load survey configuration
+            loadSurveyConfig();
+            // Fetch survey questions from backend
+            loadSurveyQuestions();
+            
+            // Initialize activity logging
+            sessionStartTime = Date.now();
+            isTabVisible = !document.hidden;
+            lastFocusTime = sessionStartTime;
+
+            // Log session start
+            logActivity('session_start', {
+                user_id: authData.userId,
+                condition: authData.condition,
+                assignment_key: authData.assignmentKey,
+                programming_language: authData.programmingLanguage || 'javascript'
+            });
+
+            // Set up periodic activity uploads
+            setInterval(() => {
+                if (activityBuffer.length > 0) {
+                    uploadActivityBatch();
+                }
+            }, 30000); // Upload every 30 seconds
+        }, 100);
+        
+        // Initialize enhanced activity tracking
+        setTimeout(() => {
+            // Start idle tracking
+            resetIdleTimer();
+            
+            // Track user interactions globally
+            document.addEventListener('click', updateUserInteraction);
+            document.addEventListener('keypress', updateUserInteraction);
+            document.addEventListener('scroll', updateUserInteraction);
+            
+            console.log('Enhanced activity tracking initialized');
+        }, 200);
+        
+    } catch (error) {
+        console.error('Initialization failed:', error);
+        showAccessDenied('Failed to initialize IDE. Please refresh and try again. Error: ' + error.message);
+    }
+}
+
+
+// Initialize Monaco Editor with timeout and error handling
+// Initialize Monaco Editor with timeout and error handling
+async function initializeEditor() {
+    return new Promise((resolve, reject) => {
+        const loadingTimeout = setTimeout(() => {
+            reject(new Error('Monaco Editor loading timed out after 15 seconds'));
+        }, 15000);
+
+        if (window.editor) {
+            try {
+                window.editor.dispose();
+                window.editor = null;
+            } catch (e) {
+                console.log('Previous editor cleanup:', e);
+            }
+        }
+        
+        const editorContainer = document.getElementById('editor');
+        if (!editorContainer) {
+            clearTimeout(loadingTimeout);
+            reject(new Error('Editor container not found'));
+            return;
+        }
+        
+        editorContainer.innerHTML = '';
+        
+        require.config({ 
+            paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs' },
+            waitSeconds: 15
+        });
+        
+        require(['vs/editor/editor.main'], function () {
+            try {
+                clearTimeout(loadingTimeout);
+                
+                const languageDefaults = {
+                    javascript: '// Start coding here...\n',
+                    python: '# Start coding here...\n',
+                    c: '#include <stdio.h>\n\n// Start coding here...\n'
+                };
+
+                const selectedLanguage = currentSession.programmingLanguage || 'javascript';
+                
+                // Check if starter code is available from session
+                let initialCode;
+                if (currentSession.starterCode) {
+                    initialCode = currentSession.starterCode;
+                    console.log('Using starter code from session');
+                } else {
+                    initialCode = languageDefaults[selectedLanguage] || '// Start coding here...\n';
+                    console.log('Using default placeholder code');
+                }
+
+                window.editor = monaco.editor.create(editorContainer, {
+                    value: initialCode,
+                    language: selectedLanguage,
+                    theme: 'vs-dark',
+                    automaticLayout: true,
+                    minimap: { enabled: true },
+                    scrollBeyondLastLine: false,
+                    wordWrap: 'on',
+                    lineNumbers: 'on',
+                    folding: true,
+                    selectOnLineNumbers: true,
+                    matchBrackets: 'always',
+                    fontSize: 12
+                });
+
+                // Enhanced Monaco Editor event handlers with time tracking
+                window.editor.onDidChangeModelContent((e) => {
+                    updateUserInteraction();
+                    onEditorChange();
+                    
+                    const changes = e.changes;
+                    const model = window.editor.getModel();
+                    const currentContent = model.getValue();
+                    
+                    for (const change of changes) {
+                        const isInsertion = change.text.length > 0;
+                        const isDeletion = change.rangeLength > 0;
+                        const isModification = isInsertion && isDeletion;
+                        
+                        let editType, details;
+                        
+                        if (isModification) {
+                            editType = 'code_editing_modify';
+                            details = {
+                                lines_modified: Math.abs(change.range.endLineNumber - change.range.startLineNumber) + 1,
+                                characters_changed: Math.abs(change.text.length - change.rangeLength),
+                                content_length: currentContent.length
+                            };
+                        } else if (isInsertion) {
+                            const linesAdded = (change.text.match(/\n/g) || []).length;
+                            editType = 'code_editing_insert';
+                            details = {
+                                lines_added: linesAdded,
+                                characters_added: change.text.length,
+                                content_length: currentContent.length,
+                                line_number: change.range.startLineNumber
+                            };
+                        } else if (isDeletion) {
+                            const linesRemoved = Math.abs(change.range.endLineNumber - change.range.startLineNumber);
+                            editType = 'code_editing_delete';
+                            details = {
+                                lines_removed: linesRemoved,
+                                characters_removed: change.rangeLength,
+                                content_length: currentContent.length,
+                                line_number: change.range.startLineNumber
+                            };
+                        }
+                        
+                        if (editType) {
+                            startCodeEditingActivity(editType, details);
+                            scheduleCodeEditingEnd();
+                        }
+                        
+                        // Trigger AI analysis on new lines - fast response
+                        if (change.text.includes('\n')) {
+                            debounceNewlineAnalysis(300);
+                            break;
+                        }
+                    }
+                });
+
+                // Trigger AI analysis when keypress released, allows for more midline analysis
+                document.addEventListener('keypress', (e) => {
+                    if (e.key !== 'Enter') {
+                        debounceGeneralAnalysis(1500);
+                    }
+                });
+
+                // ACTIVITY LOGGING: Cursor position tracking (for user interaction only - no logging)
+                window.editor.onDidChangeCursorPosition((e) => {
+                    updateUserInteraction();
+                    // Cursor movement tracking removed to reduce database load
+                });
+
+                // ACTIVITY LOGGING: Selection tracking (for user interaction only - no logging)
+                window.editor.onDidChangeCursorSelection((e) => {
+                    updateUserInteraction();
+                    // Selection change tracking removed to reduce database load
+                });
+
+
+                // Complete paste control implementation
+                if (currentSession.pasteAllowed === 0 || currentSession.pasteAllowed === "0") {
+                    const logPasteAttempt = () => {
+                        logActivity('paste_attempt', {
+                            attempt_blocked: true,
+                            paste_control_active: true
+                        });
+                    };
+                    
+                    // Block Ctrl+V
+                    window.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV, function() {
+                        logPasteAttempt();
+                        showTemporaryPasteNotification();
+                        return null;
+                    });
+                    
+                    // Block Shift+Insert
+                    window.editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.Insert, function() {
+                        logPasteAttempt();
+                        showTemporaryPasteNotification();
+                        return null;
+                    });
+                    
+                    // Block context menu paste
+                    document.addEventListener('contextmenu', function(e) {
+                        if (e.target.closest('#editor')) {
+                            e.preventDefault();
+                            logPasteAttempt();
+                            showTemporaryPasteNotification();
+                        }
+                    });
+                    
+                    console.log('Paste control active - all paste operations blocked');
+                }
+                
+                updateFontSize(currentFontSize);
+                resolve();
+                
+            } catch (error) {
+                clearTimeout(loadingTimeout);
+                console.error('Monaco Editor initialization failed:', error);
+                reject(error);
+            }
+        });
+    });
+}
+
+
+function showTemporaryPasteNotification() {
+    // Remove any existing notifications
+    const existingNotification = document.getElementById('pasteNotification');
+    const existingBanner = document.getElementById('pasteBanner');
+    
+    if (existingNotification) {
+        existingNotification.remove();
+    }
+    if (existingBanner) {
+        existingBanner.remove();
+    }
+    
+    // Create center notification
+    const notification = document.createElement('div');
+    notification.id = 'pasteNotification';
+    notification.className = 'paste-notification';
+    notification.innerHTML = '⚠️ COPY/PASTE DISABLED: All code must be typed manually';
+    
+    // Create top banner
+    const banner = document.createElement('div');
+    banner.id = 'pasteBanner';
+    banner.className = 'paste-banner';
+    banner.innerHTML = `⚠️ NOTICE: Copy and paste functionality is disabled in this IDE. All code must be typed manually.`;
+    
+    // Add both to document
+    document.body.appendChild(notification);
+    document.body.appendChild(banner);
+    
+    // Adjust main app margin temporarily
+    const mainApp = document.getElementById('application');
+    if (mainApp) {
+        mainApp.style.marginTop = '40px';
+        mainApp.style.transition = 'margin-top 0.3s ease';
+    }
+    
+    // Remove after 3 seconds
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.remove();
+        }
+        if (banner.parentNode) {
+            banner.remove();
+        }
+        
+        // Reset margin
+        if (mainApp) {
+            mainApp.style.marginTop = '0px';
+        }
+    }, 3000);
+}
+
+let debounceTimerNewline; // For Enter key - fast response
+let debounceTimerGeneral; // For general typing - slower
+
+// Quick response for Enter key
+function debounceNewlineAnalysis(delay = 300) {
+    clearTimeout(debounceTimerNewline);
+    debounceTimerNewline = setTimeout(() => { 
+        analyzeCurrentCode()
+    }, delay);
+}
+
+// Slower background analysis for general typing
+function debounceGeneralAnalysis(delay = 1500) {
+    clearTimeout(debounceTimerGeneral);
+    debounceTimerGeneral = setTimeout(() => { 
+        analyzeCurrentCode()
+    }, delay);
+}
+
+
+let previousCode = ''
+
+// Analyze current code
+async function analyzeCurrentCode() {
+    if (!currentSession.sessionId) {
+        console.warn('No active session for code analysis');
+        return;
+    }
+    
+    // Prevent race conditions - don't start new analysis if one is in progress
+    if (isAnalyzing) {
+        console.log('Analysis already in progress, skipping...');
+        return;
+    }
+    
+    const code = window.editor.getValue().trim();
+    if (!code || code === '// Start coding here...' || code === '# Start coding here...') return;
+
+    // Don't start new analysis if code hasn't changed
+    if (code === previousCode) return;
+
+    // Set analyzing flag
+    isAnalyzing = true;
+    previousCode = code;
+    // ACTIVITY LOG: AI analysis trigger
+logActivity('ai_analysis_trigger', {
+    trigger_reason: 'new_line_added',
+    code_length: code.length,
+    analysis_number: surveyData.analysisCount + 1
+});
+
+    // Show AI thinking animation and disable editor
+    showAIThinking();
+
+    try {
+        const response = await fetch('/analyze', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                code: code,
+                user_id: currentSession.userId,
+                assignment_key: currentSession.assignmentKey,
+                session_id: currentSession.sessionId
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Analysis failed: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        const analysisTime = Date.now() - (new Date().getTime()); // You'll need to add startTime variable
+        
+// ACTIVITY LOG: AI analysis complete
+logActivity('ai_analysis_complete', {
+    analysis_time_ms: 2000, // Approximate - you can make this more precise
+    analysis_result: data.analysis ? data.analysis.substring(0, 50) + '...' : 'none',
+    suggestion_generated: !!data.next_line
+});
+
+
+        const problemDescription = data.analysis || "Problem description not available";
+        let nextLineCode = data.next_line || "// No suggestions available";
+
+        console.log("analysis complete, data on next line")
+        console.log(data);
+        
+        let correctNextLineCode = nextLineCode;
+        if (currentSession.condition === 1 && data.correct_next_line) {
+            correctNextLineCode = data.correct_next_line;
+        }
+
+        // Clean and format suggested code
+        nextLineCode = nextLineCode.replace(/^```\w*\n?|```$/g, '').trim();
+        const lines = nextLineCode.split('\n');
+        if (lines.length > 2) {
+            nextLineCode = lines.slice(0, 2).join('\n');
+        }
+        
+        // Clean correct suggestion too
+        if (correctNextLineCode !== nextLineCode) {
+            correctNextLineCode = correctNextLineCode.replace(/^```\w*\n?|```$/g, '').trim();
+            const correctLines = correctNextLineCode.split('\n');
+            if (correctLines.length > 2) {
+                correctNextLineCode = correctLines.slice(0, 2).join('\n');
+            }
+        }
+
+// Store in guess history
+        currentSession.guessHistory.push({
+            timestamp: new Date().toISOString(),
+            problemAnalysis: problemDescription,
+            nextLine: nextLineCode
+        });
+
+        // Update log counts
+        currentSession.guessLogCount++;
+        guessLogCount.textContent = currentSession.guessLogCount;
+
+        // For condition 1, also store correct description data
+        if (currentSession.condition === 1) {
+            currentSession.descHistory.push({
+                timestamp: new Date().toISOString(),
+                problemAnalysis: currentSession.problemDescription || problemDescription,
+                nextLine: correctNextLineCode
+            });
+            
+            currentSession.descLogCount++;
+            descLogCount.textContent = currentSession.descLogCount;
+        }
+
+        // For condition 3, store suggestions data
+        if (currentSession.condition === 3) {
+            currentSession.suggestionsHistory.push({
+                timestamp: new Date().toISOString(),
+                nextLine: nextLineCode
+            });
+            
+            currentSession.suggestionsLogCount++;
+            document.getElementById('suggestionsLogCount').textContent = currentSession.suggestionsLogCount;
+        }
+
+        // ANIMATE THE RESULTS with typing effect and box shaking
+        await animateAnalysisResults(problemDescription, nextLineCode, correctNextLineCode);
+        incrementAnalysisCount();
+
+
+    } catch (error) {
+        console.error('Analysis error:', error);
+        analysis.innerHTML = `
+            <div style="color: #ff6b6b;">
+                <strong>Connection Issue:</strong> ${error.message}<br>
+                Local logging continues...
+            </div>
+        `;
+        addTerminalOutput('AI analysis failed - check connection', 'error');
+    } finally {
+        // Always hide thinking animation and re-enable editor
+        setTimeout(() => {
+            hideAIThinking();
+            // Reset analyzing flag after animation completes
+            isAnalyzing = false;
+        }, 500); // Small delay to show completion
+    }
+}
+
+
+// ADD these new functions:
+function showAIThinkingInBox(type) {
+    let targetElements = [];
+    let boxElement;
+    
+    if (type === 'guess') {
+        targetElements = [
+            document.getElementById('analysis'),
+            document.getElementById('suggestionGuess')
+        ];
+        boxElement = document.querySelector('.red-box');
+    } else if (type === 'desc') {
+        targetElements = [document.getElementById('suggestionDesc')];
+        boxElement = document.querySelector('.green-box');
+    } else if (type === 'suggestions') {
+        targetElements = [document.getElementById('suggestionOnly')];
+        boxElement = document.querySelector('.violet-box');
+    }
+    
+    targetElements.forEach(targetElement => {
+        if (targetElement && boxElement) {
+            // Store original height to maintain box size
+            const originalHeight = targetElement.offsetHeight;
+            
+            // Create mini AI thinking animation with fixed height
+            targetElement.innerHTML = `
+                <div class="mini-ai-thinking" style="min-height: ${Math.max(originalHeight, 60)}px; display: flex; flex-direction: column; justify-content: center;">
+                    <div class="mini-ai-loader"></div>
+                    <div class="mini-ai-text">AI is analyzing...</div>
+                </div>
+            `;
+        }
+    });
+    
+    if (boxElement) {
+        // Add glow effect to the box
+        boxElement.classList.add('ai-thinking-glow');
+    }
+}
+
+function hideAIThinkingInBox(type) {
+    let targetElements = [];
+    let boxElement;
+    
+    if (type === 'guess') {
+        targetElements = [
+            document.getElementById('analysis'),
+            document.getElementById('suggestionGuess')
+        ];
+        boxElement = document.querySelector('.red-box');
+    } else if (type === 'desc') {
+        targetElements = [document.getElementById('suggestionDesc')];
+        boxElement = document.querySelector('.green-box');
+    } else if (type === 'suggestions') {
+        targetElements = [document.getElementById('suggestionOnly')];
+        boxElement = document.querySelector('.violet-box');
+    }
+    
+    // Remove glow effect from the box
+    if (boxElement) {
+        boxElement.classList.remove('ai-thinking-glow');
+    }
+    
+    // Note: We don't restore content here since animateAnalysisResults will handle that
+}
+
+
+function typeTextAnimation(element, text, speed = 50) {
+    return new Promise((resolve) => {
+        element.textContent = '';
+        element.classList.add('typing-animation');
+        
+        let i = 0;
+        const typeInterval = setInterval(() => {
+            if (i < text.length) {
+                element.textContent += text.charAt(i);
+                i++;
+            } else {
+                clearInterval(typeInterval);
+                element.classList.remove('typing-animation');
+                resolve();
+            }
+        }, speed);
+    });
+}
+
+function shakeAndGlowBox(boxElement) {
+    boxElement.classList.add('shake-attention', 'attention-glow');
+    
+    setTimeout(() => {
+        boxElement.classList.remove('shake-attention', 'attention-glow');
+    }, 3000);
+}
+
+async function animateAnalysisResults(problemDescription, nextLineCode, correctNextLineCode = null) {
+    // Add attention effects to boxes
+    const redBox = document.querySelector('.red-box');
+    const greenBox = document.querySelector('.green-box');
+    const violetBox = document.querySelector('.violet-box');
+    
+if (currentSession.condition === 1) {
+    // Shake both red and green boxes simultaneously
+    shakeAndGlowBox(redBox);
+    shakeAndGlowBox(greenBox);
+    
+    // Show problem description instantly
+    if (currentSession.problemDescription) {
+        try {
+            const parsedMarkdown = marked.parse(currentSession.problemDescription);
+            document.getElementById('problemDescriptionDisplay').innerHTML = parsedMarkdown;
+        } catch (e) {
+            document.getElementById('problemDescriptionDisplay').innerHTML = currentSession.problemDescription;
+        }
+    }
+    
+    // Display all content instantly and simultaneously
+    analysis.textContent = problemDescription;
+    document.getElementById('suggestionGuess').textContent = nextLineCode;
+    if (correctNextLineCode) {
+        document.getElementById('suggestionDesc').textContent = correctNextLineCode;
+    }
+    
+} else if (currentSession.condition === 2) {
+        // Shake red box
+        shakeAndGlowBox(redBox);
+        
+        // Display instantly
+        analysis.textContent = problemDescription;
+        document.getElementById('suggestionGuess').textContent = nextLineCode;
+        
+    } else if (currentSession.condition === 3) {
+        // Shake violet box
+        shakeAndGlowBox(violetBox);
+        
+        // Display instantly
+        document.getElementById('suggestionOnly').textContent = nextLineCode;
+    }
+    
+    // Add terminal notification
+    addTerminalOutput('AI analysis completed - new suggestions available in sidebar!', 'success');
+    }
+
+
+function showHistoryInline(type) {
+    const historyStartTime = Date.now();
+    
+    const isGuessHistory = type === 'guess';
+    const isDescHistory = type === 'desc';
+    const isSuggestionsHistory = type === 'suggestions';
+    
+    let history, targetElement, buttonElement, historyType;
+    
+    if (isGuessHistory) {
+        history = currentSession.guessHistory;
+        targetElement = document.getElementById('analysis');
+        buttonElement = document.getElementById('history-guess');
+        historyType = 'ai_history';
+    } else if (isDescHistory) {
+        history = currentSession.descHistory;
+        targetElement = document.getElementById('problemDescriptionDisplay');
+        buttonElement = document.getElementById('history-desc');
+        historyType = 'correct_history';
+    } else if (isSuggestionsHistory) {
+        history = currentSession.suggestionsHistory;
+        targetElement = document.getElementById('suggestionOnly');
+        buttonElement = document.getElementById('history-suggestions');
+        historyType = 'suggestions_history';
+    }
+        
+    const isShowingHistory = targetElement.getAttribute('data-showing-history') === 'true';
+    const action = isShowingHistory ? 'hide_history' : 'show_history';
+    
+    // Log with proper start/end timestamps
+    logActivity('history_interaction', {
+        start_time: new Date(historyStartTime).toISOString(),
+        end_time: new Date().toISOString(),
+        duration: Date.now() - historyStartTime,
+        history_type: historyType,
+        action: action,
+        entries_available: history.length
+    });
+        
+    if (isShowingHistory) {
+        // Switch back to current analysis
+        if (isGuessHistory) {
+            const currentAnalysis = currentSession.guessHistory.length > 0 ? 
+                currentSession.guessHistory[currentSession.guessHistory.length - 1].problemAnalysis : 
+                'Waiting for code...';
+            targetElement.textContent = currentAnalysis;
+        } else if (isDescHistory) {
+            if (currentSession.problemDescription) {
+                try {
+                    // FIXED: Added safety check for marked library
+                    if (typeof marked !== 'undefined' && marked.parse) {
+                        const parsedMarkdown = marked.parse(currentSession.problemDescription);
+                        targetElement.innerHTML = parsedMarkdown;
+                    } else {
+                        targetElement.innerHTML = currentSession.problemDescription;
+                    }
+                } catch (e) {
+                    console.error('Markdown parsing error:', e);
+                    targetElement.innerHTML = currentSession.problemDescription;
+                }
+            } else {
+                targetElement.innerHTML = 'Loading problem description...';
+            }
+        } else if (isSuggestionsHistory) {
+            const lastSuggestion = currentSession.suggestionsHistory.length > 0 ? 
+                currentSession.suggestionsHistory[currentSession.suggestionsHistory.length - 1].nextLine : 
+                'Start coding...';
+            targetElement.textContent = lastSuggestion;
+        }
+        targetElement.setAttribute('data-showing-history', 'false');
+        buttonElement.textContent = 'View History';
+    } else {
+        // Show history
+        let historyHTML = '';
+
+        if (history.length === 0) {
+            const activityText = isSuggestionsHistory ? "Start coding to see AI suggestions!" : "Start coding to see AI analysis!";
+            historyHTML = `
+                <div style="text-align: center; color: #888; font-style: italic; padding: 20px;">
+                    No history entries yet. ${activityText}
+                </div>
+            `;
+        } else {
+            historyHTML = `<div style="max-height: 300px; overflow-y: auto; font-size: 12px;">`;
+            
+            const entriesToShow = history.length;
+            for (let i = history.length - 1; i >= 0; i--) {
+                const entry = history[i];
+                const timeStr = new Date(entry.timestamp).toLocaleTimeString();
+                
+                if (isSuggestionsHistory) {
+                    historyHTML += `
+                        <div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 8px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <span style="color: #8b5cf6; font-weight: bold;">Suggestion #${i + 1}</span>
+                                <span style="color: #d1d5db; font-size: 10px; font-weight: 500;">${timeStr}</span>
+                            </div>
+                            <div style="background: #374151; padding: 6px 8px; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 12px; color: #f9fafb; border: 1px solid #8b5cf6;">
+                                <strong style="color: #a855f7;">Code:</strong> ${entry.nextLine}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    historyHTML += `
+                        <div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 8px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <span style="color: #569cd6; font-weight: bold;">Entry #${i + 1}</span>
+                                <span style="color: #888; font-size: 10px;">${timeStr}</span>
+                            </div>
+                            <div style="margin-bottom: 5px;">
+                                <strong style="color: #4ade80;">Analysis:</strong><br>
+                                <span style="color: #d4d4d4; line-height: 1.3;">${entry.problemAnalysis}</span>
+                            </div>
+                            <div style="background: #2d2d2d; padding: 4px 6px; border-radius: 3px; font-family: 'Consolas', monospace; font-size: 12px; color: #4ade80;">
+                                <strong>Suggestion:</strong> ${entry.nextLine}
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+            
+            if (history.length > 0) {
+                historyHTML += `<div style="text-align: center; color: #888; font-size: 10px; font-style: italic;">Showing all ${history.length} entries</div>`;
+            }
+            
+            historyHTML += `</div>`;
+        }
+                
+        targetElement.innerHTML = historyHTML;
+        targetElement.setAttribute('data-showing-history', 'true');
+        buttonElement.textContent = 'Hide History';
+    }
+}
+function insertSuggestion(type) {
+    if (!window.editor) {
+        addTerminalOutput('Editor not initialized', 'error');
+        return;
+    }
+
+    const suggestionStartTime = Date.now();
+    
+    // Determine suggestion source
+    let suggestionSource;
+    if (type === 'guess') {
+        suggestionSource = 'ai_guess';
+    } else if (type === 'desc') {
+        suggestionSource = 'correct_description';
+    } else if (type === 'suggestions') {
+        suggestionSource = 'ai_only';
+    }
+
+    currentSession.suggestionClickCount++;
+
+    let suggestionText = '';
+    if (type === 'guess') {
+        suggestionText = document.getElementById('suggestionGuess').textContent.trim();
+    } else if (type === 'desc') {
+        suggestionText = document.getElementById('suggestionDesc').textContent.trim();
+    } else if (type === 'suggestions') {
+        suggestionText = document.getElementById('suggestionOnly').textContent.trim();
+    }
+
+    const position = window.editor.getPosition();
+
+    if (!suggestionText || 
+        suggestionText.includes('Start coding...') || 
+        suggestionText.includes('Based on correct problem...') ||
+        suggestionText.includes('No suggestions available') ||
+        suggestionText.includes('spinner')) {
+        
+        // Log failed suggestion interaction
+        logActivity('suggestion_interaction', {
+            start_time: new Date(suggestionStartTime).toISOString(),
+            end_time: new Date().toISOString(),
+            duration: Date.now() - suggestionStartTime,
+            suggestion_type: type,
+            suggestion_source: suggestionSource,
+            suggestion_inserted: false,
+            rejection_reason: 'invalid_suggestion'
+        });
+        addTerminalOutput('No valid suggestion to insert', 'warning');
+        return;
+    }
+
+    const model = window.editor.getModel();
+    
+    const currentLineContent = model.getLineContent(position.lineNumber);
+    const currentIndentation = getCurrentIndentation(currentLineContent);
+    
+    const isAtEndOfLine = position.column > currentLineContent.length;
+    const needsNewLine = currentLineContent.trim() !== '' || !isAtEndOfLine;
+    
+    let textToInsert = needsNewLine ? '\n' + currentIndentation + suggestionText : suggestionText;
+    
+    if (!needsNewLine && position.column > 1 && !currentLineContent.endsWith(' ')) {
+        textToInsert = ' ' + textToInsert;
+    }
+
+    window.editor.executeEdits('copilot-suggestion', [{
+        range: {
+            startLineNumber: position.lineNumber,
+            startColumn: position.column,
+            endLineNumber: position.lineNumber,
+            endColumn: position.column
+        },
+        text: textToInsert
+    }]);
+
+    const insertedLines = textToInsert.split('\n');
+    const newLineNumber = position.lineNumber + insertedLines.length - 1;
+    const lastLine = insertedLines[insertedLines.length - 1];
+    const newColumn = insertedLines.length === 1 ? 
+        position.column + textToInsert.length : 
+        lastLine.length + 1;
+    
+    window.editor.setPosition({
+        lineNumber: newLineNumber,
+        column: newColumn
+    });
+    window.editor.focus();
+
+    if (suggestionText.includes('{') || suggestionText.includes('}') || suggestionText.includes(';')) {
+        setTimeout(() => {
+            window.editor.getAction('editor.action.formatDocument')?.run();
+        }, 100);
+    }
+
+// Log suggestion interaction with proper timestamps
+    logActivity('suggestion_interaction', {
+        start_time: new Date(suggestionStartTime).toISOString(),
+        end_time: new Date().toISOString(),
+        duration: Date.now() - suggestionStartTime,
+        suggestion_type: type,
+        suggestion_source: suggestionSource,
+        suggestion_inserted: true,
+        suggestion_content: suggestionText.substring(0, 50) + (suggestionText.length > 50 ? '...' : ''),
+        insertion_position: {line: position.lineNumber, column: position.column},
+        suggestion_length: suggestionText.length
+    });
+
+    const sourceType = type === 'guess' ? 'AI Problem Guess' : 
+                      type === 'desc' ? 'Problem Description' : 
+                      'AI Code Suggestions';
+    addTerminalOutput(`Inserted suggestion from ${sourceType}`, 'success');
+    const preview = suggestionText.split('\n')[0].substring(0, 40);
+    addTerminalOutput(`Code: ${preview}${suggestionText.length > 40 ? '...' : ''}`, 'info');
+}
+    function getCurrentIndentation(lineContent) {
+        const match = lineContent.match(/^(\s*)/);
+        return match ? match[1] : '';
+    }
+// ADD this function after the hideAIThinkingInBox function:
+function showAIThinking() {
+    // Show AI thinking animation in sidebar boxes only
+    if (currentSession.condition === 1) {
+        showAIThinkingInBox('guess');
+        showAIThinkingInBox('desc');
+    } else if (currentSession.condition === 2) {
+        showAIThinkingInBox('guess');
+    } else if (currentSession.condition === 3) {
+        showAIThinkingInBox('suggestions');
+    }
+    
+    // DON'T disable editor - let user continue typing
+}
+
+// ADD this function after the showAIThinking function:
+function hideAIThinking() {
+    // Hide AI thinking in sidebar boxes
+    hideAIThinkingInBox('guess');
+    hideAIThinkingInBox('desc'); 
+    hideAIThinkingInBox('suggestions');
+    
+    // DON'T re-enable editor since we never disabled it
+}
+
+// Survey Functions
+function loadSurveyConfig() {
+    // This will be loaded when the session is initialized
+    // For now, set default interval
+    surveyData.surveyInterval = 4;
+}
+
+function incrementAnalysisCount() {
+    surveyData.analysisCount++;
+    console.log(`Analysis count: ${surveyData.analysisCount}`);
+    
+    // OLD TRIGGER: Check if survey should be shown based on analysisCount
+    // This is now disabled in favor of suggestion-based triggers
+    // if (surveyData.analysisCount % surveyData.surveyInterval === 0 && 
+    //     !surveyData.pendingSurvey && 
+    //     !isSubmissionInProgress) {
+    //     showPeriodicSurvey();
+    // }
+
+    // NEW: Trigger periodic survey based on analysis (AI guess) count
+    try {
+        // call the unified check which will now use analysis count
+        checkSuggestionBasedPeriodicSurvey();
+    } catch (e) {
+        console.error('Error checking periodic survey after analysis increment:', e);
+    }
+}
+
+// NEW: Check if periodic survey should be shown based on suggestion clicks
+function checkSuggestionBasedPeriodicSurvey() {
+    // New behavior: periodic surveys are triggered by AI analyses (analysisCount)
+    if (!currentSession.periodicSurveyEnabled) {
+        console.log('Periodic surveys not enabled for this assignment');
+        return;
+    }
+
+    if (!currentSession.nextPeriodicSurveyAt) {
+        console.log('No periodic survey scheduled');
+        return;
+    }
+
+    if (surveyData.pendingSurvey || isSubmissionInProgress) {
+        console.log('Survey already pending or submission in progress');
+        return;
+    }
+
+    // Prefer the explicit analysis counter if available, otherwise fall back to guess history length
+    const totalAnalyses = (typeof surveyData.analysisCount === 'number' ? surveyData.analysisCount : (currentSession.guessHistory ? currentSession.guessHistory.length : 0)) || 0;
+
+    console.log(`Periodic Survey Check: ${totalAnalyses} AI analyses, next survey at ${currentSession.nextPeriodicSurveyAt}`);
+
+    if (totalAnalyses >= currentSession.nextPeriodicSurveyAt) {
+        console.log(`✅ Triggering periodic survey at ${totalAnalyses} AI analyses`);
+
+        // Update next survey trigger (use analyses count)
+        currentSession.nextPeriodicSurveyAt = totalAnalyses + currentSession.periodicSurveyInterval;
+        currentSession.periodicSurveysCompleted++;
+
+        console.log(`Next periodic survey scheduled at: ${currentSession.nextPeriodicSurveyAt} analyses`);
+
+        // Show the survey
+        showPeriodicSurvey();
+    }
+}
+
+function showPeriodicSurvey() {
+    if (surveyData.questions.length === 0) {
+        console.warn('No survey questions loaded');
+        return;
+    }
+    
+    // Increment occurrence counter
+    surveyData.periodicSurveyOccurrenceCount++;
+    
+    // CAPTURE AI HISTORY NOW (not later)
+    const aiHistorySnapshot = collectAIHistoryContext();
+    
+    // ACTIVITY LOG: Survey start
+    logActivity('survey_interaction', {
+        survey_type: 'periodic',
+        action: 'survey_started',
+        analysis_count_trigger: surveyData.analysisCount,
+        occurrence_number: surveyData.periodicSurveyOccurrenceCount
+    });
+    
+    surveyData.pendingSurvey = true;
+    blockEditor(true);
+    
+    // Generate survey HTML
+    const questionsHTML = generateSurveyHTML(surveyData.questions);
+    const historyHTML = generateAIHistoryDisplayHTML(aiHistorySnapshot);
+    
+    // Store snapshot for later use
+    surveyData.currentSurveyAISnapshot = aiHistorySnapshot;
+
+    document.getElementById('surveyQuestions').innerHTML = questionsHTML;
+    document.getElementById('surveyAIHistory').innerHTML = historyHTML;
+    
+    // Update header to show occurrence number
+    const surveyHeader = document.querySelector('#surveyModal .survey-header h2');
+    if (surveyHeader) {
+        surveyHeader.textContent = `Periodic Survey #${surveyData.periodicSurveyOccurrenceCount}`;
+    }
+    
+    const surveyDescription = document.querySelector('#surveyModal .survey-header p');
+    if (surveyDescription) {
+        surveyDescription.textContent = `Please rate your current experience with the AI assistant (Survey ${surveyData.periodicSurveyOccurrenceCount} of approximately ${Math.ceil(surveyData.analysisCount / surveyData.surveyInterval)} total)`;
+    }
+    
+    // Show modal
+    document.getElementById('surveyModal').classList.remove('hidden');
+    
+    // Add event listeners
+    setupSurveyEventListeners('surveyModal', 'submitSurvey', submitPeriodicSurvey);
+    
+    addTerminalOutput(`Survey ${Math.floor(surveyData.analysisCount / surveyData.surveyInterval)} appeared - please complete to continue coding`, 'info');
+}
+function showFinalSurvey() {
+    if (surveyData.questions.length === 0) {
+        console.warn('No survey questions loaded for final survey');
+        // If no questions, proceed with post-survey check
+        checkAndShowPostSurvey();
+        return;
+    }
+    
+    // Increment occurrence counter for final survey
+    surveyData.periodicSurveyOccurrenceCount++;
+    
+    // CAPTURE AI HISTORY NOW (not at submission time)
+    const aiHistorySnapshot = collectAIHistoryContext();
+    
+    // ACTIVITY LOG: Final survey start
+    logActivity('survey_interaction', {
+        survey_type: 'final_periodic',
+        action: 'survey_started',
+        occurrence_number: surveyData.periodicSurveyOccurrenceCount
+    });
+    
+    blockEditor(true);
+    
+    // Generate survey HTML
+    const questionsHTML = generateSurveyHTML(surveyData.questions);
+    const historyHTML = generateAIHistoryDisplayHTML(aiHistorySnapshot);
+    
+    // Store snapshot for later use
+    surveyData.currentSurveyAISnapshot = aiHistorySnapshot;
+
+    // REUSE the existing surveyModal (not a separate finalSurveyModal)
+    document.getElementById('surveyQuestions').innerHTML = questionsHTML;
+    document.getElementById('surveyAIHistory').innerHTML = historyHTML;
+    
+    // Update header to indicate it's the final survey
+    const surveyHeader = document.querySelector('#surveyModal .survey-header h2');
+    if (surveyHeader) {
+        surveyHeader.textContent = 'Final Survey Before Submission';
+    }
+    
+    const surveyNote = document.querySelector('#surveyModal .survey-note');
+    if (surveyNote) {
+        surveyNote.textContent = 'Complete this final survey to proceed with code submission.';
+    }
+    
+    // Show survey modal
+    document.getElementById('surveyModal').classList.remove('hidden');
+    
+    // Update submit button to call submitFinalSurvey instead
+    const submitButton = document.getElementById('submitSurvey');
+    submitButton.onclick = submitFinalSurvey;
+    
+    // Add change listeners
+    document.getElementById('surveyQuestions').querySelectorAll('input[type="radio"]').forEach(radio => {
+        radio.addEventListener('change', () => {
+            const totalQuestions = surveyData.questions.length;
+            const answeredQuestions = document.getElementById('surveyQuestions').querySelectorAll('input[type="radio"]:checked').length;
+            submitButton.disabled = answeredQuestions < totalQuestions;
+        });
+    });
+    
+    // Initial check
+    submitButton.disabled = true;
+    
+    addTerminalOutput('Please complete the final survey before submitting your code', 'info');
+}
+function generateSurveyHTML(questions) {
+    return questions.map((question, index) => `
+        <div class="survey-question">
+            <div class="survey-question-text">Q${index + 1}: ${question}</div>
+            <div class="likert-scale">
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_1" name="question_${index}" value="1">
+                    <label for="q${index}_1">Not at<br>all</label>
+                </div>
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_2" name="question_${index}" value="2">
+                    <label for="q${index}_2">Slightly</label>
+                </div>
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_3" name="question_${index}" value="3">
+                    <label for="q${index}_3">Somewhat</label>
+                </div>
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_4" name="question_${index}" value="4">
+                    <label for="q${index}_4">Moderately</label>
+                </div>
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_5" name="question_${index}" value="5">
+                    <label for="q${index}_5">Very</label>
+                </div>
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_6" name="question_${index}" value="6">
+                    <label for="q${index}_6">Quite</label>
+                </div>
+                <div class="likert-option">
+                    <input type="radio" id="q${index}_7" name="question_${index}" value="7">
+                    <label for="q${index}_7">Extremely</label>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function generateAIHistoryDisplayHTML(aiHistoryContext) {
+    const condition = currentSession.condition;
+    
+    if (!aiHistoryContext || !aiHistoryContext.ai_guess_history || aiHistoryContext.ai_guess_history.length === 0) {
+        const conditionText = condition === 1 ? "AI analysis and correct descriptions" : 
+                             condition === 2 ? "AI analysis" : 
+                             "AI code suggestions";
+        return `
+            <div class="ai-history-section">
+                <h3 style="color: #569cd6; margin-bottom: 15px;">AI Interaction History</h3>
+                <div style="background: #2d2d2d; padding: 15px; border-radius: 6px; margin-bottom: 20px; color: #888; text-align: center;">
+                    No AI interactions recorded yet. Start coding to see ${conditionText}.
+                </div>
+            </div>
+        `;
+    }
+    
+    let historyTitle = "AI Interaction History";
+    if (condition === 1) {
+        historyTitle = "AI Analysis & Correct Descriptions";
+    } else if (condition === 2) {
+        historyTitle = "AI Problem Analysis";
+    } else if (condition === 3) {
+        historyTitle = "AI Code Suggestions";
+    }
+    
+    let historyHTML = `
+        <div class="ai-history-section">
+            <h3 style="color: #569cd6; margin-bottom: 15px;">${historyTitle} (${aiHistoryContext.ai_guess_history.length} analyses)</h3>
+            <div style="background: #2d2d2d; padding: 15px; border-radius: 6px; margin-bottom: 20px; flex: 1; overflow-y: auto;">
+    `;
+    
+    // CONDITION 1: Show AI analysis + correct descriptions
+    if (condition === 1) {
+        const recentInteractions = aiHistoryContext.ai_guess_history.slice(-5);
+        
+        // Show AI Problem Guess
+        historyHTML += `<h4 style="color: #f97316; font-size: 12px; margin-bottom: 10px;">AI Problem Guess (Last 5)</h4>`;
+        recentInteractions.forEach((interaction, index) => {
+            const timeStr = new Date(interaction.timestamp).toLocaleTimeString();
+            const analysisNumber = aiHistoryContext.ai_guess_history.length - recentInteractions.length + index + 1;
+            
+            historyHTML += `
+                <div style="border-bottom: 1px solid #444; padding: 8px 0; margin-bottom: 8px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                        <span style="color: #f97316; font-weight: bold; font-size: 11px;">Analysis #${analysisNumber}</span>
+                        <span style="color: #888; font-size: 10px;">${timeStr}</span>
+                    </div>
+                    <div style="margin-bottom: 5px;">
+                        <strong style="color: #f97316; font-size: 10px;">Problem:</strong><br>
+                        <span style="color: #d4d4d4; font-size: 10px; line-height: 1.3;">${interaction.problem_analysis}</span>
+                    </div>
+                    <div style="background: #2d1b0e; padding: 4px 6px; border-radius: 3px; border-left: 3px solid #f97316;">
+                        <span style="font-family: 'Consolas', monospace; font-size: 10px; color: #fbbf24;">${interaction.next_line_suggestion}</span>
+                    </div>
+                </div>
+            `;
+        });
+        
+        // Show Correct Description Suggestions
+        if (aiHistoryContext.correct_description_history && aiHistoryContext.correct_description_history.length > 0) {
+            historyHTML += `
+                <div style="border-top: 2px solid #22c55e; margin-top: 15px; padding-top: 15px;">
+                    <h4 style="color: #22c55e; font-size: 12px; margin-bottom: 10px;">Correct Problem Suggestions (Last 5)</h4>
+            `;
+            
+            const recentCorrect = aiHistoryContext.correct_description_history.slice(-5);
+            recentCorrect.forEach((interaction, index) => {
+                const timeStr = new Date(interaction.timestamp).toLocaleTimeString();
+                const analysisNumber = aiHistoryContext.correct_description_history.length - recentCorrect.length + index + 1;
+                
+                historyHTML += `
+                    <div style="border-bottom: 1px solid #333; padding: 8px 0; margin-bottom: 8px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span style="color: #22c55e; font-weight: bold; font-size: 11px;">Correct #${analysisNumber}</span>
+                            <span style="color: #888; font-size: 10px;">${timeStr}</span>
+                        </div>
+                        <div style="background: #0e2f1e; padding: 4px 6px; border-radius: 3px; border-left: 3px solid #22c55e;">
+                            <span style="font-family: 'Consolas', monospace; font-size: 10px; color: #4ade80;">${interaction.next_line_suggestion}</span>
+                        </div>
+                    </div>
+                `;
+            });
+            historyHTML += `</div>`;
+        }
+    }
+    
+    // CONDITION 2: Show only AI problem analysis
+    else if (condition === 2) {
+        const recentInteractions = aiHistoryContext.ai_guess_history.slice(-5);
+        
+        recentInteractions.forEach((interaction, index) => {
+            const timeStr = new Date(interaction.timestamp).toLocaleTimeString();
+            const analysisNumber = aiHistoryContext.ai_guess_history.length - recentInteractions.length + index + 1;
+            
+            historyHTML += `
+                <div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="color: #f97316; font-weight: bold; font-size: 12px;">Analysis #${analysisNumber}</span>
+                        <span style="color: #888; font-size: 10px;">${timeStr}</span>
+                    </div>
+                    <div style="margin-bottom: 8px;">
+                        <strong style="color: #4ade80; font-size: 11px;">Problem Analysis:</strong><br>
+                        <span style="color: #d4d4d4; font-size: 11px; line-height: 1.3;">${interaction.problem_analysis}</span>
+                    </div>
+                    <div style="background: #1e1e1e; padding: 6px 8px; border-radius: 4px; border-left: 3px solid #f97316;">
+                        <strong style="color: #f97316; font-size: 11px;">Suggestion:</strong> 
+                        <span style="font-family: 'Consolas', monospace; font-size: 11px; color: #fbbf24;">${interaction.next_line_suggestion}</span>
+                    </div>
+                </div>
+            `;
+        });
+    }
+    
+    // CONDITION 3: Show only AI code suggestions (no problem analysis)
+    else if (condition === 3) {
+        if (aiHistoryContext.suggestions_only_history && aiHistoryContext.suggestions_only_history.length > 0) {
+            const recentSuggestions = aiHistoryContext.suggestions_only_history.slice(-5);
+            
+            recentSuggestions.forEach((interaction, index) => {
+                const timeStr = new Date(interaction.timestamp).toLocaleTimeString();
+                const analysisNumber = aiHistoryContext.suggestions_only_history.length - recentSuggestions.length + index + 1;
+                
+                historyHTML += `
+                    <div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <span style="color: #8b5cf6; font-weight: bold; font-size: 12px;">Suggestion #${analysisNumber}</span>
+                            <span style="color: #888; font-size: 10px;">${timeStr}</span>
+                        </div>
+                        <div style="background: #2d1b69; padding: 6px 8px; border-radius: 4px; border-left: 3px solid #8b5cf6;">
+                            <span style="font-family: 'Consolas', monospace; font-size: 11px; color: #e9d5ff;">${interaction.next_line_suggestion}</span>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+    }
+    
+    // Show count information
+    const totalCount = condition === 3 ? 
+        (aiHistoryContext.suggestions_only_history?.length || 0) : 
+        aiHistoryContext.ai_guess_history.length;
+    const showingCount = 5;
+    
+    if (totalCount > showingCount) {
+        historyHTML += `
+            <div style="text-align: center; margin-top: 10px; padding-top: 10px; border-top: 1px solid #444;">
+                <span style="color: #888; font-size: 10px; font-style: italic;">
+                    Showing last ${Math.min(showingCount, totalCount)} of ${totalCount} total ${condition === 3 ? 'suggestions' : 'analyses'}
+                </span>
+            </div>
+        `;
+    }
+    
+    historyHTML += `
+            </div>
+        </div>
+    `;
+    
+    return historyHTML;
+}
+
+
+function setupSurveyEventListeners(modalId, submitButtonId, submitFunction) {
+    const modal = document.getElementById(modalId);
+    const submitButton = document.getElementById(submitButtonId);
+    
+    // Handle both periodic and final survey modals
+    const questionsPanelId = modalId === 'surveyModal' ? 'surveyQuestions' : 'finalSurveyQuestions';
+    const questionsPanel = document.getElementById(questionsPanelId);
+    
+    // Check if all questions are answered
+    function checkSurveyCompletion() {
+        const totalQuestions = surveyData.questions.length;
+        const answeredQuestions = questionsPanel.querySelectorAll('input[type="radio"]:checked').length;
+        
+        submitButton.disabled = answeredQuestions < totalQuestions;
+    }
+    
+    // Add change listeners to all radio buttons in the questions panel
+    questionsPanel.querySelectorAll('input[type="radio"]').forEach(radio => {
+        radio.addEventListener('change', checkSurveyCompletion);
+    });
+    
+    // Submit button listener
+    submitButton.onclick = submitFunction;
+    
+    // Initial check
+    checkSurveyCompletion();
+}
+
+async function submitPeriodicSurvey() {
+    console.log('=== PERIODIC SURVEY SUBMISSION START ===');
+    const responses = collectSurveyResponses('surveyModal');
+    
+    console.log('Responses collected:', responses.length, 'of', surveyData.questions.length);
+    
+    if (responses.length !== surveyData.questions.length) {
+        alert('Please answer all questions before submitting.');
+        console.error('Incomplete survey - missing answers');
+        return;
+    }
+    
+    try {
+        console.log('Saving survey responses to backend...');
+        await saveSurveyResponses(responses, 'periodic');
+        
+        // Use the AI snapshot captured when survey was shown
+        const aiSnapshot = surveyData.currentSurveyAISnapshot || collectAIHistoryContext();
+        
+        const surveyEntry = {
+            occurrence: surveyData.periodicSurveyOccurrenceCount,
+            timestamp: new Date().toISOString(),
+            analysisCount: surveyData.analysisCount,
+            responses: responses,
+            ai_history_at_survey: aiSnapshot
+        };
+        
+        console.log('Adding survey to array:', surveyEntry);
+        surveyData.surveyResponses.push(surveyEntry);
+        
+        // ✅ NEW: Save to sessionStorage immediately
+        savePeriodicSurveysToStorage();
+        
+        console.log('Total periodic surveys now:', surveyData.surveyResponses.length);
+        
+        // Clear the snapshot
+        surveyData.currentSurveyAISnapshot = null;
+        
+        document.getElementById('surveyModal').classList.add('hidden');
+        blockEditor(false);
+        surveyData.pendingSurvey = false;
+        
+        // ACTIVITY LOG: Survey completed with AI history
+        logActivity('survey_interaction', {
+            survey_type: 'periodic',
+            action: 'survey_completed',
+            responses_count: responses.length,
+            ai_history_included: true,
+            ai_analyses_at_survey: surveyData.analysisCount,
+            occurrence_number: surveyData.periodicSurveyOccurrenceCount
+        });
+        
+        const aiHistoryCount = currentSession.guessHistory.length;
+        addTerminalOutput('Survey completed successfully - you can continue coding!', 'success');
+        addTerminalOutput(`AI History: ${aiHistoryCount} analyses captured with survey`, 'info');
+        
+        console.log('=== PERIODIC SURVEY SUBMISSION SUCCESS ===');
+        
+    } catch (error) {
+        console.error('Survey submission error:', error);
+        console.error('Error stack:', error.stack);
+        addTerminalOutput('Survey submission failed - please try again', 'error');
+        alert('Survey submission failed. Please try again or contact support.');
+    }
+}
+
+async function submitFinalSurvey() {
+    const modal = document.getElementById('surveyModal');
+    const responses = [];
+    
+    for (let i = 0; i < surveyData.questions.length; i++) {
+        const checkedRadio = modal.querySelector(`input[name="question_${i}"]:checked`);
+        if (checkedRadio) {
+            responses.push({
+                question: surveyData.questions[i],
+                response: parseInt(checkedRadio.value)
+            });
+        }
+    }
+    
+    if (responses.length !== surveyData.questions.length) {
+        alert('Please answer all questions before submitting.');
+        return;
+    }
+    
+    try {
+        // Use the AI snapshot captured when survey was shown
+        const finalAISnapshot = surveyData.currentSurveyAISnapshot || collectAIHistoryContext();
+        
+        await saveSurveyResponses(responses, 'final');
+        
+        // MERGE into periodic surveys array (not separate finalSurveyResponse)
+        surveyData.surveyResponses.push({
+            occurrence: surveyData.periodicSurveyOccurrenceCount,
+            timestamp: new Date().toISOString(),
+            analysisCount: surveyData.analysisCount,
+            responses: responses,
+            ai_history_at_survey: finalAISnapshot,
+            is_final: true,
+            triggered_at_submission: true
+        });
+        
+        // Also set finalSurveyResponse for backward compatibility
+        surveyData.finalSurveyResponse = {
+            timestamp: new Date().toISOString(),
+            responses: responses
+        };
+        
+        // ✅ Save to sessionStorage before navigating away
+        savePeriodicSurveysToStorage();
+        
+        // Hide the modal
+        document.getElementById('surveyModal').classList.add('hidden');
+        
+        // ACTIVITY LOG: Final survey completed with AI history
+        logActivity('survey_interaction', {
+            survey_type: 'final_periodic',
+            action: 'survey_completed',
+            responses_count: responses.length,
+            ai_history_included: true,
+            total_session_analyses: surveyData.analysisCount
+        });
+        
+        const aiHistoryCount = currentSession.guessHistory.length;
+        addTerminalOutput('Final periodic survey completed!', 'success');
+        addTerminalOutput(`Final AI History: ${aiHistoryCount} total analyses captured`, 'info');
+        
+        // Check for post-survey (file already downloaded before this survey)
+        await checkAndShowPostSurvey();
+        
+    } catch (error) {
+        console.error('Final survey submission error:', error);
+        addTerminalOutput('Final survey submission failed - please try again', 'error');
+        blockEditor(false);
+    }
+}
+
+function downloadCodeFile() {
+    try {
+        const code = window.editor.getValue();
+        if (!code || code.trim().length === 0) {
+            console.warn('No code to download');
+            return false;
+        }
+        
+        // Determine file extension based on programming language
+        const languageExtensions = {
+            'javascript': '.js',
+            'python': '.py',
+            'c': '.c',
+            'cpp': '.cpp',
+            'java': '.java',
+            'csharp': '.cs',
+            'html': '.html',
+            'css': '.css',
+            'sql': '.sql'
+        };
+        
+        const language = currentSession.programmingLanguage || 'javascript';
+        const extension = languageExtensions[language] || '.txt';
+        
+        // Create filename with user and assignment info
+        const fileName = `${currentSession.userId}_${currentSession.assignmentKey}_code${extension}`;
+        
+        // Create blob and download
+        const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        
+        // Trigger download
+        document.body.appendChild(link);
+        link.click();
+        
+        // Cleanup
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        console.log(`✅ Code downloaded as: ${fileName}`);
+        addTerminalOutput(`✅ Code downloaded as: ${fileName}`, 'success');
+        
+        // Log the download activity
+        logActivity('code_download', {
+            file_name: fileName,
+            language: language,
+            code_length: code.length,
+            download_trigger: 'final_survey_completion'
+        });
+        
+        return true;
+    } catch (error) {
+        console.error('❌ Code download failed:', error);
+        addTerminalOutput('⚠️ Code download failed, but submission will continue', 'warning');
+        return false;
+    }
+}
+
+function collectSurveyResponses(modalId) {
+    const modal = document.getElementById(modalId);
+    const responses = [];
+    
+    for (let i = 0; i < surveyData.questions.length; i++) {
+        const checkedRadio = modal.querySelector(`input[name="question_${i}"]:checked`);
+        if (checkedRadio) {
+            responses.push({
+                question: surveyData.questions[i],
+                response: parseInt(checkedRadio.value)
+            });
+        }
+    }
+    
+    return responses;
+}
+
+
+// Add this function to collect AI history context
+function collectAIHistoryContext() {
+    const context = {
+        condition: currentSession.condition,
+        timestamp: new Date().toISOString(),
+        total_analyses: surveyData.analysisCount,
+        ai_guess_history: currentSession.guessHistory.map(entry => ({
+            timestamp: entry.timestamp,
+            problem_analysis: entry.problemAnalysis,
+            next_line_suggestion: entry.nextLine
+        }))
+    };
+    
+    // Add condition-specific history
+    if (currentSession.condition === 1 && currentSession.descHistory) {
+        context.correct_description_history = currentSession.descHistory.map(entry => ({
+            timestamp: entry.timestamp,
+            problem_analysis: entry.problemAnalysis,
+            next_line_suggestion: entry.nextLine
+        }));
+    } else if (currentSession.condition === 3 && currentSession.suggestionsHistory) {
+        context.suggestions_only_history = currentSession.suggestionsHistory.map(entry => ({
+            timestamp: entry.timestamp,
+            next_line_suggestion: entry.nextLine
+        }));
+    }
+    
+    return context;
+}
+
+async function saveSurveyResponses(responses, surveyType) {
+    try {
+        const aiHistoryContext = collectAIHistoryContext();
+        
+        const response = await fetch('/submit-survey', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                user_id: currentSession.userId,
+                session_id: currentSession.sessionId,
+                assignment_key: currentSession.assignmentKey,
+                survey_type: surveyType,
+                responses: responses,
+                analysis_count: surveyData.analysisCount,
+                timestamp: new Date().toISOString(),
+                ai_history_context: aiHistoryContext  // NEW: Include AI history
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Survey submission failed: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        console.log('Survey with AI history saved successfully:', result);
+        
+        // Log the AI history capture
+        logActivity('survey_ai_history_captured', {
+            survey_type: surveyType,
+            ai_entries_captured: aiHistoryContext.ai_guess_history.length,
+            condition_specific_entries: aiHistoryContext.correct_description_history?.length || 
+                                       aiHistoryContext.suggestions_only_history?.length || 0
+        });
+        
+    } catch (error) {
+        console.error('Error saving survey with AI history:', error);
+        throw error;
+    }
+}
+
+function blockEditor(block) {
+    const editorContainer = document.getElementById('editor');
+    
+    if (block) {
+        editorContainer.classList.add('editor-blocked');
+        
+        // Add overlay if not exists
+        if (!document.getElementById('editorBlockOverlay')) {
+            const overlay = document.createElement('div');
+            overlay.id = 'editorBlockOverlay';
+            overlay.className = 'editor-block-overlay';
+            overlay.innerHTML = '⚠️<br>Complete the survey to continue coding';
+            editorContainer.appendChild(overlay);
+        }
+        
+        // Disable Monaco editor
+        if (window.editor) {
+            window.editor.updateOptions({ readOnly: true });
+        }
+    } else {
+        editorContainer.classList.remove('editor-blocked');
+        
+        // Remove overlay
+        const overlay = document.getElementById('editorBlockOverlay');
+        if (overlay) {
+            overlay.remove();
+        }
+        
+        // Re-enable Monaco editor
+        if (window.editor) {
+            window.editor.updateOptions({ readOnly: false });
+            window.editor.focus();
+        }
+    }
+}
+
+// Store original submit function
+let originalSubmitToDatabase = null;
+
+
+
+
+async function loadSurveyQuestions() {
+    try {
+        const response = await fetch('/survey-config', {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        if (response.ok) {
+            const config = await response.json();
+            surveyData.questions = config.questions;
+            surveyData.surveyInterval = config.feedback_interval;
+            console.log('Survey config loaded:', config);
+        } else {
+            console.warn('Failed to load survey config, using defaults');
+            surveyData.questions = [
+                "I trust the AI's responses.",
+                "I am confident in the AI's responses.", 
+                "I am suspicious of the AI's intentions.",
+                "The AI's responses are consistent."
+            ];
+        }
+    } catch (error) {
+        console.error('Error loading survey config:', error);
+        // Use default questions
+        surveyData.questions = [
+            "I trust the AI's responses.",
+            "I am confident in the AI's responses.", 
+            "I am suspicious of the AI's intentions.",
+            "The AI's responses are consistent."
+        ];
+    }
+}
+
+   // Font size controls
+   const increaseFontBtn = document.getElementById('increaseFontBtn');
+   const decreaseFontBtn = document.getElementById('decreaseFontBtn');
+   const fontSizeDisplay = document.getElementById('fontSizeDisplay');
+
+   function updateFontSize(newSize) {
+       currentFontSize = Math.max(minFontSize, Math.min(maxFontSize, newSize));
+       fontSizeDisplay.textContent = `${currentFontSize}px`;
+       
+       if (window.editor) {
+           window.editor.updateOptions({
+               fontSize: currentFontSize
+           });
+       }
+
+       const terminalOutput = document.getElementById('terminalOutput');
+       if (terminalOutput) {
+           terminalOutput.style.fontSize = `${currentFontSize}px`;
+       }
+
+       decreaseFontBtn.disabled = currentFontSize <= minFontSize;
+       increaseFontBtn.disabled = currentFontSize >= maxFontSize;
+   }
+
+function increaseFontSize() {
+    const oldSize = currentFontSize;
+    updateFontSize(currentFontSize + 1);
+    
+    // ACTIVITY LOG: Font size change
+    logActivity('font_size_change', {
+        action: 'increase',
+        from_size: oldSize,
+        to_size: currentFontSize,
+        trigger: 'button_click'
+    });
+    
+    addTerminalOutput(`Font size increased to ${currentFontSize}px`, 'info');
+}
+
+function decreaseFontSize() {
+    const oldSize = currentFontSize;
+    updateFontSize(currentFontSize - 1);
+    
+    // ACTIVITY LOG: Font size change
+    logActivity('font_size_change', {
+        action: 'decrease',
+        from_size: oldSize,
+        to_size: currentFontSize,
+        trigger: 'button_click'
+    });
+    
+    addTerminalOutput(`Font size decreased to ${currentFontSize}px`, 'info');
+}
+
+   // Terminal and execution functionality
+   const runButton = document.getElementById("runButton");
+   const clearButton = document.getElementById("clearButton");
+   const submitButton = document.getElementById("submitButton");
+   const logoutBtn = document.getElementById("logoutBtn");
+   
+   let isRunning = false;
+
+async function executeCode() {
+    if (isRunning) return;
+    
+    const executionStartTime = Date.now();
+    currentSession.compilerClickCount++;
+    
+    const code = window.editor.getValue();
+    if (!code) {
+        logActivity('code_execution', {
+            start_time: new Date(executionStartTime).toISOString(),
+            end_time: new Date().toISOString(),
+            duration: Date.now() - executionStartTime,
+            execution_trigger: 'run_button',
+            execution_result: 'no_code',
+            output_summary: 'No code to execute',
+            error_message: 'No code provided'
+        });
+        addTerminalOutput('No code to execute. Please write some code first.', 'warning');
+        return;
+    }
+    
+    isRunning = true;
+    runButton.disabled = true;
+    runButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Running...</div>';
+
+    try {
+        let executionResult, outputSummary, errorMessage = '';
+        
+        if (currentSession.programmingLanguage === 'javascript') {
+            const result = await executeJavaScriptInBrowser(code);
+            executionResult = result.success ? 'success' : 'error';
+            outputSummary = result.output || 'No output';
+            errorMessage = result.error || '';
+        } else if (currentSession.programmingLanguage === 'python') {
+            const result = await executeOnBackend(code, 'python');
+            executionResult = result.success ? 'success' : 'error';
+            outputSummary = result.output || 'No output';
+            errorMessage = result.error || '';
+        } else if (currentSession.programmingLanguage === 'c') {
+            const result = await executeOnBackend(code, 'c');
+            executionResult = result.success ? 'success' : 'error';
+            outputSummary = result.output || 'No output';
+            errorMessage = result.error || '';
+        } else {
+            executionResult = 'unsupported';
+            outputSummary = `${currentSession.programmingLanguage} execution not supported yet`;
+            errorMessage = 'Language not supported';
+            addTerminalOutput(outputSummary, 'warning');
+        }
+        
+        const executionEndTime = Date.now();
+        logActivity('code_execution', {
+            start_time: new Date(executionStartTime).toISOString(),
+            end_time: new Date(executionEndTime).toISOString(),
+            duration: executionEndTime - executionStartTime,
+            execution_trigger: 'run_button',
+            code_length: code.length,
+            execution_number: currentSession.compilerClickCount,
+            execution_result: executionResult,
+            output_summary: outputSummary.substring(0, 100) + (outputSummary.length > 100 ? '...' : ''),
+            error_message: errorMessage.substring(0, 100) + (errorMessage.length > 100 ? '...' : '')
+        });
+        
+    } catch (error) {
+        console.error('Execution error:', error);
+        logActivity('code_execution', {
+            start_time: new Date(executionStartTime).toISOString(),
+            end_time: new Date().toISOString(),
+            duration: Date.now() - executionStartTime,
+            execution_trigger: 'run_button',
+            code_length: code.length,
+            execution_number: currentSession.compilerClickCount,
+            execution_result: 'error',
+            output_summary: 'Execution failed',
+            error_message: error.message
+        });
+        addTerminalOutput('Execution failed:', 'error');
+        addTerminalOutput(error.message, 'error');
+    } finally {
+        isRunning = false;
+        runButton.disabled = false;
+        runButton.innerHTML = 'Run';
+    }
+}
+
+
+async function executeJavaScriptInBrowser(code) {
+    const originalLog = console.log;
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    
+    let executionSuccess = true;
+    let executionOutput = '';
+    let executionError = '';
+    
+    console.log = function(...args) {
+        originalLog.apply(this, args);
+        const output = args.join(' ');
+        executionOutput += output + '\n';
+        addTerminalOutput(output);
+    };
+    
+    console.error = function(...args) {
+        originalError.apply(this, args);
+        const error = args.join(' ');
+        executionError += error + '\n';
+        addTerminalOutput(error, 'error');
+    };
+    
+    console.warn = function(...args) {
+        originalWarn.apply(this, args);
+        const warning = args.join(' ');
+        executionOutput += 'Warning: ' + warning + '\n';
+        addTerminalOutput(warning, 'warning');
+    };
+
+    try {
+        const canvas = document.createElement("canvas");
+        addTerminalOutput(`Running JavaScript...`, 'prompt');
+        const startTime = Date.now();
+
+        const run = new Function(["canvas"], code);
+        run(canvas);
+
+        const executionTime = Date.now() - startTime;
+        
+        addTerminalOutput(`Process finished (${executionTime}ms)`, 'execution-time');
+        addTerminalOutput(`Ready for more code!`, 'prompt');
+        
+        return {
+            success: true,
+            output: executionOutput,
+            error: executionError
+        };
+        
+    } catch (error) {
+        executionSuccess = false;
+        executionError += error.message;
+        
+        addTerminalOutput('JavaScript error:', 'error');
+        addTerminalOutput(error.message, 'error');
+        
+        return {
+            success: false,
+            output: executionOutput,
+            error: executionError
+        };
+        
+    } finally {
+        console.log = originalLog;
+        console.error = originalError;
+        console.warn = originalWarn;
+    }
+}
+async function executeOnBackend(code, language) {
+    try {
+        addTerminalOutput(`Running ${language} on server...`, 'prompt');
+        const startTime = Date.now();
+        
+        const response = await fetch('/execute', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                code: code,
+                language: language,
+                user_id: currentSession.userId,
+                session_id: currentSession.sessionId
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Server error: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        const finishTime = Date.now();
+        const executionTime = finishTime - startTime;
+        
+        if (result.success) {
+            if (result.output) {
+                addTerminalOutput('Output:', 'success');
+                result.output.split('\n').forEach(line => {
+                    if (line.trim()) {
+                        addTerminalOutput(line, 'normal');
+                    }
+                });
+            }
+            if (result.error) {
+                addTerminalOutput('Warnings:', 'warning');
+                addTerminalOutput(result.error, 'warning');
+            }
+            addTerminalOutput(`${language} execution completed (${executionTime}ms)`, 'execution-time');
+        } else {
+            addTerminalOutput(`${language} error:`, 'error');
+            addTerminalOutput(result.error, 'error');
+            if (result.output) {
+                addTerminalOutput('Output before error:', 'info');
+                addTerminalOutput(result.output, 'normal');
+            }
+        }
+        
+        addTerminalOutput(`Ready for more code!`, 'prompt');
+        
+        return {
+            success: result.success,
+            output: result.output || '',
+            error: result.error || ''
+        };
+        
+    } catch (error) {
+        addTerminalOutput('Network/Server error:', 'error');
+        addTerminalOutput(error.message, 'error');
+        
+        return {
+            success: false,
+            output: '',
+            error: error.message
+        };
+    }
+}
+
+async function submitToDatabase() {
+    if (!currentSession.sessionId) {
+        addTerminalOutput('No active session to submit', 'error');
+        return;
+    }
+
+    const code = window.editor.getValue();
+    if (!code.trim()) {
+        addTerminalOutput('No code to submit. Please write some code first.', 'warning');
+        return;
+    }
+
+    // Check for pending survey before submission
+    if (surveyData.pendingSurvey) {
+        addTerminalOutput('⚠️ Please complete the pending survey before submitting code', 'warning');
+        alert('Please complete the pending survey before submitting your code.');
+        return;
+    }
+
+    console.log('=== CODE SUBMISSION START ===');
+    
+    // ✅ CRITICAL FIX: Capture ALL data RIGHT NOW before any redirects
+    const capturedData = captureAllSubmissionData();
+    if (!capturedData) {
+        addTerminalOutput('❌ Failed to capture submission data', 'error');
+        alert('Error preparing submission. Please try again.');
+        return;
+    }
+    
+    addTerminalOutput('✅ Code and session data captured successfully', 'success');
+    addTerminalOutput(`   Code: ${capturedData.code.length} characters, ${capturedData.lineCount} lines`, 'info');
+    addTerminalOutput(`   Activity logs: ${capturedData.activity.allActivityLogs.length} entries`, 'info');
+
+    const confirmSubmit = confirm(
+        'IMPORTANT: Submitting your code will automatically log you out of this session.\n\n' +
+        'You will need to start a new session with your credentials to continue coding.\n\n' +
+        'Are you sure you want to submit and logout?'
+    );
+
+    if (!confirmSubmit) {
+        addTerminalOutput('Submission cancelled by user', 'warning');
+        // Clear the cache since user cancelled
+        clearCachedSubmissionData();
+        return;
+    }
+
+    // Set submission flag to prevent any periodic surveys during submission process
+    isSubmissionInProgress = true;
+
+    // ✅ DOWNLOAD CODE FILE FIRST (before any surveys)
+    addTerminalOutput('📥 Downloading your code...', 'info');
+    const downloadSuccess = downloadCodeFile();
+    
+    if (downloadSuccess) {
+        addTerminalOutput('✅ Code file downloaded successfully!', 'success');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    } else {
+        addTerminalOutput('⚠️ Code download encountered an issue, but submission will continue', 'warning');
+    }
+
+    // Check if final periodic survey is needed
+    console.log('🔍 Final Survey Check:', {
+        hasQuestions: surveyData.questions.length > 0,
+        alreadyCompleted: !!surveyData.finalSurveyResponse,
+        disabled: currentSession.finalSurveyDisabled,
+        willShow: surveyData.questions.length > 0 && !surveyData.finalSurveyResponse && !currentSession.finalSurveyDisabled
+    });
+    
+    if (surveyData.questions.length > 0 && 
+        !surveyData.finalSurveyResponse && 
+        !currentSession.finalSurveyDisabled) {
+        addTerminalOutput('📋 Final periodic survey required before submission...', 'info');
+        showFinalSurvey();
+        return; // Will continue after final survey
+    } else if (currentSession.finalSurveyDisabled) {
+        addTerminalOutput('✅ Final periodic survey skipped (disabled for this assignment)', 'success');
+        console.log('✅ Skipping final survey - disabled by configuration');
+    }
+    
+    // Check for post-survey
+    await checkAndShowPostSurvey();
+}
+// NEW FUNCTION: Check and show post survey if needed
+async function checkAndShowPostSurvey() {
+    const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
+    
+    if (authData.hasPostSurvey) {
+        try {
+            const statusResponse = await fetch(`/survey-status/${currentSession.sessionId}`);
+            if (statusResponse.ok) {
+                const statusData = await statusResponse.json();
+                
+                if (statusData.post_survey_status !== 'completed') {
+                    // Post-survey required but not completed - redirect to survey page
+                    addTerminalOutput('⚠️ Post-survey required before code submission!', 'warning');
+                    addTerminalOutput('Redirecting to post-survey...', 'info');
+                    
+                    // Mark that we're in submission flow
+                    sessionStorage.setItem('postSurveySubmissionPending', 'true');
+                    
+                    // Get session parameters for redirect
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const sessionToken = urlParams.get('session');
+                    const userId = urlParams.get('user');
+                    
+                    // Redirect to survey page with session preserved
+                    setTimeout(() => {
+                        allowNavigation = true;  // Allow navigation without warning
+                        window.location.href = `/survey.html?type=post&session=${sessionToken}&user=${encodeURIComponent(userId)}`;
+                    }, 1500);
+                    return;
+                }
+            }
+        } catch (error) {
+            console.error('Error checking survey status:', error);
+            addTerminalOutput('⚠️ Could not verify post-survey status, proceeding with submission', 'warning');
+            // Continue with submission if check fails (fallback)
+        }
+    }
+    
+    // No post survey needed or already completed, proceed with submission
+    addTerminalOutput('All surveys completed! Proceeding with code submission...', 'success');
+    await proceedWithActualSubmission();
+}
+
+
+// RENAME the original function
+async function proceedWithActualSubmission() {
+    // This is the original submission code
+    isSubmissionInProgress = true;
+    
+    // ✅ NEW: Restore periodic surveys from storage before submission
+    const restored = restorePeriodicSurveysFromStorage();
+    if (restored) {
+        addTerminalOutput(`Restored ${surveyData.surveyResponses.length} periodic surveys from storage`, 'info');
+    }
+    
+    // FINAL AI ANALYSIS BEFORE SUBMISSION
+    addTerminalOutput('Performing final AI analysis before submission...', 'info');
+    await analyzeCurrentCode();
+    
+    // ✅ RETRIEVE CACHED DATA instead of reading from editor
+    const cachedData = retrieveCachedSubmissionData();
+    if (!cachedData) {
+        addTerminalOutput('❌ No cached submission data found!', 'error');
+        alert('Submission data was lost. Please try submitting again.');
+        isSubmissionInProgress = false;
+        return;
+    }
+
+    const code = cachedData.code;
+    addTerminalOutput('✅ Using cached submission data', 'success');
+    addTerminalOutput(`   Code: ${code.length} characters from cache`, 'info');
+    
+    submitButton.disabled = true;
+    submitButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Submitting & Logging out...</div>';
+
+    try {
+        const response = await fetch('/submit', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            // NEW CODE - Use cached data:
+            body: JSON.stringify({
+                code: cachedData.code,
+                user_id: cachedData.session.userId,
+                assignment_key: cachedData.session.assignmentKey,
+                session_id: cachedData.session.sessionId,
+                programming_language: cachedData.session.programmingLanguage,
+                timestamp: new Date().toISOString(),
+                suggestion_clicked: cachedData.metrics.suggestionClicks,
+                compiler_clicked: cachedData.metrics.compilerClicks,
+                // Include ALL captured data
+                session_metadata: cachedData.session,
+                activity_logs: cachedData.activity.allActivityLogs,
+                activity_summary: cachedData.metrics,
+                survey_data: {
+                    periodic_surveys: surveyData.surveyResponses,
+                    total_occurrences: surveyData.periodicSurveyOccurrenceCount,
+                    total_analyses: surveyData.analysisCount,
+                    survey_interval: surveyData.surveyInterval
+                }
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Submission failed: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        addTerminalOutput(`${result.message}`, 'success');
+        addTerminalOutput(`Database Status: ${result.firebase_status}`, 'info');
+        addTerminalOutput(`Submission ID: ${result.submission_id}`, 'info');
+        addTerminalOutput(`Problem Guess Logs: ${currentSession.guessLogCount}`, 'info');
+        addTerminalOutput(`Suggestions Clicked: ${currentSession.suggestionClickCount}`, 'info');
+        addTerminalOutput(`Compiler Runs: ${currentSession.compilerClickCount}`, 'info');
+        addTerminalOutput(`Surveys Completed: ${surveyData.surveyResponses.length}`, 'info');
+        if (currentSession.condition === 1) {
+            addTerminalOutput(`Description-based Logs: ${currentSession.descLogCount}`, 'info');
+        }
+        if (currentSession.condition === 3) {
+            addTerminalOutput(`AI Suggestion Logs: ${currentSession.suggestionsLogCount}`, 'info');
+        }
+        
+        if (result.firebase_status === 'success') {
+            addTerminalOutput(`Database save successful - logging out now...`, 'success');
+            
+            // Clear both caches
+            clearPeriodicSurveysFromStorage();
+            clearCachedSubmissionData();  // ✅ ADD THIS LINE
+            
+            setTimeout(() => {
+                showSuccessMessage(
+                    'Code submitted successfully to Database!\nSession ended for security.', 
+                    3
+                );
+            }, 500);
+        }else {
+            addTerminalOutput(`Database save failed but data preserved locally - logging out...`, 'warning');
+            
+            // ✅ NEW: Keep data in storage if submission failed (for retry)
+            console.log('⚠️ Keeping periodic surveys in sessionStorage due to submission failure');
+            
+            setTimeout(() => {
+                showSuccessMessage(
+                    'Submission completed with local backup.\nSession ended for security.', 
+                    3
+                );
+            }, 500);
+        }
+
+    } catch (error) {
+        console.error('Submission error:', error);
+        addTerminalOutput(`Submission failed: ${error.message}`, 'error');
+        addTerminalOutput(`Data preserved locally in session logs`, 'warning');
+        submitButton.disabled = false;
+        submitButton.innerHTML = 'Submit & Logout';
+        isSubmissionInProgress = false;
+    }
+    
+    clearProgress();
+    stopAutoSave();
+}
+    
+
+
+
+   function endSession() {
+       if (confirm('Are you sure you want to end this session? Any unsaved code will be lost.')) {
+           allowNavigation = true;  // Allow navigation without warning
+           addTerminalOutput('Session ended by user', 'warning');
+           clearProgress();
+           stopAutoSave();
+           showSuccessMessage('Session ended. Redirecting to login...', 2);
+       }
+   }
+
+   function addTerminalOutput(text, type = 'normal') {
+       const line = document.createElement('div');
+       line.className = 'output-line';
+       
+       switch (type) {
+           case 'success':
+               line.innerHTML = `<span class="output-success">${text}</span>`;
+               break;
+           case 'error':
+               line.innerHTML = `<span class="output-error">${text}</span>`;
+               break;
+           case 'info':
+               line.innerHTML = `<span class="output-info">${text}</span>`;
+               break;
+           case 'warning':
+               line.innerHTML = `<span class="output-warning">${text}</span>`;
+               break;
+           case 'prompt':
+               line.innerHTML = `<span class="output-prompt">>>> </span>${text}`;
+               break;
+           case 'execution-time':
+               line.innerHTML = `<span class="execution-time">${text}</span>`;
+               break;
+           default:
+               line.innerHTML = `<pre>${text}</pre>`;
+       }
+       
+       const terminalOutput = document.getElementById('terminalOutput');
+       terminalOutput.appendChild(line);
+       terminalOutput.scrollTop = terminalOutput.scrollHeight;
+   }
+
+   function clearTerminal() {
+        // ACTIVITY LOG: Terminal clear
+    logActivity('terminal_clear', {
+        trigger: 'clear_button',
+        terminal_lines_cleared: document.getElementById('terminalOutput').children.length
+    });
+       const terminalOutput = document.getElementById('terminalOutput');
+       terminalOutput.innerHTML = `
+           <div class="output-line">
+               <span class="output-info">Secure Database-Integrated Code Assistant Terminal</span>
+           </div>
+           <div class="output-line">
+               <span class="output-info">Session: ${currentSession.sessionId || 'None'}</span>
+           </div>
+           <div class="output-line">
+               <span class="output-info">Condition ${currentSession.condition || '?'} - Secure logging active</span>
+           </div>
+           <div class="output-line">
+               <span class="output-warning">REMINDER: Submitting code will automatically log you out</span>
+           </div>
+           <div class="output-line">
+               <span class="output-prompt">>>> </span><span class="output-info">Continue coding!</span>
+           </div>
+       `;
+   }
+
+   // Event Listeners
+   increaseFontBtn.addEventListener('click', increaseFontSize);
+   decreaseFontBtn.addEventListener('click', decreaseFontSize);
+   runButton.addEventListener('click', executeCode);
+   clearButton.addEventListener('click', clearTerminal);
+   submitButton.addEventListener('click', submitToDatabase);
+   logoutBtn.addEventListener('click', endSession);
+
+// History functionality
+document.getElementById("history-guess").onclick = () => {
+   showHistoryInline('guess');
+}
+
+const historyDescButton = document.getElementById("history-desc");
+if (historyDescButton) {
+   historyDescButton.onclick = () => {
+       showHistoryInline('desc');
+   }
+}
+
+const historySuggestionsButton = document.getElementById("history-suggestions");
+if (historySuggestionsButton) {
+   historySuggestionsButton.onclick = () => {
+       showHistoryInline('suggestions');
+   }
+}
+
+   // Keyboard shortcuts
+   document.addEventListener('keydown', (e) => {
+       if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+           e.preventDefault();
+           if (currentFontSize < maxFontSize) {
+               increaseFontSize();
+           }
+       }
+       if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+           e.preventDefault();
+           if (currentFontSize > minFontSize) {
+               decreaseFontSize();
+           }
+       }
+       if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+           e.preventDefault();
+           updateFontSize(12);
+           addTerminalOutput(`Font size reset to ${currentFontSize}px`, 'info');
+       }
+   });
+
+   // Resize handling
+   const resize = {};
+   resize.sidebar = false;
+   resize.terminal = false;
+   
+   document.getElementById('resize-sidebar').addEventListener('mousedown', (e) => {
+       resize.sidebar = true;
+       document.addEventListener('mousemove', handleSidebarResize);
+       document.addEventListener('mouseup', handleMouseUp);
+   });
+
+   document.getElementById('resize-terminal').addEventListener('mousedown', (e) => {
+       resize.terminal = true;
+       document.addEventListener('mousemove', handleTerminalResize);
+       document.addEventListener('mouseup', handleMouseUp);
+   });
+
+   function handleSidebarResize(e) {
+       if (!resize.sidebar) return;
+       document.getElementById('sidebar').style.width = `${window.innerWidth - e.clientX}px`;
+   }
+
+   function handleTerminalResize(e) {
+       if (!resize.terminal) return;
+       document.getElementById('terminal').style.height = `${window.innerHeight - e.clientY}px`;
+   }
+
+   function handleMouseUp() {
+       resize.sidebar = false;
+       resize.terminal = false;
+       document.removeEventListener('mouseup', handleMouseUp);
+       document.removeEventListener('mousemove', handleSidebarResize);
+       document.removeEventListener('mousemove', handleTerminalResize);
+   }
+
+// Prevent accidental page close
+window.addEventListener('beforeunload', (e) => {
+    // Allow navigation if it's a legitimate redirect (after submission/logout)
+    if (allowNavigation) {
+        return undefined;  // Don't show warning
+    }
+    
+    if (currentSession.sessionId) {
+        // Save progress before leaving
+        saveProgress();
+        
+        // ACTIVITY LOG: Page unload attempt
+        logActivity('page_unload_attempt', {
+            unload_reason: 'beforeunload_triggered',
+            session_duration_seconds: (Date.now() - sessionStartTime) / 1000
+        });
+        
+        // Upload any remaining activities synchronously
+        if (activityBuffer.length > 0) {
+            navigator.sendBeacon('/log-activities', JSON.stringify({
+                activities: activityBuffer,
+                session_id: currentSession.sessionId
+            }));
+        }
+        
+        e.preventDefault();
+        e.returnValue = 'You have an active secure coding session! Submit your code to Database before leaving to save your work.';
+        return e.returnValue;
+    }
+});
+
+
+   // Prevent double initialization
+let isInitializing = false;
+let isInitialized = false;
+
+async function safeInitialize() {
+    if (isInitializing || isInitialized) {
+        console.log('Initialization already in progress or completed');
+        return;
+    }
+    
+    isInitializing = true;
+    try {
+        await initializeFromURL();
+        
+        // Initialize sidebar AFTER session data is loaded
+        setTimeout(() => {
+            setupSidebarToggle();  // Setup the toggle button
+            // initializeSidebar() is already called in initializeFromURL()
+        }, 500);
+        
+        isInitialized = true;
+    } catch (error) {
+        console.error('Initialization failed:', error);
+        showAccessDenied('Failed to initialize IDE: ' + error.message);
+    } finally {
+        isInitializing = false;
+    }
+}
+
+// Prevent closing modal by clicking outside
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM loaded, starting initialization...');
+    safeInitialize();
+    
+    // Setup modal protection
+    const surveyModal = document.getElementById('surveyModal');
+    
+    surveyModal.addEventListener('click', function(e) {
+        if (e.target === this && surveyData.pendingSurvey) {
+            e.preventDefault();
+            e.stopPropagation();
+            addTerminalOutput('⚠️ Please complete the survey to continue', 'warning');
+        }
+    });
+    
+    // Prevent ESC key from closing modal
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && surveyData.pendingSurvey) {
+            e.preventDefault();
+            addTerminalOutput('⚠️ Please complete the survey to continue', 'warning');
+        }
+    });
+});
+
+// Backup initialization if DOM already loaded
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    console.log('DOM already ready, initializing immediately...');
+    safeInitialize();
+}
+
+
+// Enhanced tab visibility tracking with time-based logging
+document.addEventListener('visibilitychange', function() {
+    const currentTime = Date.now();
+    const newVisibilityState = document.hidden ? 'hidden' : 'visible';
+    
+    if (newVisibilityState === 'hidden' && isTabVisible) {
+        // User switched away from tab
+        lastFocusTime = currentTime;
+        logActivity('tab_switching', {
+            start_time: new Date(currentTime).toISOString(),
+            switch_type: 'tab_away',
+            visibility_state: 'hidden'
+        });
+    } else if (newVisibilityState === 'visible' && !isTabVisible) {
+    // User returned to tab
+    const awayDuration = lastFocusTime ? currentTime - lastFocusTime : 0;
+        logActivity('tab_switching', {
+            start_time: new Date(lastFocusTime).toISOString(),
+            end_time: new Date(currentTime).toISOString(),
+            duration: awayDuration,
+            switch_type: 'tab_return',
+            away_duration_ms: awayDuration,
+            visibility_state: 'visible'
+        });
+    }
+    
+    isTabVisible = newVisibilityState === 'visible';
+});
+
+
+// Sidebar toggle functionality
+let sidebarCollapsed = false;
+
+// Check if sidebar should be hidden on load based on prefix
+function shouldHideSidebar() {
+    const templateValue = "{{ side_panel_hidden }}";
+    
+    // ✅ CHECK: Did template render?
+    if (templateValue.includes('{{') || templateValue.includes('}}')) {
+        console.error('❌ TEMPLATE NOT RENDERED!');
+        console.error('   Template value:', templateValue);
+        console.error('   You must access this page through the web server:');
+        console.error('   http://localhost:8000/index.html (NOT file:///...)');
+        addTerminalOutput('⚠️ Configuration error: Sidebar control not loaded. Using default settings.', 'warning');
+        return false; // Don't hide sidebar if config broken
+    }
+    
+    const hiddenAssignmentKeys = templateValue.toLowerCase().split(',').map(k => k.trim()).filter(k => k.length > 0);
+    const currentAssignmentKey = currentSession.assignmentKey ? currentSession.assignmentKey.toLowerCase().trim() : '';
+    
+    console.log('🔍 Sidebar visibility check:', {
+        templateValue: templateValue,
+        hiddenAssignmentKeys: hiddenAssignmentKeys,
+        currentAssignmentKey: currentAssignmentKey,
+        userId: currentSession.userId,
+        shouldHide: hiddenAssignmentKeys.includes(currentAssignmentKey)
+    });
+    
+    return hiddenAssignmentKeys.includes(currentAssignmentKey);
+}
+
+// Initialize sidebar state
+function initializeSidebar() {
+    // Query DOM elements inside the function when it's called
+    const sidebar = document.getElementById('sidebar');
+    const toggleIcon = document.getElementById('toggleIcon');
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    
+    if (!sidebar || !toggleIcon || !sidebarToggle) {
+        console.error('❌ Sidebar elements not found in DOM');
+        return;
+    }
+    
+    const shouldHide = shouldHideSidebar();
+    console.log(`🎯 Initializing sidebar - Should hide: ${shouldHide}, Prefix: "${currentSession.prefix}"`);
+    
+    if (shouldHide) {
+        sidebarCollapsed = true;
+        sidebar.classList.add('collapsed');
+        toggleIcon.textContent = '▶';
+        sidebarToggle.style.right = '0px';
+        console.log(`✅ Sidebar HIDDEN for prefix: "${currentSession.prefix}"`);
+        addTerminalOutput(`Sidebar hidden by default (warmup mode)`, 'info');
+    } else {
+        sidebarCollapsed = false;
+        sidebar.classList.remove('collapsed');
+        toggleIcon.textContent = '◀';
+        sidebarToggle.style.right = '30vw';
+        console.log(`✅ Sidebar VISIBLE for prefix: "${currentSession.prefix}"`);
+    }
+}
+
+// Setup toggle event listener
+function setupSidebarToggle() {
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const sidebar = document.getElementById('sidebar');
+    const toggleIcon = document.getElementById('toggleIcon');
+    
+    if (!sidebarToggle || !sidebar || !toggleIcon) {
+        console.error('Cannot setup sidebar toggle - elements not found');
+        return;
+    }
+    
+    sidebarToggle.addEventListener('click', () => {
+        sidebarCollapsed = !sidebarCollapsed;
+        sidebar.classList.toggle('collapsed');
+        toggleIcon.textContent = sidebarCollapsed ? '▶' : '◀';
+        sidebarToggle.style.right = sidebarCollapsed ? '0px' : '30vw';
+        sidebarToggle.style.borderRadius = sidebarCollapsed ? '8px 0 0 8px' : '8px 0 0 8px';
+    });
+}
+
+// Make restore functions globally accessible
+window.handleRestoreProgress = handleRestoreProgress;
+window.handleDismissRestore = handleDismissRestore;
+
+</script>
+
+</body>
+
+</html>

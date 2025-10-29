@@ -27,27 +27,20 @@ import smtplib
 import email
 from email import encoders
 import traceback
-# Add these to your existing imports section
 from typing import List, Dict, Optional, Any
 from enum import Enum
 import json
 from pathlib import Path
 from fastapi.responses import FileResponse
-from admin import router as admin_router  # ADD THIS LINE
-
+from admin import router as admin_router
 
 
 # Load environment variables
 load_dotenv()
 
-# Add logging and debugging capabilities
 import logging
-
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Initialize Firebase
 def initialize_firebase():
     """Initialize Firebase Admin SDK using environment variables"""
     try:
@@ -57,7 +50,6 @@ def initialize_firebase():
                 "FIREBASE_PROJECT_ID", "FIREBASE_PRIVATE_KEY_ID", 
                 "FIREBASE_PRIVATE_KEY", "FIREBASE_CLIENT_EMAIL", "FIREBASE_CLIENT_ID"
             ]):
-                # Use individual environment variables (new method)
                 cred_dict = {
                     "type": "service_account",
                     "project_id": os.getenv("FIREBASE_PROJECT_ID"),
@@ -73,8 +65,6 @@ def initialize_firebase():
                 }
                 
                 cred = credentials.Certificate(cred_dict)
-                
-                # Initialize with database URL for Realtime Database
                 database_url = os.getenv("FIREBASE_DATABASE_URL")
                 if database_url:
                     firebase_admin.initialize_app(cred, {
@@ -114,8 +104,6 @@ def initialize_firebase():
     except Exception as e:
         logger.error(f"Firebase initialization failed: {e}")
         return None
-
-# Initialize Firebase client
 firebase_db = initialize_firebase()
 
 def get_condition_keys():
@@ -842,7 +830,6 @@ app.add_middleware(
 app.include_router(admin_router)  # ADD THIS LINE
 
 
-
 def save_session_to_local(session_log: SessionLog):
     """Save session log to local file as backup"""
     try:
@@ -888,7 +875,6 @@ def extract_survey_ai_history_summary(session_log: SessionLog, survey_data: Dict
         }
     
     return summary
-
 
 
 # OpenAI Configuration
@@ -1090,8 +1076,6 @@ class ExecuteResponse(BaseModel):
     output: str
     error: str
     execution_time: float
-
-
 
 
 @app.post("/analyze", response_model=CodeResponse)
@@ -1833,7 +1817,6 @@ async def log_activities(request: ActivityLogRequest):
     
 
 
-
 @app.post("/submit-survey")
 async def submit_survey(request: SurveySubmission):
     """Submit survey responses with AI history context"""
@@ -1973,11 +1956,6 @@ class SurveyStatusResponse(BaseModel):
     can_submit_code: bool
 
 
-
-
-
-
-
 @app.get("/survey-config/{assignment_key}")
 async def get_survey_config(assignment_key: str):
     """
@@ -2071,7 +2049,6 @@ async def get_survey_status(session_id: str):
     except Exception as e:
         logger.error(f"Error getting survey status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 
 @app.post("/update-survey-status")
@@ -2278,8 +2255,6 @@ async def authenticate_user(request: AuthRequest):
         
         # Get starter code if available
         starter_code = get_starter_code(base_key, programming_language)
-        
-        # ===== ADD THIS SECTION TO CHECK FOR SURVEYS =====
         survey_file = Path("surveys") / f"{base_key}.json"
         has_surveys = survey_file.exists()
         
@@ -2293,9 +2268,6 @@ async def authenticate_user(request: AuthRequest):
                     has_post = len(survey_config.get('post_survey', {}).get('questions', [])) > 0
             except Exception as e:
                 logger.error(f"Error checking survey config: {e}")
-        # ===== END OF NEW SECTION =====
-        
-        # Initialize session log
         session_log = SessionLog(
             user_id=user_id,
             assignment_id=assignment_key,
@@ -2306,11 +2278,8 @@ async def authenticate_user(request: AuthRequest):
             correct_description_history=[] if condition == 1 else None,
             suggestions_only_history=[] if condition == 3 else None,
             problem_description=problem_description,
-            
-            # ===== ADD THESE SURVEY FIELDS =====
             pre_survey_status=SurveyStatus.NOT_REQUIRED if not has_pre else SurveyStatus.NOT_STARTED,
             post_survey_status=SurveyStatus.NOT_REQUIRED if not has_post else SurveyStatus.NOT_STARTED,
-            # ===== END OF NEW FIELDS =====
         )
         
         active_sessions[session_id] = session_log
@@ -2407,8 +2376,6 @@ async def save_session_to_firebase(
     
     try:
         condition_path = f"condition_{session_log.condition}"
-        
-        # ===== PREPARE SESSION METADATA =====
         session_metadata = {
             'user_id': session_log.user_id,
             'assignment_key': session_log.assignment_id,
@@ -2421,8 +2388,6 @@ async def save_session_to_firebase(
             'suggestion_clicked': suggestion_clicked,
             'compiler_clicked': compiler_clicked,
         }
-        
-        # ===== PREPARE PRE-SURVEY =====
         pre_survey = None
         if session_log.pre_survey_responses:
             pre_survey = {
@@ -2437,8 +2402,6 @@ async def save_session_to_firebase(
                 'questions': session_log.pre_survey_responses.get('questions', []),
                 'responses': session_log.pre_survey_responses.get('responses', [])
             }
-        
-        # ===== PREPARE POST-SURVEY =====
         post_survey = None
         if session_log.post_survey_responses:
             post_survey = {
@@ -2454,8 +2417,6 @@ async def save_session_to_firebase(
                 'responses': session_log.post_survey_responses.get('responses', []),
                 'ai_context': session_log.post_survey_responses.get('ai_context', {})
             }
-        
-        # ===== PREPARE PERIODIC SURVEYS WITH AI HISTORY =====
         periodic_surveys_data = []
         
         # Log what we received
@@ -2515,8 +2476,6 @@ async def save_session_to_firebase(
                 }
                 for idx, survey in enumerate(survey_data.get('periodic_surveys', []))
             ]
-        
-        # ===== PREPARE AI LOGS =====
         logs_data = {
             'ai_guesses': {
                 str(i): {
@@ -2545,14 +2504,10 @@ async def save_session_to_firebase(
                     'full_code_suggestion': entry.full_code_suggestion
                 } for i, entry in enumerate(session_log.suggestions_only_history, 1)
             }
-        
-        # ===== PREPARE ACTIVITY LOG =====
         activity_log_data = {
             'entries': [entry.dict() for entry in session_log.activity_log],
             'summary': session_log.activity_summary.dict()
         }
-        
-        # ===== BUILD FINAL USER DATA WITH SEPARATE SURVEYS =====
         user_data = {
             'session_metadata': session_metadata,
             'logs': logs_data,
@@ -2586,8 +2541,6 @@ async def save_session_to_firebase(
                     } for survey in periodic_surveys_data
                 }
             }
-        
-        # ===== SAVE TO FIREBASE =====
         user_ref = firebase_db.child(f'{condition_path}/{session_log.assignment_id}/{session_log.user_id}')
         user_ref.set(user_data)
         
