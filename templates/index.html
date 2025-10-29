@@ -2535,6 +2535,56 @@ async function initializeFromURL() {
         const currentURL = window.location.href;
         urlDisplay.textContent = `URL: ${currentURL.substring(0, 50)}${currentURL.length > 50 ? '...' : ''}`;
         
+        // ✅ CHECK FOR PRE-SURVEY REQUIREMENT (FLEXIBLE)
+        if (authData.hasPreSurvey) {
+            console.log('🔍 Pre-survey check: Assignment has pre-survey configured');
+            try {
+                const statusResponse = await fetch(`/survey-status/${currentSession.sessionId}`);
+                if (statusResponse.ok) {
+                    const statusData = await statusResponse.json();
+                    
+                    // If pre-survey is required but not completed, redirect to survey
+                    if (statusData.pre_survey_status !== 'completed') {
+                        console.log('⚠️ Pre-survey not completed - redirecting...');
+                        updateLoadingMessage('Pre-survey required before accessing IDE...');
+                        
+                        // Get session parameters for redirect
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const sessionToken = urlParams.get('session');
+                        const userId = urlParams.get('user');
+                        
+                        // Show message in loading screen
+                        setTimeout(() => {
+                            const loadingDetail = document.getElementById('loadingDetail');
+                            if (loadingDetail) {
+                                loadingDetail.innerHTML = `
+                                    <span style="color: #f59e0b;">⚠️ Pre-survey required</span><br>
+                                    <span style="color: #cccccc;">Redirecting in 2 seconds...</span>
+                                `;
+                            }
+                        }, 100);
+                        
+                        // Redirect to pre-survey page with session preserved
+                        setTimeout(() => {
+                            allowNavigation = true;  // Allow navigation without warning
+                            window.location.href = `/survey.html?type=pre&session=${sessionToken}&user=${encodeURIComponent(userId)}`;
+                        }, 2000);
+                        return; // Stop initialization here
+                    } else {
+                        console.log('✅ Pre-survey already completed - IDE access granted');
+                    }
+                } else {
+                    console.warn('⚠️ Could not fetch survey status:', statusResponse.status);
+                    // Continue with IDE initialization if check fails (fallback)
+                }
+            } catch (error) {
+                console.error('❌ Error checking pre-survey status:', error);
+                // Continue with IDE initialization if check fails (fallback)
+            }
+        } else {
+            console.log('ℹ️ No pre-survey required for this assignment');
+        }
+        
         // Add paste status indicator
         const pasteStatus = authData.pasteAllowed === 1 ? 'Enabled' : 'Disabled';
         const pasteIndicator = document.createElement('span');
@@ -5004,6 +5054,13 @@ async function safeInitialize() {
     isInitializing = true;
     try {
         await initializeFromURL();
+        
+        // Initialize sidebar AFTER session data is loaded
+        setTimeout(() => {
+            setupSidebarToggle();  // Setup the toggle button
+            // initializeSidebar() is already called in initializeFromURL()
+        }, 500);
+        
         isInitialized = true;
     } catch (error) {
         console.error('Initialization failed:', error);
@@ -5076,35 +5133,86 @@ document.addEventListener('visibilitychange', function() {
 
 
 // Sidebar toggle functionality
-const sidebarToggle = document.getElementById('sidebarToggle');
-const sidebar = document.getElementById('sidebar');
-const toggleIcon = document.getElementById('toggleIcon');
 let sidebarCollapsed = false;
 
 // Check if sidebar should be hidden on load based on prefix
 function shouldHideSidebar() {
-    const hiddenPrefixes = "{{ side_panel_hidden }}".toLowerCase().split(',').map(p => p.trim());
-    const currentPrefix = currentSession.prefix ? currentSession.prefix.toLowerCase() : '';
-    return hiddenPrefixes.includes(currentPrefix);
+    const templateValue = "{{ side_panel_hidden }}";
+    
+    // ✅ CHECK: Did template render?
+    if (templateValue.includes('{{') || templateValue.includes('}}')) {
+        console.error('❌ TEMPLATE NOT RENDERED!');
+        console.error('   Template value:', templateValue);
+        console.error('   You must access this page through the web server:');
+        console.error('   http://localhost:8000/index.html (NOT file:///...)');
+        addTerminalOutput('⚠️ Configuration error: Sidebar control not loaded. Using default settings.', 'warning');
+        return false; // Don't hide sidebar if config broken
+    }
+    
+    const hiddenAssignmentKeys = templateValue.toLowerCase().split(',').map(k => k.trim()).filter(k => k.length > 0);
+    const currentAssignmentKey = currentSession.assignmentKey ? currentSession.assignmentKey.toLowerCase().trim() : '';
+    
+    console.log('🔍 Sidebar visibility check:', {
+        templateValue: templateValue,
+        hiddenAssignmentKeys: hiddenAssignmentKeys,
+        currentAssignmentKey: currentAssignmentKey,
+        userId: currentSession.userId,
+        shouldHide: hiddenAssignmentKeys.includes(currentAssignmentKey)
+    });
+    
+    return hiddenAssignmentKeys.includes(currentAssignmentKey);
 }
 
 // Initialize sidebar state
 function initializeSidebar() {
-    if (shouldHideSidebar()) {
+    // Query DOM elements inside the function when it's called
+    const sidebar = document.getElementById('sidebar');
+    const toggleIcon = document.getElementById('toggleIcon');
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    
+    if (!sidebar || !toggleIcon || !sidebarToggle) {
+        console.error('❌ Sidebar elements not found in DOM');
+        return;
+    }
+    
+    const shouldHide = shouldHideSidebar();
+    console.log(`🎯 Initializing sidebar - Should hide: ${shouldHide}, Prefix: "${currentSession.prefix}"`);
+    
+    if (shouldHide) {
         sidebarCollapsed = true;
         sidebar.classList.add('collapsed');
         toggleIcon.textContent = '▶';
         sidebarToggle.style.right = '0px';
+        console.log(`✅ Sidebar HIDDEN for prefix: "${currentSession.prefix}"`);
+        addTerminalOutput(`Sidebar hidden by default (warmup mode)`, 'info');
+    } else {
+        sidebarCollapsed = false;
+        sidebar.classList.remove('collapsed');
+        toggleIcon.textContent = '◀';
+        sidebarToggle.style.right = '30vw';
+        console.log(`✅ Sidebar VISIBLE for prefix: "${currentSession.prefix}"`);
     }
 }
 
-sidebarToggle.addEventListener('click', () => {
-    sidebarCollapsed = !sidebarCollapsed;
-    sidebar.classList.toggle('collapsed');
-    toggleIcon.textContent = sidebarCollapsed ? '▶' : '◀';
-    sidebarToggle.style.right = sidebarCollapsed ? '0px' : '30vw';
-    sidebarToggle.style.borderRadius = sidebarCollapsed ? '8px 0 0 8px' : '8px 0 0 8px';
-});
+// Setup toggle event listener
+function setupSidebarToggle() {
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const sidebar = document.getElementById('sidebar');
+    const toggleIcon = document.getElementById('toggleIcon');
+    
+    if (!sidebarToggle || !sidebar || !toggleIcon) {
+        console.error('Cannot setup sidebar toggle - elements not found');
+        return;
+    }
+    
+    sidebarToggle.addEventListener('click', () => {
+        sidebarCollapsed = !sidebarCollapsed;
+        sidebar.classList.toggle('collapsed');
+        toggleIcon.textContent = sidebarCollapsed ? '▶' : '◀';
+        sidebarToggle.style.right = sidebarCollapsed ? '0px' : '30vw';
+        sidebarToggle.style.borderRadius = sidebarCollapsed ? '8px 0 0 8px' : '8px 0 0 8px';
+    });
+}
 
 // Make restore functions globally accessible
 window.handleRestoreProgress = handleRestoreProgress;

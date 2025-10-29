@@ -198,12 +198,15 @@ def get_starter_code(prefix, language):
     return None
 
 
-def get_side_panel_hidden_prefixes():
-    """Get prefixes that should have sidebar hidden by default"""
-    hidden_prefixes = os.getenv("SIDE_PANEL_HIDDEN", "").lower().split(",")
-    # Clean up the prefixes (remove spaces and empty strings)
-    hidden_prefixes = [prefix.strip() for prefix in hidden_prefixes if prefix.strip()]
-    return ",".join(hidden_prefixes)  # Return as comma-separated string for template
+def get_side_panel_hidden_assignment_keys():
+    """Get assignment keys that should have sidebar hidden by default"""
+    hidden_keys = os.getenv("SIDE_PANEL_HIDDEN", "").lower().split(",")
+    # Clean up the assignment keys (remove spaces and empty strings)
+    hidden_keys = [key.strip() for key in hidden_keys if key.strip()]
+    # Return as comma-separated string for template
+    result = ",".join(hidden_keys)
+    logger.info(f"Sidebar hidden for assignment keys: {result}")
+    return result
 
 def get_periodic_survey_config():
     """Get periodic survey configuration from environment variables"""
@@ -1507,10 +1510,10 @@ async def serve_ide(request: Request):
     
     # Serve the IDE page - authentication will be handled by JavaScript
     return templates.TemplateResponse("index.html", {
-        "request": request,
-        "session_token": session_token,
-        "user_id": user_id,
-        "side_panel_hidden": get_side_panel_hidden_prefixes()
+    "request": request,
+    "session_token": session_token,
+    "user_id": user_id,
+    "side_panel_hidden": get_side_panel_hidden_assignment_keys()
     })
 
 @app.get("/health")
@@ -2793,6 +2796,18 @@ async def validate_survey_images(assignment_key: str):
     except Exception as e:
         logger.error(f"Image validation error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+# Add to main.py after other @app.get endpoints
+
+@app.get("/debug/sidebar-config")
+async def debug_sidebar_config():
+    """Debug sidebar configuration"""
+    return {
+        "SIDE_PANEL_HIDDEN_raw": os.getenv("SIDE_PANEL_HIDDEN", "NOT_SET"),
+        "processed_prefixes": get_side_panel_hidden_prefixes(),
+        "split_prefixes": get_side_panel_hidden_prefixes().split(','),
+        "environment_loaded": bool(os.getenv("OPENAI_API_KEY"))  # Check if .env loaded at all
+    }
     
 if __name__ == "__main__":
     import uvicorn
