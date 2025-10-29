@@ -3454,9 +3454,6 @@ function insertSuggestion(type) {
     }
 
     currentSession.suggestionClickCount++;
-    
-    // Check if periodic survey should be shown
-    checkSuggestionBasedPeriodicSurvey();
 
     let suggestionText = '';
     if (type === 'guess') {
@@ -3599,38 +3596,48 @@ function incrementAnalysisCount() {
     //     !isSubmissionInProgress) {
     //     showPeriodicSurvey();
     // }
+
+    // NEW: Trigger periodic survey based on analysis (AI guess) count
+    try {
+        // call the unified check which will now use analysis count
+        checkSuggestionBasedPeriodicSurvey();
+    } catch (e) {
+        console.error('Error checking periodic survey after analysis increment:', e);
+    }
 }
 
 // NEW: Check if periodic survey should be shown based on suggestion clicks
 function checkSuggestionBasedPeriodicSurvey() {
+    // New behavior: periodic surveys are triggered by AI analyses (analysisCount)
     if (!currentSession.periodicSurveyEnabled) {
         console.log('Periodic surveys not enabled for this assignment');
         return;
     }
-    
+
     if (!currentSession.nextPeriodicSurveyAt) {
         console.log('No periodic survey scheduled');
         return;
     }
-    
+
     if (surveyData.pendingSurvey || isSubmissionInProgress) {
         console.log('Survey already pending or submission in progress');
         return;
     }
-    
-    const totalSuggestions = currentSession.suggestionClickCount || 0;
-    
-    console.log(`Periodic Survey Check: ${totalSuggestions} suggestions, next survey at ${currentSession.nextPeriodicSurveyAt}`);
-    
-    if (totalSuggestions >= currentSession.nextPeriodicSurveyAt) {
-        console.log(`✅ Triggering periodic survey at ${totalSuggestions} suggestions`);
-        
-        // Update next survey trigger
-        currentSession.nextPeriodicSurveyAt = totalSuggestions + currentSession.periodicSurveyInterval;
+
+    // Prefer the explicit analysis counter if available, otherwise fall back to guess history length
+    const totalAnalyses = (typeof surveyData.analysisCount === 'number' ? surveyData.analysisCount : (currentSession.guessHistory ? currentSession.guessHistory.length : 0)) || 0;
+
+    console.log(`Periodic Survey Check: ${totalAnalyses} AI analyses, next survey at ${currentSession.nextPeriodicSurveyAt}`);
+
+    if (totalAnalyses >= currentSession.nextPeriodicSurveyAt) {
+        console.log(`✅ Triggering periodic survey at ${totalAnalyses} AI analyses`);
+
+        // Update next survey trigger (use analyses count)
+        currentSession.nextPeriodicSurveyAt = totalAnalyses + currentSession.periodicSurveyInterval;
         currentSession.periodicSurveysCompleted++;
-        
-        console.log(`Next periodic survey scheduled at: ${currentSession.nextPeriodicSurveyAt} suggestions`);
-        
+
+        console.log(`Next periodic survey scheduled at: ${currentSession.nextPeriodicSurveyAt} analyses`);
+
         // Show the survey
         showPeriodicSurvey();
     }
