@@ -139,9 +139,9 @@ credentials/
 firebase-service-account.json
 
 # ============================================
-# ENVIRONMENT FILES
+# ENVIRONMENT FILES (MUST NOT GO TO GITHUB!)
 # ============================================
-# .env IS INCLUDED - only exclude these variants
+.env
 .env.local
 .env.*.local
 .env.backup
@@ -176,19 +176,3 @@ yarn-error.log*
 package-lock.json
 yarn.lock
 
-# ============================================
-# ✅ CRITICAL: THESE ARE INCLUDED IN DOCKER
-# ============================================
-# The following are NOT ignored and WILL be copied to Docker:
-# - .env
-# - surveys/
-# - surveys/images/
-# - surveys/*.json
-# - assignment/
-# - assignment/*.pdf
-# - assignment/*.txt
-# - starter_code/
-# - templates/
-# - main.py
-# - admin.py
-# - requirements.txt
