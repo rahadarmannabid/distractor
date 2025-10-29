@@ -304,15 +304,29 @@ def get_assignment_file_path(assignment_key):
     """
     Get the correct assignment file path based on assignment key
     Returns Path object or None if not found
-    CASE-INSENSITIVE: Looks for lowercase filename
+    CASE-INSENSITIVE: Scans directory for matching file
     """
     base_key = get_assignment_base_key(assignment_key)
     if not base_key:
         return None
     
-    # ✅ CHANGED: base_key is now always lowercase, so file path will be lowercase
-    assignment_file = Path("assignment") / f"{base_key}.txt"
-    return assignment_file if assignment_file.exists() else None
+    assignment_dir = Path("assignment")
+    if not assignment_dir.exists():
+        logger.warning(f"Assignment directory does not exist: {assignment_dir}")
+        return None
+    
+    # Case-insensitive file search
+    base_key_lower = base_key.lower()
+    try:
+        for file in assignment_dir.iterdir():
+            if file.is_file() and file.stem.lower() == base_key_lower and file.suffix == '.txt':
+                logger.info(f"Found assignment file: {file}")
+                return file
+    except Exception as e:
+        logger.error(f"Error searching for assignment file: {e}")
+    
+    logger.warning(f"Assignment file not found for: {base_key}")
+    return None
 
 
 def send_notification_email(submission_data):
@@ -1960,24 +1974,40 @@ class SurveyStatusResponse(BaseModel):
 async def get_survey_config(assignment_key: str):
     """
     Get pre, post, and periodic survey configuration for an assignment key
+    FULLY CASE-INSENSITIVE - works with any case variation
     """
     try:
-        # Get base key for file reading
+        # Get base key for file reading (this returns capitalized version)
         base_key = get_assignment_base_key(assignment_key)
         if not base_key:
             raise HTTPException(status_code=400, detail="Invalid assignment key")
         
-        # Try to load assignment-specific survey
-        survey_file = Path("surveys") / f"{base_key}.json"
+        # FIXED: Use lowercase for file matching
+        base_key_lower = base_key.lower()
         
-        if not survey_file.exists():
+        # Case-insensitive survey file search
+        surveys_dir = Path("surveys")
+        survey_file = None
+        
+        if surveys_dir.exists():
+            try:
+                for file in surveys_dir.iterdir():
+                    # FIXED: Compare lowercase to lowercase
+                    if file.is_file() and file.stem.lower() == base_key_lower and file.suffix == '.json':
+                        survey_file = file
+                        logger.info(f"Found survey config: {file} (matched with key: {base_key})")
+                        break
+            except Exception as e:
+                logger.error(f"Error searching for survey config: {e}")
+        
+        if not survey_file or not survey_file.exists():
             # Fallback to default survey
             survey_file = Path("surveys") / "default_survey.json"
-            logger.warning(f"Survey config not found for {base_key}, using default")
+            logger.warning(f"Survey config not found for {base_key} (tried: {base_key_lower}.json), using default")
         
         if not survey_file.exists():
             # Return empty config if no default exists
-            logger.error("No survey configuration found")
+            logger.error("No survey configuration found - neither specific nor default")
             return {
                 "assignment_key": base_key,
                 "pre_survey": {"title": "", "description": "", "questions": []},
@@ -1988,7 +2018,7 @@ async def get_survey_config(assignment_key: str):
         with open(survey_file, 'r', encoding='utf-8') as f:
             survey_config = json.load(f)
         
-        logger.info(f"Loaded survey config for {base_key}")
+        logger.info(f"Successfully loaded survey config for {base_key} from {survey_file.name}")
         return survey_config
         
     except Exception as e:
@@ -2255,8 +2285,19 @@ async def authenticate_user(request: AuthRequest):
         
         # Get starter code if available
         starter_code = get_starter_code(base_key, programming_language)
-        survey_file = Path("surveys") / f"{base_key}.json"
-        has_surveys = survey_file.exists()
+        
+        # FIXED: Case-insensitive survey file check
+        has_surveys = False
+        survey_file = None
+        if base_key:
+            surveys_dir = Path("surveys")
+            if surveys_dir.exists():
+                base_key_lower = base_key.lower()
+                for file in surveys_dir.iterdir():
+                    if file.is_file() and file.stem.lower() == base_key_lower and file.suffix == '.json':
+                        survey_file = file
+                        has_surveys = True
+                        break
         
         has_pre = False
         has_post = False
@@ -2591,18 +2632,30 @@ async def serve_admin_panel(request: Request):
 
 @app.get("/download-assignment/{assignment_key}")
 async def download_assignment(assignment_key: str):
-    """Download assignment PDF based on assignment key"""
+    """Download assignment PDF based on assignment key - CASE-INSENSITIVE"""
     try:
         # Get base key for file reading
         base_key = get_assignment_base_key(assignment_key)
         if not base_key:
             raise HTTPException(status_code=400, detail="Invalid assignment key")
         
-        # Look for PDF file
-        pdf_file = Path("assignment") / f"{base_key}.pdf"
+        # Case-insensitive PDF file search
+        assignment_dir = Path("assignment")
+        pdf_file = None
         
-        if not pdf_file.exists():
-            logger.warning(f"Assignment PDF not found: {pdf_file}")
+        if assignment_dir.exists():
+            base_key_lower = base_key.lower()
+            try:
+                for file in assignment_dir.iterdir():
+                    if file.is_file() and file.stem.lower() == base_key_lower and file.suffix == '.pdf':
+                        pdf_file = file
+                        logger.info(f"Found assignment PDF: {file}")
+                        break
+            except Exception as e:
+                logger.error(f"Error searching for assignment PDF: {e}")
+        
+        if not pdf_file or not pdf_file.exists():
+            logger.warning(f"Assignment PDF not found for: {base_key}")
             raise HTTPException(status_code=404, detail="Assignment PDF not found")
         
         logger.info(f"Downloading assignment PDF: {pdf_file}")

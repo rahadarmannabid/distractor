@@ -6,17 +6,25 @@ services:
     ports:
       - "8000:8000"
     
+    env_file:
+      - .env
+    
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - LOG_LEVEL=info
+    
     volumes:
-      # Persistent data volumes (read-write)
+      # ONLY mount directories for OUTPUT/RUNTIME DATA
       - ./submissions:/app/submissions
       - ./session_logs:/app/session_logs
       - ./logs:/app/logs
       
-      # Configuration volumes (read-only)
-      - ./starter_code:/app/starter_code:ro
-      - ./surveys:/app/surveys:ro
-      - ./assignment:/app/assignment:ro
-      - ./templates:/app/templates:ro
+      # ❌ REMOVED - These will come from Docker image:
+      # - ./starter_code:/app/starter_code:ro
+      # - ./surveys:/app/surveys:ro
+      # - ./assignment:/app/assignment:ro
+      # - ./templates:/app/templates:ro
     
     networks:
       - guessing_ide_network
@@ -24,7 +32,7 @@ services:
     restart: unless-stopped
     
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
