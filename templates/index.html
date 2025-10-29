@@ -1952,6 +1952,7 @@ let currentSession = {
     periodicSurveyInterval: 10,
     nextPeriodicSurveyAt: null,
     periodicSurveysCompleted: 0,
+    finalSurveyDisabled: false,
     guessLogCount: 0,
     descLogCount: 0,
     suggestionsLogCount: 0,
@@ -2503,6 +2504,7 @@ async function initializeFromURL() {
             periodicSurveyInterval: 10,
             nextPeriodicSurveyAt: authData.periodicSurveyStart || 5,
             periodicSurveysCompleted: 0,
+            finalSurveyDisabled: authData.finalSurveyDisabled || false,
             guessLogCount: 0,
             descLogCount: 0,
             suggestionsLogCount: 0,
@@ -2515,6 +2517,13 @@ async function initializeFromURL() {
         
         // ✅ NEW: Restore periodic surveys from sessionStorage if returning from post-survey
         restorePeriodicSurveysFromStorage();
+        
+        // ✅ DEBUG: Log final survey configuration
+        console.log('🔍 Final Survey Configuration:', {
+            assignmentKey: authData.assignmentKey,
+            finalSurveyDisabled: authData.finalSurveyDisabled,
+            willShowFinalSurvey: !authData.finalSurveyDisabled
+        });
         
         // Update UI
         userDisplay.textContent = `User: ${authData.userId}`;
@@ -2600,6 +2609,13 @@ async function initializeFromURL() {
             addTerminalOutput(`Condition: ${authData.condition}`, 'info');
             addTerminalOutput(`Session ID: ${authData.sessionId}`, 'info');
             addTerminalOutput(`Database: Ready for logging`, 'info');
+            
+            // ✅ Show final survey status
+            if (authData.finalSurveyDisabled) {
+                addTerminalOutput(`📋 Final Survey: DISABLED for this assignment`, 'warning');
+            } else {
+                addTerminalOutput(`📋 Final Survey: ENABLED (will appear at submission)`, 'info');
+            }
             
             if (authData.pasteAllowed === 0 || authData.pasteAllowed === "0") {
                 addTerminalOutput(`⚠️  COPY/PASTE DISABLED: All code must be typed manually`, 'warning');
@@ -2784,7 +2800,7 @@ async function initializeEditor() {
                 // Trigger AI analysis when keypress released, allows for more midline analysis
                 document.addEventListener('keypress', (e) => {
                     if (e.key !== 'Enter') {
-                        debounceGeneralAnalysis(2500);
+                        debounceGeneralAnalysis(1500);
                     }
                 });
 
@@ -2911,19 +2927,16 @@ function debounceNewlineAnalysis(delay = 300) {
     }, delay);
 }
 
-let previousCode = '';
-
 // Slower background analysis for general typing
-function debounceGeneralAnalysis(delay = 2500) {
+function debounceGeneralAnalysis(delay = 1500) {
     clearTimeout(debounceTimerGeneral);
     debounceTimerGeneral = setTimeout(() => { 
-        const code = window.editor.getValue().trim();
-        // Run if significant change since last analysis
-        if (Math.abs(previousCode.length - code.length) > 5){
-            analyzeCurrentCode();
-        }
+        analyzeCurrentCode()
     }, delay);
 }
+
+
+let previousCode = ''
 
 // Analyze current code
 async function analyzeCurrentCode() {
@@ -4024,19 +4037,7 @@ async function submitFinalSurvey() {
         addTerminalOutput('Final periodic survey completed!', 'success');
         addTerminalOutput(`Final AI History: ${aiHistoryCount} total analyses captured`, 'info');
         
-        // ✅✅✅ NEW: DOWNLOAD CODE AUTOMATICALLY ✅✅✅
-        addTerminalOutput('📥 Downloading your code...', 'info');
-        const downloadSuccess = downloadCodeFile();
-        
-        if (downloadSuccess) {
-            addTerminalOutput('✅ Code file downloaded successfully!', 'success');
-            // Small delay to ensure download completes
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        } else {
-            addTerminalOutput('⚠️ Code download encountered an issue, but submission will continue', 'warning');
-        }
-        
-        // Now check for post-survey
+        // Check for post-survey (file already downloaded before this survey)
         await checkAndShowPostSurvey();
         
     } catch (error) {
@@ -4608,11 +4609,34 @@ async function submitToDatabase() {
     // Set submission flag to prevent any periodic surveys during submission process
     isSubmissionInProgress = true;
 
+    // ✅ DOWNLOAD CODE FILE FIRST (before any surveys)
+    addTerminalOutput('📥 Downloading your code...', 'info');
+    const downloadSuccess = downloadCodeFile();
+    
+    if (downloadSuccess) {
+        addTerminalOutput('✅ Code file downloaded successfully!', 'success');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    } else {
+        addTerminalOutput('⚠️ Code download encountered an issue, but submission will continue', 'warning');
+    }
+
     // Check if final periodic survey is needed
-    if (surveyData.questions.length > 0 && !surveyData.finalSurveyResponse) {
-        addTerminalOutput('Final periodic survey required before submission...', 'info');
+    console.log('🔍 Final Survey Check:', {
+        hasQuestions: surveyData.questions.length > 0,
+        alreadyCompleted: !!surveyData.finalSurveyResponse,
+        disabled: currentSession.finalSurveyDisabled,
+        willShow: surveyData.questions.length > 0 && !surveyData.finalSurveyResponse && !currentSession.finalSurveyDisabled
+    });
+    
+    if (surveyData.questions.length > 0 && 
+        !surveyData.finalSurveyResponse && 
+        !currentSession.finalSurveyDisabled) {
+        addTerminalOutput('📋 Final periodic survey required before submission...', 'info');
         showFinalSurvey();
         return; // Will continue after final survey
+    } else if (currentSession.finalSurveyDisabled) {
+        addTerminalOutput('✅ Final periodic survey skipped (disabled for this assignment)', 'success');
+        console.log('✅ Skipping final survey - disabled by configuration');
     }
     
     // Check for post-survey

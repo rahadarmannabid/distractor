@@ -807,13 +807,27 @@
         });
 
         // Show/hide error messages
-        function showError(message) {
+        function showError(message, type = 'error') {
             errorText.textContent = message;
             errorMessage.classList.remove('hidden');
+            
+            // Visual styling based on type
+            if (type === 'warning') {
+                errorMessage.style.borderColor = '#f59e0b';
+                errorMessage.style.background = 'linear-gradient(135deg, #3d2e1b, #4d3722)';
+                errorMessage.querySelector('span:first-child').textContent = '⚠️';
+            } else {
+                errorMessage.style.borderColor = '#ef4444';
+                errorMessage.style.background = 'linear-gradient(135deg, #2d1b1b, #3d2222)';
+                errorMessage.querySelector('span:first-child').textContent = '⚠️';
+            }
         }
 
         function hideError() {
             errorMessage.classList.add('hidden');
+            // Reset to default error styling
+            errorMessage.style.borderColor = '#ef4444';
+            errorMessage.style.background = 'linear-gradient(135deg, #2d1b1b, #3d2222)';
         }
 
         // Generate session token for URL
@@ -904,6 +918,9 @@
 
                 // Download assignment
                 try {
+                    // Show download in progress
+                    loginButton.innerHTML = '<div class="loading"><span class="spinner"></span>Downloading assignment...</div>';
+                    
                     // Trigger PDF download using fetch for better error handling
                     const downloadResponse = await fetch(`/download-assignment/${assignmentKey}`);
                     
@@ -920,15 +937,29 @@
                         // Clean up
                         setTimeout(() => URL.revokeObjectURL(url), 100);
                         
+                        // SUCCESS MESSAGE
+                        loginButton.innerHTML = '✅ Assignment downloaded successfully!';
+                        loginButton.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
                         await new Promise(resolve => setTimeout(resolve, 1500));
+                        
                     } else {
-                        throw new Error('Download failed');
+                        throw new Error('Assignment PDF not found on server');
                     }
                     
                 } catch (downloadError) {
                     console.error('PDF download error:', downloadError);
-                    this.showError('Assignment download failed, but you can continue to the IDE', 'warning');
-                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
+                    // CLEAR WARNING MESSAGE
+                    loginButton.innerHTML = '⚠️ Assignment file not available';
+                    loginButton.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
+                    
+                    // Show detailed error message
+                    showError(
+                        'Assignment download failed. The assignment file may not be uploaded yet. You can still access the IDE, but please contact your instructor for the assignment details.',
+                        'warning'
+                    );
+                    
+                    await new Promise(resolve => setTimeout(resolve, 3000)); // Wait longer to read message
                 }
                 
                 // Check if pre-survey is required and redirect accordingly
