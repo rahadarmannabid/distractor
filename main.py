@@ -132,6 +132,14 @@ def get_condition_keys():
     return condition_1_keys, condition_2_keys, condition_3_keys
 
 
+def get_final_survey_disabled_prefixes():
+    """Get prefixes that should NOT show final periodic survey"""
+    disabled_prefixes = os.getenv("FINAL_SURVEY", "").lower().split(",")
+    # Clean up the prefixes (remove spaces and empty strings)
+    disabled_prefixes = [prefix.strip() for prefix in disabled_prefixes if prefix.strip()]
+    return disabled_prefixes
+
+
 # Starter code directory
 STARTER_CODE_DIR = os.getenv("STARTER_CODE_DIR", "starter_code")
 
@@ -212,6 +220,17 @@ def get_periodic_survey_config():
         "enabled_prefixes": periodic_prefixes,
         "start_after_suggestions": start_after
     }
+
+def is_final_survey_disabled(prefix):
+    """Check if final periodic survey is disabled for this prefix"""
+    if not prefix:
+        return False
+    
+    disabled_prefixes = get_final_survey_disabled_prefixes()
+    prefix_lower = prefix.lower()
+    
+    # Check if prefix matches any disabled prefix
+    return any(prefix_lower.startswith(disabled.lower()) for disabled in disabled_prefixes)
 
 def get_assignment_base_key(assignment_key):
     """
@@ -717,6 +736,7 @@ class AuthResponse(BaseModel):
     starter_code: str | None = None
     periodic_survey_enabled: bool = False
     periodic_survey_start: int = 5
+    final_survey_disabled: bool = False
 
 class ActivityEntry(BaseModel):
     timestamp: str
@@ -1902,7 +1922,7 @@ class SurveyStatus(str, Enum):
 class SurveyQuestionData(BaseModel):
     """Store complete question data"""
     id: str
-    type: str  # likert, multiple_choice, open_ended
+    type: str  # likert, multiple_choice, open_ended, info_block
     question: str
     required: bool
     # Type-specific fields
@@ -1910,6 +1930,8 @@ class SurveyQuestionData(BaseModel):
     options: Optional[List[str]] = None      # For multiple choice
     placeholder: Optional[str] = None        # For open-ended
     max_length: Optional[int] = None         # For open-ended
+    min_length: Optional[int] = None         # For open-ended (minimum character requirement)
+    help_text: Optional[str] = None          # Optional help text for any question type
 
 
 class SurveyResponseData(BaseModel):
@@ -2299,6 +2321,9 @@ async def authenticate_user(request: AuthRequest):
         periodic_config = get_periodic_survey_config()
         periodic_enabled = base_key.lower() in periodic_config["enabled_prefixes"] if base_key else False
         
+        # Check if final periodic survey is disabled for this assignment
+        final_survey_disabled = is_final_survey_disabled(base_key)
+        
         return AuthResponse(
             status="success",
             message="Authentication successful",
@@ -2311,7 +2336,8 @@ async def authenticate_user(request: AuthRequest):
             programming_language=programming_language,
             starter_code=starter_code,
             periodic_survey_enabled=periodic_enabled,
-            periodic_survey_start=periodic_config["start_after_suggestions"]
+            periodic_survey_start=periodic_config["start_after_suggestions"],
+            final_survey_disabled=final_survey_disabled
         )
         
     except HTTPException:

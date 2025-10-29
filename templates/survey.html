@@ -191,6 +191,19 @@
             color: #ef4444;
         }
 
+        /* Help Text */
+        .question-help-text {
+            color: #888;
+            font-size: 11px;
+            font-style: italic;
+            margin: 8px 0 12px 0;
+            padding: 8px 12px;
+            background: rgba(64, 64, 64, 0.2);
+            border-left: 3px solid #569cd6;
+            border-radius: 4px;
+            line-height: 1.4;
+        }
+
         /* Likert Scale */
         .likert-scale {
             display: flex;
@@ -420,31 +433,6 @@
             font-size: 14px;
         }
 
-        /* Responsive */
-        @media (max-width: 768px) {
-            .survey-container {
-                padding: 25px 20px;
-            }
-
-            .survey-header h1 {
-                font-size: 22px;
-            }
-
-            .likert-scale {
-                flex-direction: column;
-            }
-
-            .likert-option label {
-                padding: 12px;
-                min-height: 50px;
-            }
-
-            .btn {
-                padding: 12px 30px;
-                font-size: 14px;
-            }
-        }
-
         /* Info section at bottom */
         .info-section {
             margin-top: 30px;
@@ -473,201 +461,360 @@
             margin-top: 10px;
         }
 
+        /* Image Container */
+        .question-image-container {
+            margin: 15px 0;
+            text-align: center;
+        }
+
+        .question-image {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            border: 2px solid #404040;
+            transition: all 0.3s ease;
+            cursor: default;
+        }
+
+        .question-image.clickable {
+            cursor: pointer;
+        }
+
+        .question-image.clickable:hover {
+            border-color: #569cd6;
+            transform: scale(1.02);
+            box-shadow: 0 4px 15px rgba(86, 156, 214, 0.3);
+        }
+
+        .question-image.code-background {
+            background: #1e1e1e;
+            padding: 10px;
+        }
+
+        .image-caption {
+            display: block;
+            margin-top: 8px;
+            color: #888;
+            font-size: 12px;
+            font-style: italic;
+        }
+
+        .image-position-above {
+            margin-bottom: 15px;
+        }
+
+        .image-position-below {
+            margin-top: 15px;
+        }
+
+        /* Multiple Images Layout */
+        .multiple-images {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .multiple-images .question-image {
+            max-width: 300px;
+        }
+
+        /* Image Loading State */
+        .image-loading {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #404040;
+            border-radius: 50%;
+            border-top-color: #569cd6;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        .image-error {
+            color: #ef4444;
+            font-size: 12px;
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid #ef4444;
+            border-radius: 4px;
+        }
+
+        /* Survey Header Image */
+        .survey-header-image {
+            width: 100%;
+            max-width: 100%;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            border: 2px solid #404040;
+        }
+
+        /* Image Modal for Zoom */
+        .image-modal {
+            display: none;
+            position: fixed;
+            z-index: 10000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            overflow: auto;
+        }
+
+        .image-modal.active {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            animation: modalFadeIn 0.3s ease-out;
+        }
+
+        @keyframes modalFadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .image-modal-content {
+            max-width: 95%;
+            max-height: 95%;
+            margin: auto;
+            display: block;
+            border: 2px solid #569cd6;
+            border-radius: 8px;
+            animation: modalZoomIn 0.3s ease-out;
+        }
+
+        @keyframes modalZoomIn {
+            from { transform: scale(0.8); }
+            to { transform: scale(1); }
+        }
+
+        .image-modal-close {
+            position: absolute;
+            top: 20px;
+            right: 40px;
+            color: #f1f1f1;
+            font-size: 40px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.3s;
+            z-index: 10001;
+        }
+
+        .image-modal-close:hover {
+            color: #f97316;
+            transform: scale(1.2);
+        }
+
+        /* Character counter for text input */
+        .char-counter {
+            text-align: right;
+            font-size: 11px;
+            color: #888;
+            margin-top: 5px;
+        }
+
+        .char-counter.warning {
+            color: #f59e0b;
+        }
+
+        .char-counter.error {
+            color: #ef4444;
+        }
+
         /* ========================================
-   IMAGE SUPPORT STYLES - ADD THIS SECTION
-   ======================================== */
+           NEW QUESTION TYPES STYLES
+           ======================================== */
 
-/* Help Text */
-.question-help-text {
-    color: #888;
-    font-size: 11px;
-    font-style: italic;
-    margin: 8px 0 12px 0;
-    padding: 8px 12px;
-    background: rgba(64, 64, 64, 0.2);
-    border-left: 3px solid #569cd6;
-    border-radius: 4px;
-    line-height: 1.4;
-}
+        /* Info Block Question */
+        .info-block-question {
+            background: rgba(86, 156, 214, 0.1) !important;
+            border-left: 4px solid #569cd6 !important;
+            padding: 20px;
+        }
 
-/* Image Container */
-.question-image-container {
-    margin: 15px 0;
-    text-align: center;
-}
+        .info-block-content {
+            color: #d4d4d4;
+            font-size: 14px;
+            line-height: 1.6;
+            margin-bottom: 15px;
+        }
 
-.question-image {
-    max-width: 100%;
-    height: auto;
-    border-radius: 8px;
-    border: 2px solid #404040;
-    transition: all 0.3s ease;
-    cursor: default;
-}
+        /* 7-point Likert scale with N/A */
+        .likert-7-scale {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
 
-.question-image.clickable {
-    cursor: pointer;
-}
+        .likert-7-scale .likert-option {
+            flex: 1;
+            min-width: 60px;
+            max-width: 90px;
+        }
 
-.question-image.clickable:hover {
-    border-color: #569cd6;
-    transform: scale(1.02);
-    box-shadow: 0 4px 15px rgba(86, 156, 214, 0.3);
-}
+        .likert-number {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 3px;
+            color: #569cd6;
+        }
 
-.question-image.code-background {
-    background: #1e1e1e;
-    padding: 10px;
-}
+        .likert-7-scale .likert-option label {
+            min-height: 85px;
+            padding: 10px 5px;
+        }
 
-.image-caption {
-    display: block;
-    margin-top: 8px;
-    color: #888;
-    font-size: 12px;
-    font-style: italic;
-}
+        .likert-na-option {
+            border-left: 3px solid #f59e0b;
+            padding-left: 5px;
+            margin-left: 5px;
+            background: rgba(245, 158, 11, 0.05);
+        }
 
-.image-position-above {
-    margin-bottom: 15px;
-}
+        .likert-na-option label {
+            background: rgba(245, 158, 11, 0.1) !important;
+            border-color: #f59e0b !important;
+        }
 
-.image-position-below {
-    margin-top: 15px;
-}
+        .likert-na-option input[type="radio"]:checked + label {
+            background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+            border-color: #f59e0b !important;
+        }
 
-/* Multiple Images Layout */
-.multiple-images {
-    display: flex;
-    gap: 15px;
-    justify-content: center;
-    flex-wrap: wrap;
-}
+        /* Slider styles */
+        .slider-container {
+            margin: 20px 0;
+            padding: 15px;
+            background: rgba(64, 64, 64, 0.2);
+            border-radius: 8px;
+        }
 
-.multiple-images .question-image {
-    max-width: 300px;
-}
+        .slider-value {
+            text-align: center;
+            font-size: 32px;
+            font-weight: bold;
+            color: #569cd6;
+            margin-bottom: 20px;
+            text-shadow: 0 2px 10px rgba(86, 156, 214, 0.5);
+        }
 
-/* Image Loading State */
-.image-loading {
-    display: inline-block;
-    width: 40px;
-    height: 40px;
-    border: 4px solid #404040;
-    border-radius: 50%;
-    border-top-color: #569cd6;
-    animation: spin 1s linear infinite;
-    margin: 20px auto;
-}
+        .slider-input {
+            width: 100%;
+            height: 10px;
+            border-radius: 5px;
+            background: linear-gradient(to right, #1e1e1e 0%, #569cd6 50%, #f97316 100%);
+            outline: none;
+            -webkit-appearance: none;
+            cursor: pointer;
+        }
 
-.image-error {
-    color: #ef4444;
-    font-size: 12px;
-    margin-top: 10px;
-    padding: 10px;
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid #ef4444;
-    border-radius: 4px;
-}
+        .slider-input::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(249, 115, 22, 0.6);
+            transition: all 0.3s ease;
+        }
 
-/* Survey Header Image */
-.survey-header-image {
-    width: 100%;
-    max-width: 100%;
-    margin-bottom: 20px;
-    border-radius: 8px;
-    border: 2px solid #404040;
-}
+        .slider-input::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 6px 20px rgba(249, 115, 22, 0.8);
+        }
 
-/* Image Modal for Zoom */
-.image-modal {
-    display: none;
-    position: fixed;
-    z-index: 10000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.95);
-    overflow: auto;
-}
+        .slider-input::-moz-range-thumb {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 4px 12px rgba(249, 115, 22, 0.6);
+            transition: all 0.3s ease;
+        }
 
-.image-modal.active {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    animation: modalFadeIn 0.3s ease-out;
-}
+        .slider-input::-moz-range-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 6px 20px rgba(249, 115, 22, 0.8);
+        }
 
-@keyframes modalFadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
+        .slider-labels {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 12px;
+            font-size: 13px;
+            color: #888;
+            font-weight: 600;
+        }
 
-.image-modal-content {
-    max-width: 95%;
-    max-height: 95%;
-    margin: auto;
-    display: block;
-    border: 2px solid #569cd6;
-    border-radius: 8px;
-    animation: modalZoomIn 0.3s ease-out;
-}
+        /* Responsive */
+        @media (max-width: 768px) {
+            .survey-container {
+                padding: 25px 20px;
+            }
 
-@keyframes modalZoomIn {
-    from { transform: scale(0.8); }
-    to { transform: scale(1); }
-}
+            .survey-header h1 {
+                font-size: 22px;
+            }
 
-.image-modal-close {
-    position: absolute;
-    top: 20px;
-    right: 40px;
-    color: #f1f1f1;
-    font-size: 40px;
-    font-weight: bold;
-    cursor: pointer;
-    transition: 0.3s;
-    z-index: 10001;
-}
+            .likert-scale {
+                flex-direction: column;
+            }
 
-.image-modal-close:hover {
-    color: #f97316;
-    transform: scale(1.2);
-}
+            .likert-option label {
+                padding: 12px;
+                min-height: 50px;
+            }
 
-/* Character counter for text input */
-.char-counter {
-    text-align: right;
-    font-size: 11px;
-    color: #888;
-    margin-top: 5px;
-}
+            .btn {
+                padding: 12px 30px;
+                font-size: 14px;
+            }
 
-.char-counter.warning {
-    color: #f59e0b;
-}
+            .multiple-images {
+                flex-direction: column;
+            }
+            
+            .multiple-images .question-image {
+                max-width: 100%;
+            }
+            
+            .image-modal-close {
+                top: 10px;
+                right: 20px;
+                font-size: 30px;
+            }
 
-.char-counter.error {
-    color: #ef4444;
-}
-
-/* Responsive Images */
-@media (max-width: 768px) {
-    .multiple-images {
-        flex-direction: column;
-    }
-    
-    .multiple-images .question-image {
-        max-width: 100%;
-    }
-    
-    .image-modal-close {
-        top: 10px;
-        right: 20px;
-        font-size: 30px;
-    }
-}
+            .likert-7-scale {
+                gap: 5px;
+            }
+            
+            .likert-7-scale .likert-option {
+                min-width: 45px;
+                max-width: 70px;
+            }
+            
+            .likert-number {
+                font-size: 14px;
+            }
+            
+            .likert-7-scale .likert-option label {
+                min-height: 75px;
+                padding: 8px 3px;
+                font-size: 10px;
+            }
+            
+            .slider-value {
+                font-size: 24px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -709,6 +856,7 @@
         
         // Navigation control flag to prevent warning during legitimate redirects
         let allowNavigation = false;
+        
         class SurveyManager {
             constructor() {
                 this.surveyType = new URLSearchParams(window.location.search).get('type');
@@ -766,72 +914,100 @@
             }
 
             renderSurvey() {
-            const content = document.getElementById('surveyContent');
-            content.className = '';
-            content.innerHTML = '';
+                const content = document.getElementById('surveyContent');
+                content.className = '';
+                content.innerHTML = '';
 
-            // ✨ NEW: Add header image if present
-            if (this.surveyConfig.header_image) {
-                const headerImg = document.createElement('img');
-                headerImg.className = 'survey-header-image';
-                headerImg.src = `/survey-images/${this.surveyConfig.header_image.src}`;
-                headerImg.alt = this.surveyConfig.header_image.alt || 'Survey header';
-                headerImg.onerror = () => {
-                    console.error('Header image failed to load');
-                    headerImg.remove();
-                };
-                content.appendChild(headerImg);
+                // Add header image if present
+                if (this.surveyConfig.header_image) {
+                    const headerImg = document.createElement('img');
+                    headerImg.className = 'survey-header-image';
+                    headerImg.src = `/survey-images/${this.surveyConfig.header_image.src}`;
+                    headerImg.alt = this.surveyConfig.header_image.alt || 'Survey header';
+                    headerImg.onerror = () => {
+                        console.error('Header image failed to load');
+                        headerImg.remove();
+                    };
+                    content.appendChild(headerImg);
+                }
+
+                // Filter out info_block from question numbering
+                let questionNumber = 1;
+                this.surveyConfig.questions.forEach((question) => {
+                    const questionDiv = this.createQuestionElement(question, questionNumber - 1);
+                    content.appendChild(questionDiv);
+                    
+                    // Only increment for actual questions, not info blocks
+                    if (question.type !== 'info_block') {
+                        questionNumber++;
+                    }
+                });
+
+                document.getElementById('buttonGroup').style.display = 'flex';
+                document.getElementById('submitBtn').disabled = true;
+                this.updateProgress();
             }
-
-            this.surveyConfig.questions.forEach((question, index) => {
-                const questionDiv = this.createQuestionElement(question, index);
-                content.appendChild(questionDiv);
-            });
-
-            document.getElementById('buttonGroup').style.display = 'flex';
-            document.getElementById('submitBtn').disabled = true;
-            this.updateProgress();
-        }
 
             createQuestionElement(question, index) {
-            const div = document.createElement('div');
-            div.className = 'question';
-            div.dataset.questionId = question.id;
+                const div = document.createElement('div');
+                
+                // Handle info_block differently (no numbering)
+                if (question.type === 'info_block') {
+                    div.className = 'question info-block-question';
+                    div.dataset.questionId = question.id;
+                    
+                    const content = document.createElement('div');
+                    content.className = 'info-block-content';
+                    content.innerHTML = question.content || '';
+                    div.appendChild(content);
+                    
+                    // Add image if present
+                    if (question.image) {
+                        div.appendChild(this.createImageElement(question.image, question.id));
+                    }
+                    
+                    return div; // Return early for info blocks
+                }
+                
+                // Regular question handling
+                div.className = 'question';
+                div.dataset.questionId = question.id;
 
-            const label = document.createElement('label');
-            label.className = 'question-label';
-            // Check if question is required (defaults to true if not specified)
-            const isRequired = question.required !== false;
-            const requiredMark = isRequired ? '<span class="required">*</span>' : '';
-            label.innerHTML = `${index + 1}. ${question.question} ${requiredMark}`;
-            div.appendChild(label);
+                const label = document.createElement('label');
+                label.className = 'question-label';
+                const isRequired = question.required !== false;
+                const requiredMark = isRequired ? '<span class="required">*</span>' : '';
+                label.innerHTML = `${index + 1}. ${question.question} ${requiredMark}`;
+                div.appendChild(label);
 
-            // ✨ NEW: Add help text if present
-            if (question.help_text) {
-                const helpText = document.createElement('div');
-                helpText.className = 'question-help-text';
-                helpText.textContent = question.help_text;
-                div.appendChild(helpText);
+                if (question.help_text) {
+                    const helpText = document.createElement('div');
+                    helpText.className = 'question-help-text';
+                    helpText.textContent = question.help_text;
+                    div.appendChild(helpText);
+                }
+
+                if (question.image) {
+                    div.appendChild(this.createImageElement(question.image, question.id));
+                } else if (question.images && Array.isArray(question.images)) {
+                    div.appendChild(this.createMultipleImagesElement(question.images, question.id));
+                }
+
+                // Add question input based on type
+                if (question.type === 'likert') {
+                    div.appendChild(this.createLikertScale(question));
+                } else if (question.type === 'likert_7_with_na') {
+                    div.appendChild(this.createLikert7WithNA(question));
+                } else if (question.type === 'slider') {
+                    div.appendChild(this.createSlider(question));
+                } else if (question.type === 'multiple_choice') {
+                    div.appendChild(this.createMultipleChoice(question));
+                } else if (question.type === 'open_ended') {
+                    div.appendChild(this.createOpenEnded(question));
+                }
+
+                return div;
             }
-
-            // ✨ NEW: Add image(s) if present
-            if (question.image) {
-                div.appendChild(this.createImageElement(question.image, question.id));
-            } else if (question.images && Array.isArray(question.images)) {
-                div.appendChild(this.createMultipleImagesElement(question.images, question.id));
-            }
-
-            // Add question input based on type
-            if (question.type === 'likert') {
-                div.appendChild(this.createLikertScale(question));
-            } else if (question.type === 'multiple_choice') {
-                div.appendChild(this.createMultipleChoice(question));
-            } else if (question.type === 'open_ended') {
-                div.appendChild(this.createOpenEnded(question));
-            }
-
-            return div;
-        }
 
             createLikertScale(question) {
                 const container = document.createElement('div');
@@ -874,6 +1050,116 @@
                 return container;
             }
 
+            createLikert7WithNA(question) {
+                const container = document.createElement('div');
+                container.className = 'likert-scale likert-7-scale';
+
+                const scale = question.scale || {
+                    min: 1,
+                    max: 7,
+                    minLabel: 'Strongly Disagree',
+                    maxLabel: 'Strongly Agree'
+                };
+
+                // Create 7 regular options
+                for (let i = scale.min; i <= scale.max; i++) {
+                    const option = document.createElement('div');
+                    option.className = 'likert-option';
+
+                    const input = document.createElement('input');
+                    input.type = 'radio';
+                    input.name = question.id;
+                    input.value = i;
+                    input.id = `${question.id}_${i}`;
+                    input.addEventListener('change', () => this.handleResponse(question.id, i));
+
+                    const label = document.createElement('label');
+                    label.htmlFor = input.id;
+                    
+                    if (i === scale.min) {
+                        label.innerHTML = `<div class="likert-number">${i}</div><div class="likert-label">${scale.minLabel}</div>`;
+                    } else if (i === scale.max) {
+                        label.innerHTML = `<div class="likert-number">${i}</div><div class="likert-label">${scale.maxLabel}</div>`;
+                    } else {
+                        label.innerHTML = `<div class="likert-number">${i}</div>`;
+                    }
+
+                    option.appendChild(input);
+                    option.appendChild(label);
+                    container.appendChild(option);
+                }
+
+                // Add N/A option
+                const naOption = document.createElement('div');
+                naOption.className = 'likert-option likert-na-option';
+
+                const naInput = document.createElement('input');
+                naInput.type = 'radio';
+                naInput.name = question.id;
+                naInput.value = 'N/A';
+                naInput.id = `${question.id}_na`;
+                naInput.addEventListener('change', () => this.handleResponse(question.id, 'N/A'));
+
+                const naLabel = document.createElement('label');
+                naLabel.htmlFor = naInput.id;
+                naLabel.innerHTML = `<div class="likert-label" style="font-weight: bold; padding: 10px;">N/A</div>`;
+
+                naOption.appendChild(naInput);
+                naOption.appendChild(naLabel);
+                container.appendChild(naOption);
+
+                return container;
+            }
+
+            createSlider(question) {
+                const container = document.createElement('div');
+                container.className = 'slider-container';
+
+                const scale = question.scale || {
+                    min: 0,
+                    max: 100,
+                    step: 5,
+                    default: 50,
+                    unit: '%'
+                };
+
+                const sliderValue = document.createElement('div');
+                sliderValue.className = 'slider-value';
+                sliderValue.textContent = `${scale.default}${scale.unit || ''}`;
+
+                const slider = document.createElement('input');
+                slider.type = 'range';
+                slider.id = question.id;
+                slider.name = question.id;
+                slider.min = scale.min;
+                slider.max = scale.max;
+                slider.step = scale.step || 1;
+                slider.value = scale.default || scale.min;
+                slider.className = 'slider-input';
+
+                slider.addEventListener('input', (e) => {
+                    const value = e.target.value;
+                    sliderValue.textContent = `${value}${scale.unit || ''}`;
+                    this.handleResponse(question.id, value);
+                });
+
+                // Initialize with default value
+                this.handleResponse(question.id, slider.value);
+
+                const sliderLabels = document.createElement('div');
+                sliderLabels.className = 'slider-labels';
+                sliderLabels.innerHTML = `
+                    <span>${scale.min}${scale.unit || ''}</span>
+                    <span>${scale.max}${scale.unit || ''}</span>
+                `;
+
+                container.appendChild(sliderValue);
+                container.appendChild(slider);
+                container.appendChild(sliderLabels);
+
+                return container;
+            }
+
             createMultipleChoice(question) {
                 const container = document.createElement('div');
                 container.className = 'multiple-choice';
@@ -911,55 +1197,50 @@
             }
 
             createOpenEnded(question) {
-            const container = document.createElement('div');
-            
-            const textarea = document.createElement('textarea');
-            textarea.className = 'text-input';
-            textarea.placeholder = question.placeholder || 'Enter your response here...';
-            textarea.maxLength = question.max_length || 1000;
-            
-            // ✨ NEW: Character counter
-            const charCounter = document.createElement('div');
-            charCounter.className = 'char-counter';
-            const minLength = question.min_length || 0;
-            charCounter.textContent = `0 / ${question.max_length || 1000} characters${minLength > 0 ? ` (minimum ${minLength})` : ''}`;
-            
-            textarea.addEventListener('input', (e) => {
-                const value = e.target.value;
-                const trimmedValue = value.trim();
-                const currentLength = value.length;
+                const container = document.createElement('div');
                 
-                // Update character counter
-                charCounter.textContent = `${currentLength} / ${question.max_length || 1000} characters${minLength > 0 ? ` (minimum ${minLength})` : ''}`;
+                const textarea = document.createElement('textarea');
+                textarea.className = 'text-input';
+                textarea.placeholder = question.placeholder || 'Enter your response here...';
+                textarea.maxLength = question.max_length || 1000;
                 
-                // Color coding for character counter
-                if (minLength > 0 && trimmedValue.length < minLength) {
-                    charCounter.className = 'char-counter warning';
-                } else if (currentLength > (question.max_length || 1000) * 0.9) {
-                    charCounter.className = 'char-counter warning';
-                } else {
-                    charCounter.className = 'char-counter';
-                }
+                const charCounter = document.createElement('div');
+                charCounter.className = 'char-counter';
+                const minLength = question.min_length || 0;
+                charCounter.textContent = `0 / ${question.max_length || 1000} characters${minLength > 0 ? ` (minimum ${minLength})` : ''}`;
                 
-                // ✨ NEW: Validate minimum length
-                if (trimmedValue.length >= minLength) {
-                    this.handleResponse(question.id, value); // Store with original formatting
-                } else {
-                    // Remove from responses if doesn't meet minimum
-                    delete this.responses[question.id];
-                    this.updateProgress();
-                }
-            });
-            
-            container.appendChild(textarea);
-            container.appendChild(charCounter);
-            
-            return container;
-        }
-
-            // ========================================
-            // IMAGE SUPPORT METHODS - ADD THESE
-            // ========================================
+                textarea.addEventListener('input', (e) => {
+                    const value = e.target.value;
+                    const trimmedValue = value.trim();
+                    const currentLength = value.length;
+                    
+                    // Update character counter
+                    charCounter.textContent = `${currentLength} / ${question.max_length || 1000} characters${minLength > 0 ? ` (minimum ${minLength})` : ''}`;
+                    
+                    // Color coding for character counter
+                    if (minLength > 0 && trimmedValue.length < minLength) {
+                        charCounter.className = 'char-counter warning';
+                    } else if (currentLength > (question.max_length || 1000) * 0.9) {
+                        charCounter.className = 'char-counter warning';
+                    } else {
+                        charCounter.className = 'char-counter';
+                    }
+                    
+                    // Validate minimum length
+                    if (trimmedValue.length >= minLength) {
+                        this.handleResponse(question.id, value);
+                    } else {
+                        // Remove from responses if doesn't meet minimum
+                        delete this.responses[question.id];
+                        this.updateProgress();
+                    }
+                });
+                
+                container.appendChild(textarea);
+                container.appendChild(charCounter);
+                
+                return container;
+            }
 
             createImageElement(imageConfig, questionId) {
                 const container = document.createElement('div');
@@ -970,7 +1251,6 @@
                 img.alt = imageConfig.alt || 'Survey question image';
                 img.loading = 'eager';
                 
-                // Add custom styling
                 if (imageConfig.width) {
                     img.style.width = imageConfig.width;
                 }
@@ -993,7 +1273,7 @@
                 container.appendChild(loadingDiv);
                 
                 img.onload = () => {
-                    console.log(`✅ Loaded: ${imageConfig.src} (${img.naturalWidth}x${img.naturalHeight})`);
+                    console.log(`✅ Loaded: ${imageConfig.src}`);
                     loadingDiv.remove();
                     container.appendChild(img);
                     
@@ -1007,7 +1287,6 @@
                 
                 img.onerror = (e) => {
                     console.error(`❌ Failed: ${imageConfig.src}`);
-                    console.error(`   URL: ${window.location.origin}${imageSrc}`);
                     loadingDiv.remove();
                     const errorDiv = document.createElement('div');
                     errorDiv.className = 'image-error';
@@ -1015,24 +1294,7 @@
                     container.appendChild(errorDiv);
                 };
                 
-                const timeout = setTimeout(() => {
-                    if (loadingDiv.parentElement) {
-                        console.error(`⏱️ Timeout: ${imageConfig.src}`);
-                        loadingDiv.remove();
-                        const errorDiv = document.createElement('div');
-                        errorDiv.className = 'image-error';
-                        errorDiv.textContent = `⏱️ Timeout: ${imageConfig.src}`;
-                        container.appendChild(errorDiv);
-                    }
-                }, 10000);
-                
                 img.src = imageSrc;
-                
-                if (img.complete) {
-                    console.log(`⚡ Cached: ${imageConfig.src}`);
-                    clearTimeout(timeout);
-                    img.onload();
-                }
                 
                 if (imageConfig.zoom || imageConfig.clickable) {
                     img.classList.add('clickable');
@@ -1065,7 +1327,6 @@
                         imgWrapper.appendChild(errorDiv);
                     };
                     
-                    // Add zoom if configured
                     if (imageConfig.zoom || imageConfig.clickable) {
                         img.classList.add('clickable');
                         img.onclick = () => this.openImageModal(img.src, imageConfig.alt);
@@ -1087,7 +1348,6 @@
             }
 
             openImageModal(src, alt) {
-                // Create modal if doesn't exist
                 let modal = document.getElementById('imageModal');
                 if (!modal) {
                     modal = document.createElement('div');
@@ -1099,7 +1359,6 @@
                     `;
                     document.body.appendChild(modal);
                     
-                    // Close modal on click
                     modal.querySelector('.image-modal-close').onclick = () => {
                         modal.classList.remove('active');
                     };
@@ -1109,7 +1368,6 @@
                         }
                     };
                     
-                    // Close on ESC key
                     document.addEventListener('keydown', (e) => {
                         if (e.key === 'Escape' && modal.classList.contains('active')) {
                             modal.classList.remove('active');
@@ -1117,13 +1375,11 @@
                     });
                 }
                 
-                // Show modal with image
                 const modalImg = document.getElementById('modalImage');
                 modalImg.src = src;
                 modalImg.alt = alt;
                 modal.classList.add('active');
             }
-
 
             handleResponse(questionId, answer) {
                 this.responses[questionId] = answer;
@@ -1131,13 +1387,13 @@
             }
 
             updateProgress() {
-                const totalQuestions = this.surveyConfig.questions.length;
+                // Exclude info_block from total count
+                const totalQuestions = this.surveyConfig.questions.filter(q => q.type !== 'info_block').length;
                 const answeredQuestions = Object.keys(this.responses).length;
                 const progress = (answeredQuestions / totalQuestions) * 100;
 
                 document.getElementById('progressFill').style.width = `${progress}%`;
                 
-                // Enable submit button only when ALL questions are answered
                 const submitBtn = document.getElementById('submitBtn');
                 if (submitBtn) {
                     submitBtn.disabled = answeredQuestions < totalQuestions;
@@ -1158,11 +1414,9 @@
             setupEventListeners() {
                 document.getElementById('submitBtn').addEventListener('click', () => this.submitSurvey());
 
-                // Prevent accidental navigation
                 window.addEventListener('beforeunload', (e) => {
-                    // Allow navigation if it's a legitimate redirect
                     if (allowNavigation) {
-                        return undefined;  // Don't show warning
+                        return undefined;
                     }
                     
                     if (Object.keys(this.responses).length > 0) {
@@ -1172,266 +1426,269 @@
                 });
             }
 
-        async submitSurvey() {
-            // ✨ IMPROVED: Validate required questions and minimum lengths
-            const requiredQuestions = this.surveyConfig.questions.filter(q => q.required !== false);
-            const unansweredRequired = requiredQuestions.filter(q => !this.responses[q.id]);
-            
-            if (unansweredRequired.length > 0) {
-                this.showError(`Please answer all required questions (${unansweredRequired.length} remaining).`);
-                return;
-            }
-            
-            // ✨ NEW: Validate minimum lengths for open-ended questions
-            const invalidLengths = [];
-            for (const question of this.surveyConfig.questions) {
-                if (question.type === 'open_ended' && question.min_length) {
-                    const response = this.responses[question.id];
-                    if (response && response.trim().length < question.min_length) {
-                        invalidLengths.push({
-                            id: question.id,
-                            minLength: question.min_length,
-                            currentLength: response.trim().length
-                        });
+            async submitSurvey() {
+                const requiredQuestions = this.surveyConfig.questions.filter(q => q.required !== false && q.type !== 'info_block');
+                const unansweredRequired = requiredQuestions.filter(q => !this.responses[q.id]);
+                
+                if (unansweredRequired.length > 0) {
+                    this.showError(`Please answer all required questions (${unansweredRequired.length} remaining).`);
+                    return;
+                }
+                
+                const invalidLengths = [];
+                for (const question of this.surveyConfig.questions) {
+                    if (question.type === 'open_ended' && question.min_length) {
+                        const response = this.responses[question.id];
+                        if (response && response.trim().length < question.min_length) {
+                            invalidLengths.push({
+                                id: question.id,
+                                minLength: question.min_length,
+                                currentLength: response.trim().length
+                            });
+                        }
                     }
                 }
-            }
-            
-            if (invalidLengths.length > 0) {
-                const firstInvalid = invalidLengths[0];
-                this.showError(`Some answers are too short. Please provide at least ${firstInvalid.minLength} characters for all text responses.`);
-                return;
-            }
+                
+                if (invalidLengths.length > 0) {
+                    const firstInvalid = invalidLengths[0];
+                    this.showError(`Some answers are too short. Please provide at least ${firstInvalid.minLength} characters for all text responses.`);
+                    return;
+                }
 
-            // ============================================
-            // ACTUAL SUBMISSION LOGIC STARTS HERE
-            // ============================================
+                const submitBtn = document.getElementById('submitBtn');
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Submitting...';
 
-            const submitBtn = document.getElementById('submitBtn');
-            submitBtn.disabled = true;
-            submitBtn.textContent = 'Submitting...';
+                try {
+                    const completionTime = (Date.now() - this.startTime) / 1000;
 
-            try {
-                const completionTime = (Date.now() - this.startTime) / 1000;
+                    const submission = {
+                        user_id: this.userId,
+                        session_id: this.sessionId,
+                        assignment_key: this.assignmentKey,
+                        survey_type: this.surveyType,
+                        survey_title: this.surveyConfig.title,
+                        survey_description: this.surveyConfig.description,
+                        // FIXED: Filter out info_block from questions too
+                        questions: this.surveyConfig.questions.filter(q => q.type !== 'info_block').map(q => ({
+                            id: q.id,
+                            type: q.type,
+                            question: q.question,
+                            required: q.required !== false,
+                            scale: q.scale || null,
+                            options: q.options || null,
+                            placeholder: q.placeholder || null,
+                            max_length: q.max_length || null
+                        })),
+                        responses: this.surveyConfig.questions.filter(q => q.type !== 'info_block').map(q => ({
+                            question_id: q.id,
+                            question_text: q.question,
+                            question_type: q.type,
+                            question_config: {
+                                scale: q.scale,
+                                options: q.options,
+                                placeholder: q.placeholder,
+                                max_length: q.max_length,
+                                min_length: q.min_length,
+                                help_text: q.help_text
+                            },
+                            answer: this.responses[q.id] || null,
+                            required: q.required !== false
+                        })),
+                        timestamp: new Date().toISOString(),
+                        total_questions: this.surveyConfig.questions.filter(q => q.type !== 'info_block').length,
+                        required_questions: requiredQuestions.length,
+                        completion_time_seconds: completionTime
+                    };
 
-                const submission = {
-                    user_id: this.userId,
-                    session_id: this.sessionId,
-                    assignment_key: this.assignmentKey,
-                    survey_type: this.surveyType,
-                    survey_title: this.surveyConfig.title,
-                    survey_description: this.surveyConfig.description,
-                    questions: this.surveyConfig.questions,
-                    responses: this.surveyConfig.questions.map(q => ({
-                        question_id: q.id,
-                        question_text: q.question,
-                        question_type: q.type,
-                        question_config: {
-                            scale: q.scale,
-                            options: q.options,
-                            placeholder: q.placeholder,
-                            max_length: q.max_length,
-                            min_length: q.min_length,
-                            help_text: q.help_text
-                        },
-                        answer: this.responses[q.id] || null,
-                        required: q.required !== false
-                    })),
-                    timestamp: new Date().toISOString(),
-                    total_questions: this.surveyConfig.questions.length,
-                    required_questions: requiredQuestions.length,
-                    completion_time_seconds: completionTime
-                };
-
-                const response = await fetch('/submit-pre-post-survey', {
+                    const response = await fetch('/submit-pre-post-survey', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(submission)
                 });
 
-                if (!response.ok) throw new Error('Submission failed');
-
-                await this.updateSurveyStatus('completed');
-
-                // Get auth data for redirect
-                const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
-                const sessionToken = authData.sessionToken;
-                const userId = authData.userId;
-
-                // ===== Handle Pre-Survey and Post-Survey Differently =====
-                if (this.surveyType === 'pre') {
-                    // Redirect to IDE after pre-survey
-                    allowNavigation = true;  // Allow navigation without warning
-                    window.location.href = `/index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
+                    if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('❌ SERVER ERROR:', {
+                        status: response.status,
+                        statusText: response.statusText,
+                        responseBody: errorText
+                    });
                     
-                } else if (this.surveyType === 'post') {
-                    // Post-survey complete - check if we came from submission flow
-                    const isSubmissionPending = sessionStorage.getItem('postSurveySubmissionPending') === 'true';
-                    
-                    if (isSubmissionPending) {
-                        // Clear the flag
-                        sessionStorage.removeItem('postSurveySubmissionPending');
-                        
-                        // ===== SUBMIT CODE DIRECTLY FROM HERE =====
-                        submitBtn.textContent = 'Submitting Your Code...';
-                        
-                        try {
-                            // Retrieve cached submission data
-                            const cachedData = this.retrieveCachedSubmissionData();
-                            
-                            if (!cachedData) {
-                                throw new Error('Could not find submission data. Please return to IDE and submit again.');
-                            }
-                            
-                            // Restore periodic surveys from storage
-                            const periodicSurveysData = this.restorePeriodicSurveysFromStorage();
-                            
-                            // Submit code to database
-                            const codeResponse = await fetch('/submit', {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                },
-                                body: JSON.stringify({
-                                    code: cachedData.code,
-                                    user_id: cachedData.session.userId,
-                                    assignment_key: cachedData.session.assignmentKey,
-                                    session_id: cachedData.session.sessionId,
-                                    programming_language: cachedData.session.programmingLanguage,
-                                    timestamp: new Date().toISOString(),
-                                    suggestion_clicked: cachedData.metrics.suggestionClicks,
-                                    compiler_clicked: cachedData.metrics.compilerClicks,
-                                    session_metadata: cachedData.session,
-                                    activity_logs: cachedData.activity.allActivityLogs,
-                                    activity_summary: cachedData.metrics,
-                                    survey_data: periodicSurveysData || cachedData.surveys
-                                })
-                            });
-                            
-                            if (!codeResponse.ok) {
-                                throw new Error('Code submission failed');
-                            }
-                            
-                            const result = await codeResponse.json();
-                            
-                            // Clear cached data after successful submission
-                            this.clearCachedSubmissionData();
-                            this.clearPeriodicSurveysFromStorage();
-                            
-                            // Clear auth data
-                            sessionStorage.removeItem('authData');
-                            
-                            // Show success message
-                            submitBtn.textContent = '✅ All Data Submitted!';
-                            this.showError(`Survey and code submitted successfully!\n\nSubmission ID: ${result.submission_id}\nDatabase Status: ${result.firebase_status}`, 'success');
-                            
-                            await new Promise(resolve => setTimeout(resolve, 3000));
-                            
-                            // Redirect to home/login
-                            allowNavigation = true;  // Allow navigation without warning
-                            window.location.href = '/home.html';
-                            
-                        } catch (error) {
-                            console.error('Code submission error:', error);
-                            this.showError('Code submission failed: ' + error.message);
-                            submitBtn.disabled = false;
-                            submitBtn.textContent = 'Retry Submission';
-                        }
-                        
-                    } else {
-                        // Post-survey completed outside submission flow
-                        allowNavigation = true;  // Allow navigation without warning
-                        window.location.href = `/index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
+                    // Try to parse as JSON for more details
+                    try {
+                        const errorJson = JSON.parse(errorText);
+                        console.error('❌ ERROR DETAILS:', errorJson);
+                        throw new Error(`Submission failed (${response.status}): ${errorJson.detail || errorText}`);
+                    } catch (parseError) {
+                        throw new Error(`Submission failed (${response.status}): ${errorText.substring(0, 200)}`);
                     }
                 }
+                    await this.updateSurveyStatus('completed');
 
-            } catch (error) {
-                console.error('Submission error:', error);
-                this.showError('Failed to submit survey. Please try again.');
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Submit Survey';
-            }
-        }
+                    const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
+                    const sessionToken = authData.sessionToken;
+                    const userId = authData.userId;
 
-        retrieveCachedSubmissionData() {
-            try {
-                const cached = sessionStorage.getItem('pendingSubmissionData');
-                if (cached) {
-                    return JSON.parse(cached);
+                    if (this.surveyType === 'pre') {
+                        allowNavigation = true;
+                        window.location.href = `/index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
+                        
+                    } else if (this.surveyType === 'post') {
+                        const isSubmissionPending = sessionStorage.getItem('postSurveySubmissionPending') === 'true';
+                        
+                        if (isSubmissionPending) {
+                            sessionStorage.removeItem('postSurveySubmissionPending');
+                            
+                            submitBtn.textContent = 'Submitting Your Code...';
+                            
+                            try {
+                                const cachedData = this.retrieveCachedSubmissionData();
+                                
+                                if (!cachedData) {
+                                    throw new Error('Could not find submission data. Please return to IDE and submit again.');
+                                }
+                                
+                                const periodicSurveysData = this.restorePeriodicSurveysFromStorage();
+                                
+                                const codeResponse = await fetch('/submit', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                    },
+                                    body: JSON.stringify({
+                                        code: cachedData.code,
+                                        user_id: cachedData.session.userId,
+                                        assignment_key: cachedData.session.assignmentKey,
+                                        session_id: cachedData.session.sessionId,
+                                        programming_language: cachedData.session.programmingLanguage,
+                                        timestamp: new Date().toISOString(),
+                                        suggestion_clicked: cachedData.metrics.suggestionClicks,
+                                        compiler_clicked: cachedData.metrics.compilerClicks,
+                                        session_metadata: cachedData.session,
+                                        activity_logs: cachedData.activity.allActivityLogs,
+                                        activity_summary: cachedData.metrics,
+                                        survey_data: periodicSurveysData || cachedData.surveys
+                                    })
+                                });
+                                
+                                if (!codeResponse.ok) {
+                                    throw new Error('Code submission failed');
+                                }
+                                
+                                const result = await codeResponse.json();
+                                
+                                this.clearCachedSubmissionData();
+                                this.clearPeriodicSurveysFromStorage();
+                                sessionStorage.removeItem('authData');
+                                
+                                submitBtn.textContent = '✅ All Data Submitted!';
+                                this.showError(`Survey and code submitted successfully!\n\nSubmission ID: ${result.submission_id}\nDatabase Status: ${result.firebase_status}`, 'success');
+                                
+                                await new Promise(resolve => setTimeout(resolve, 3000));
+                                
+                                allowNavigation = true;
+                                window.location.href = '/home.html';
+                                
+                            } catch (error) {
+                                console.error('Code submission error:', error);
+                                this.showError('Code submission failed: ' + error.message);
+                                submitBtn.disabled = false;
+                                submitBtn.textContent = 'Retry Submission';
+                            }
+                            
+                        } else {
+                            allowNavigation = true;
+                            window.location.href = `/index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
+                        }
+                    }
+
+                } catch (error) {
+                    console.error('Submission error:', error);
+                    this.showError('Failed to submit survey. Please try again.');
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Submit Survey';
                 }
-                return null;
-            } catch (error) {
-                console.error('Failed to retrieve cached data:', error);
-                return null;
             }
-        }
 
-        clearCachedSubmissionData() {
-            try {
-                sessionStorage.removeItem('pendingSubmissionData');
-            } catch (error) {
-                console.error('Failed to clear cached data:', error);
+            retrieveCachedSubmissionData() {
+                try {
+                    const cached = sessionStorage.getItem('pendingSubmissionData');
+                    if (cached) {
+                        return JSON.parse(cached);
+                    }
+                    return null;
+                } catch (error) {
+                    console.error('Failed to retrieve cached data:', error);
+                    return null;
+                }
             }
-        }
 
-        restorePeriodicSurveysFromStorage() {
-            try {
-                const storageKey = `periodicSurveys_${this.sessionId}`;
-                const savedData = sessionStorage.getItem(storageKey);
+            clearCachedSubmissionData() {
+                try {
+                    sessionStorage.removeItem('pendingSubmissionData');
+                } catch (error) {
+                    console.error('Failed to clear cached data:', error);
+                }
+            }
+
+            restorePeriodicSurveysFromStorage() {
+                try {
+                    const storageKey = `periodicSurveys_${this.sessionId}`;
+                    const savedData = sessionStorage.getItem(storageKey);
+                    
+                    if (savedData) {
+                        const parsedData = JSON.parse(savedData);
+                        return {
+                            periodic_surveys: parsedData.surveyResponses || [],
+                            total_occurrences: parsedData.periodicSurveyOccurrenceCount || 0,
+                            total_analyses: parsedData.analysisCount || 0,
+                            survey_interval: parsedData.surveyInterval || 4
+                        };
+                    }
+                    return null;
+                } catch (error) {
+                    console.error('Failed to restore periodic surveys:', error);
+                    return null;
+                }
+            }
+
+            clearPeriodicSurveysFromStorage() {
+                try {
+                    const storageKey = `periodicSurveys_${this.sessionId}`;
+                    sessionStorage.removeItem(storageKey);
+                } catch (error) {
+                    console.error('Failed to clear surveys:', error);
+                }
+            }
+
+            showError(message, type = 'error') {
+                const errorDiv = document.getElementById('errorMessage');
+                errorDiv.textContent = message;
+                errorDiv.style.display = 'block';
                 
-                if (savedData) {
-                    const parsedData = JSON.parse(savedData);
-                    return {
-                        periodic_surveys: parsedData.surveyResponses || [],
-                        total_occurrences: parsedData.periodicSurveyOccurrenceCount || 0,
-                        total_analyses: parsedData.analysisCount || 0,
-                        survey_interval: parsedData.surveyInterval || 4
-                    };
+                if (type === 'success') {
+                    errorDiv.style.borderColor = '#22c55e';
+                    errorDiv.style.background = 'linear-gradient(135deg, #0e2f1e, #1a4d2e)';
+                    errorDiv.style.color = '#22c55e';
+                } else if (type === 'warning') {
+                    errorDiv.style.borderColor = '#f59e0b';
+                    errorDiv.style.background = 'linear-gradient(135deg, #2d2510, #3d3015)';
+                    errorDiv.style.color = '#f59e0b';
+                } else {
+                    errorDiv.style.borderColor = '#ef4444';
+                    errorDiv.style.background = 'linear-gradient(135deg, #2d1b1b, #3d2222)';
+                    errorDiv.style.color = '#ef4444';
                 }
-                return null;
-            } catch (error) {
-                console.error('Failed to restore periodic surveys:', error);
-                return null;
+                
+                setTimeout(() => errorDiv.style.display = 'none', 8000);
             }
         }
 
-        clearPeriodicSurveysFromStorage() {
-            try {
-                const storageKey = `periodicSurveys_${this.sessionId}`;
-                sessionStorage.removeItem(storageKey);
-            } catch (error) {
-                console.error('Failed to clear surveys:', error);
-            }
-        }
-
-        showError(message, type = 'error') {
-            const errorDiv = document.getElementById('errorMessage');
-            errorDiv.textContent = message;
-            errorDiv.style.display = 'block';
-            
-            // Change color for success messages
-            if (type === 'success') {
-                errorDiv.style.borderColor = '#22c55e';
-                errorDiv.style.background = 'linear-gradient(135deg, #0e2f1e, #1a4d2e)';
-                errorDiv.style.color = '#22c55e';
-            } else if (type === 'warning') {
-                errorDiv.style.borderColor = '#f59e0b';
-                errorDiv.style.background = 'linear-gradient(135deg, #2d2510, #3d3015)';
-                errorDiv.style.color = '#f59e0b';
-            } else {
-                errorDiv.style.borderColor = '#ef4444';
-                errorDiv.style.background = 'linear-gradient(135deg, #2d1b1b, #3d2222)';
-                errorDiv.style.color = '#ef4444';
-            }
-            
-            setTimeout(() => errorDiv.style.display = 'none', 8000);
-        }
-    }
-
-    // Initialize when page loads
-    document.addEventListener('DOMContentLoaded', () => {
-        new SurveyManager();
-    });
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new SurveyManager();
+        });
     </script>
 </body>
 </html>
