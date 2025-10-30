@@ -23,7 +23,7 @@
       {
         "id": "post_trust_q1",
         "type": "open_ended",
-        "question": "Please answer the following questions with respect to the Coding Assistant you used to complete this assignment. Describe why you trust or distrust AI coding assistants in your own words.",
+        "question": "Describe why you trust or distrust this system's AI coding assistant in your own words.",
         "required": true,
         "placeholder": "Describe the factors that influenced your trust or distrust in the AI coding assistant during this assignment...",
         "max_length": 1000,
@@ -32,7 +32,7 @@
       {
         "id": "post_mental_q1",
         "type": "open_ended",
-        "question": "Please describe in your own words, how you think this AI Coding Assistant generates code suggestions?",
+        "question": "Please describe in your own words, how you think this system's AI Coding Assistant generates code suggestions?",
         "required": true,
         "placeholder": "Explain your understanding of how this AI generates code suggestions...",
         "max_length": 1000,
@@ -41,7 +41,7 @@
       {
         "id": "post_accuracy_q1",
         "type": "slider",
-        "question": "How accurate do you believe these AI Coding Assistant generated code suggestions are?",
+        "question": "How accurate do you believe this system's AI-generated code suggestions are?",
         "required": true,
         "scale": {
           "min": 0,
@@ -53,9 +53,18 @@
         "help_text": "Move the slider to indicate your perceived accuracy (0% = completely inaccurate, 100% = perfectly accurate)"
       },
       {
+        "id": "post_accuracy_q2",
+        "type": "open_ended",
+        "question": "Why do you believe AI-generated code might be incorrect?",
+        "required": true,
+        "placeholder": "Explain your reasoning about why AI-generated code suggestions might be incorrect...",
+        "max_length": 1000,
+        "min_length": 30
+      },
+      {
         "id": "post_experience_q1",
         "type": "open_ended",
-        "question": "Share your overall experience with how the AI coding assistant helped or hindered you in solving the programming assignment.",
+        "question": "In this system, the AI coding assistant provided next-line code suggestions alongside a guess of the problem you were attempting to solve. Share your overall experience with how this system helped or hindered you in solving the programming assignment.",
         "required": true,
         "placeholder": "Describe your overall experience with the AI assistant during this assignment...",
         "max_length": 1500,
@@ -95,7 +104,7 @@
       {
         "id": "post_misalignment_q1",
         "type": "open_ended",
-        "question": "How often was the AI's intention different from yours, and how did you interpret those misalignments?",
+        "question": "In this system, the AI coding assistant provided next-line code suggestions alongside a guess of the problem you were attempting to solve. How often was the AI's guess different from your intention, and how did you interpret those misalignments?",
         "required": true,
         "placeholder": "Describe instances where the AI's understanding differed from yours and how you dealt with it...",
         "max_length": 1000,
@@ -104,7 +113,7 @@
       {
         "id": "post_reflection_q1",
         "type": "open_ended",
-        "question": "Has using this tool changed your view on how AI assistants work, and if so, why?",
+        "question": "Has using this system changed your view on how AI assistants work, and if so, why?",
         "required": true,
         "placeholder": "Reflect on whether and how your understanding of AI assistants has changed...",
         "max_length": 1000,
@@ -122,7 +131,7 @@
       {
         "id": "post_difficulty_q1",
         "type": "likert",
-        "question": "How difficult did you find this problem?",
+        "question": "How difficult did you find this assignment?",
         "required": true,
         "scale": {
           "min": 1,

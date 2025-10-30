@@ -773,6 +773,7 @@ class AIGuessEntry(BaseModel):
     full_code_suggestion: str
     timestamp: str
     analysis_type: str  # "ai_problem_guess" or "correct_description"
+    user_code_snapshot: str  # NEW: Store user's code at analysis time
 
 class SessionLog(BaseModel):
     user_id: str
@@ -1212,7 +1213,8 @@ async def analyze_code(request: CodeRequest):
                 next_line_suggestion=ai_next_line,
                 full_code_suggestion=ai_full_code_suggestion,
                 timestamp=datetime.now().isoformat(),
-                analysis_type="ai_problem_guess"
+                analysis_type="ai_problem_guess",
+                user_code_snapshot=code
             )
             session_log.ai_guess_history.append(ai_guess_entry)
             
@@ -1235,7 +1237,8 @@ async def analyze_code(request: CodeRequest):
                     next_line_suggestion=correct_next_line,  # FIXED: Use correct next line
                     full_code_suggestion=correct_full_code_suggestion,
                     timestamp=datetime.now().isoformat(),
-                    analysis_type="correct_description"
+                    analysis_type="correct_description",
+                    user_code_snapshot=code
                 )
                 session_log.correct_description_history.append(correct_desc_entry)
             
@@ -1250,7 +1253,8 @@ async def analyze_code(request: CodeRequest):
                     next_line_suggestion=ai_next_line,
                     full_code_suggestion=ai_full_code_suggestion,
                     timestamp=datetime.now().isoformat(),
-                    analysis_type="suggestions_only"
+                    analysis_type="suggestions_only",
+                    user_code_snapshot=code
                 )
                 session_log.suggestions_only_history.append(suggestions_entry)
             
@@ -2523,7 +2527,8 @@ async def save_session_to_firebase(
                     'ai_analysis': entry.problem_analysis,
                     'timestamp': entry.timestamp,
                     'next_line_suggestion': entry.next_line_suggestion,
-                    'full_code_suggestion': entry.full_code_suggestion
+                    'full_code_suggestion': entry.full_code_suggestion,
+                    'user_code_snapshot': entry.user_code_snapshot
                 } for i, entry in enumerate(session_log.ai_guess_history, 1)
             }
         }
@@ -2534,7 +2539,8 @@ async def save_session_to_firebase(
                     'correct_analysis': entry.problem_analysis,
                     'timestamp': entry.timestamp,
                     'next_line_suggestion': entry.next_line_suggestion,
-                    'full_code_suggestion': entry.full_code_suggestion
+                    'full_code_suggestion': entry.full_code_suggestion,
+                    'user_code_snapshot': entry.user_code_snapshot
                 } for i, entry in enumerate(session_log.correct_description_history, 1)
             }
         elif session_log.condition == 3 and session_log.suggestions_only_history:
@@ -2542,7 +2548,8 @@ async def save_session_to_firebase(
                 str(i): {
                     'suggestion_only': entry.next_line_suggestion,
                     'timestamp': entry.timestamp,
-                    'full_code_suggestion': entry.full_code_suggestion
+                    'full_code_suggestion': entry.full_code_suggestion,
+                    'user_code_snapshot': entry.user_code_snapshot
                 } for i, entry in enumerate(session_log.suggestions_only_history, 1)
             }
         activity_log_data = {
