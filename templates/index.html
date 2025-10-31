@@ -91,9 +91,11 @@
             gap: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.3);
             white-space: nowrap;
-            overflow: hidden;
-            height: 40px;
+            overflow: visible;
+            min-height: 40px;
+            height: auto;
             flex-shrink: 0;
+            flex-wrap: wrap;
         }
 
         /* Header Button Styling */
@@ -108,11 +110,13 @@
             background: #ef4444;
             border: none;
             border-radius: 4px;
-            padding: 4px 8px;
+            padding: 6px 12px;
             color: white;
             font-size: 12px;
             cursor: pointer;
             transition: background 0.3s ease;
+            min-width: 90px;
+            flex-shrink: 0;
         }
         .logout-btn:hover {
             background: #dc2626;
@@ -127,7 +131,7 @@
             background: linear-gradient(135deg, #22c55e, #16a34a);
             border: none;
             border-radius: 4px;
-            padding: 6px 12px;
+            padding: 8px 14px;
             color: white;
             font-size: 12px;
             font-weight: 600;
@@ -138,6 +142,7 @@
             display: flex;
             align-items: center;
             gap: 5px;
+            min-height: 36px;
         }
         .run-button:hover {
             background: linear-gradient(135deg, #16a34a, #15803d);
@@ -154,19 +159,20 @@
             background: #404040;
             border: none;
             border-radius: 4px;
-            padding: 6px 12px;
+            padding: 8px 14px;
             color: #cccccc;
             font-size: 12px;
             cursor: pointer;
             transition: all 0.3s ease;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            min-height: 36px;
         }
         .submit-button {
             background: linear-gradient(135deg, #f97316, #ea580c);
             border: none;
             border-radius: 4px;
-            padding: 6px 12px;
+            padding: 8px 14px;
             color: white;
             font-size: 12px;
             font-weight: 600;
@@ -177,6 +183,7 @@
             display: flex;
             align-items: center;
             gap: 5px;
+            min-height: 36px;
         }
         .submit-button:hover {
             background: linear-gradient(135deg, #ea580c, #dc2626);
@@ -1417,7 +1424,7 @@
 /* Sidebar Toggle Button */
 .sidebar-toggle {
     position: fixed;
-    right: 30vw;
+    right: 0;
     top: 50%;
     transform: translateY(-50%);
     background: linear-gradient(135deg, #569cd6, #4a86c7);
@@ -1428,9 +1435,15 @@
     font-size: 16px;
     font-weight: bold;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: right 0.3s ease, transform 0.3s ease;
     z-index: 1000;
     box-shadow: -2px 0 10px rgba(0,0,0,0.3);
+    min-width: 40px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    will-change: right;
 }
 .sidebar-toggle:hover {
     background: linear-gradient(135deg, #4a86c7, #3a76b7);
@@ -1454,6 +1467,164 @@
     transition: all 0.3s ease;
 }
 
+
+    /* ============================================
+   RESPONSIVE DESIGN - MEDIA QUERIES
+   ============================================ */
+
+/* Tablet Landscape and Below (1024px) */
+@media (max-width: 1024px) {
+    .header {
+        gap: 6px;
+        padding: 8px 10px;
+    }
+    
+    .url-display {
+        display: none;
+    }
+    
+    .header h2 {
+        font-size: 14px;
+        margin-right: 5px;
+    }
+    
+    .font-controls {
+        gap: 4px;
+    }
+    
+    .session-indicator,
+    .condition-indicator {
+        font-size: 9px;
+        padding: 3px 6px;
+        max-width: 100px;
+    }
+}
+
+/* Tablet Portrait (768px - 1024px) */
+@media (max-width: 768px) {
+    .header {
+        gap: 4px;
+        padding: 6px 8px;
+        min-height: 44px;
+    }
+    
+    .autosave-indicator {
+        display: none;
+    }
+    
+    .font-controls {
+        display: none;
+    }
+    
+    .user-info {
+        gap: 4px;
+    }
+    
+    .session-indicator {
+        display: none;
+    }
+    
+    .condition-indicator {
+        font-size: 10px;
+        padding: 4px 6px;
+    }
+    
+    #userDisplay {
+        font-size: 11px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 80px;
+    }
+    
+    .logout-btn {
+        padding: 8px 10px;
+        font-size: 11px;
+        min-width: 70px;
+    }
+    
+    #sidebar {
+        width: 50vw !important;
+        min-width: 300px;
+    }
+    
+    .sidebar-toggle {
+        padding: 10px 6px;
+        font-size: 14px;
+    }
+    
+    .terminal .header {
+        flex-wrap: wrap;
+    }
+    
+    .terminal-controls {
+        width: 100%;
+        justify-content: space-between;
+        margin-top: 4px;
+        margin-left: 0;
+        gap: 4px;
+    }
+    
+    .run-button,
+    .clear-button,
+    .submit-button {
+        flex: 1;
+        min-width: 0;
+        padding: 8px 6px;
+        font-size: 10px;
+    }
+}
+
+/* Mobile Phone (< 768px) */
+@media (max-width: 480px) {
+    .header {
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 6px;
+        justify-content: space-between;
+    }
+    
+    .header h2 {
+        font-size: 12px;
+        flex: 0 0 auto;
+    }
+    
+    .user-info {
+        order: 2;
+        width: 100%;
+        justify-content: space-between;
+        margin-top: 4px;
+        padding-top: 4px;
+        border-top: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    .condition-indicator {
+        font-size: 9px;
+        padding: 3px 5px;
+    }
+    
+    #userDisplay {
+        font-size: 10px;
+        max-width: 60px;
+    }
+    
+    .logout-btn {
+        padding: 6px 8px;
+        font-size: 10px;
+        min-width: 60px;
+        min-height: 36px;
+    }
+    
+    #sidebar {
+        width: 80vw !important;
+        min-width: 250px;
+    }
+    
+    .sidebar-toggle {
+        font-size: 12px;
+        padding: 8px 6px;
+    }
+}
 
     </style>
 </head>
@@ -2933,6 +3104,7 @@ let debounceTimerGeneral; // For general typing - slower
 
 // Quick response for Enter key
 function debounceNewlineAnalysis(delay = 300) {
+    if (aiDisabled) return;  // Skip if AI is disabled
     clearTimeout(debounceTimerNewline);
     debounceTimerNewline = setTimeout(() => { 
         analyzeCurrentCode()
@@ -2941,6 +3113,7 @@ function debounceNewlineAnalysis(delay = 300) {
 
 // Slower background analysis for general typing
 function debounceGeneralAnalysis(delay = 1500) {
+    if (aiDisabled) return;  // Skip if AI is disabled
     clearTimeout(debounceTimerGeneral);
     debounceTimerGeneral = setTimeout(() => { 
         analyzeCurrentCode()
@@ -2952,6 +3125,12 @@ let previousCode = ''
 
 // Analyze current code
 async function analyzeCurrentCode() {
+    // Check if AI is disabled for this assignment
+    if (aiDisabled) {
+        console.log('AI analysis skipped - disabled for this assignment');
+        return;
+    }
+    
     if (!currentSession.sessionId) {
         console.warn('No active session for code analysis');
         return;
@@ -3241,6 +3420,11 @@ if (currentSession.condition === 1) {
 
 
 function showHistoryInline(type) {
+    if (aiDisabled) {
+        addTerminalOutput('⚠️ AI history is disabled for this assignment', 'warning');
+        return;
+    }
+    
     const historyStartTime = Date.now();
     
     const isGuessHistory = type === 'guess';
@@ -3372,6 +3556,11 @@ function showHistoryInline(type) {
     }
 }
 function insertSuggestion(type) {
+    if (aiDisabled) {
+        addTerminalOutput('⚠️ AI suggestions are disabled for this assignment', 'warning');
+        return;
+    }
+    
     if (!window.editor) {
         addTerminalOutput('Editor not initialized', 'error');
         return;
@@ -4903,10 +5092,16 @@ if (historySuggestionsButton) {
        document.addEventListener('mouseup', handleMouseUp);
    });
 
-   function handleSidebarResize(e) {
-       if (!resize.sidebar) return;
-       document.getElementById('sidebar').style.width = `${window.innerWidth - e.clientX}px`;
-   }
+    function handleSidebarResize(e) {
+        if (!resize.sidebar) return;
+        const sidebar = document.getElementById('sidebar');
+        sidebar.style.width = `${window.innerWidth - e.clientX}px`;
+        
+        // Update toggle button position during resize - use requestAnimationFrame for smooth updates
+        requestAnimationFrame(() => {
+            updateToggleButtonPosition();
+        });
+    }
 
    function handleTerminalResize(e) {
        if (!resize.terminal) return;
@@ -4919,7 +5114,73 @@ if (historySuggestionsButton) {
        document.removeEventListener('mouseup', handleMouseUp);
        document.removeEventListener('mousemove', handleSidebarResize);
        document.removeEventListener('mousemove', handleTerminalResize);
+       document.removeEventListener('touchend', handleMouseUp);
+       document.removeEventListener('touchmove', handleSidebarResizeTouch);
+       document.removeEventListener('touchmove', handleTerminalResizeTouch);
+       
+       // Final position update after resize completes
+       if (!resize.sidebar && !resize.terminal) {
+           updateToggleButtonPosition();
+       }
    }
+
+   // Touch support for resize handles
+   document.getElementById('resize-sidebar').addEventListener('touchstart', (e) => {
+       resize.sidebar = true;
+       document.addEventListener('touchmove', handleSidebarResizeTouch, { passive: false });
+       document.addEventListener('touchend', handleMouseUp);
+   }, { passive: false });
+
+   document.getElementById('resize-terminal').addEventListener('touchstart', (e) => {
+       resize.terminal = true;
+       document.addEventListener('touchmove', handleTerminalResizeTouch, { passive: false });
+       document.addEventListener('touchend', handleMouseUp);
+   }, { passive: false });
+
+   function handleSidebarResizeTouch(e) {
+       if (!resize.sidebar) return;
+       e.preventDefault();
+       const touch = e.touches[0];
+       const sidebar = document.getElementById('sidebar');
+       sidebar.style.width = `${window.innerWidth - touch.clientX}px`;
+       
+       // Update toggle button position during touch resize - use requestAnimationFrame for smooth updates
+       requestAnimationFrame(() => {
+           updateToggleButtonPosition();
+       });
+   }
+
+   function handleTerminalResizeTouch(e) {
+       if (!resize.terminal) return;
+       e.preventDefault();
+       const touch = e.touches[0];
+       document.getElementById('terminal').style.height = `${window.innerHeight - touch.clientY}px`;
+   }
+
+// Responsive window resize handler
+let resizeTimeout;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {
+        // Auto-adjust font for small screens
+        const width = window.innerWidth;
+        
+        if (width < 768 && currentFontSize > 11) {
+            updateFontSize(Math.max(10, currentFontSize - 2));
+            addTerminalOutput('Font size auto-adjusted for screen size', 'info');
+        } else if (width >= 768 && width < 1024 && currentFontSize < 12) {
+            updateFontSize(Math.min(12, currentFontSize + 1));
+        }
+        
+        // Trigger Monaco editor layout recalculation
+        if (window.editor) {
+            window.editor.layout();
+        }
+        
+        // Update sidebar toggle button position after window resize
+        updateToggleButtonPosition();
+    }, 250);
+});
 
 // Prevent accidental page close
 window.addEventListener('beforeunload', (e) => {
@@ -5043,6 +5304,28 @@ document.addEventListener('visibilitychange', function() {
 
 // Sidebar toggle functionality
 let sidebarCollapsed = false;
+let aiDisabled = false;  // Flag to completely disable AI functionality
+
+// Function to calculate and update toggle button position
+function updateToggleButtonPosition() {
+    const sidebar = document.getElementById('sidebar');
+    const toggleButton = document.getElementById('sidebarToggle');
+    
+    if (!sidebar || !toggleButton) return;
+    
+    // Force a reflow to ensure we get accurate measurements
+    sidebar.getBoundingClientRect();
+    
+    if (sidebarCollapsed) {
+        // When collapsed, button sits at screen edge
+        toggleButton.style.right = '0px';
+    } else {
+        // When expanded, button sits at sidebar's left edge
+        // Use getBoundingClientRect for more accurate width during transitions
+        const sidebarWidth = sidebar.getBoundingClientRect().width;
+        toggleButton.style.right = `${sidebarWidth}px`;
+    }
+}
 
 // Check if sidebar should be hidden on load based on prefix
 function shouldHideSidebar() {
@@ -5087,16 +5370,55 @@ function initializeSidebar() {
     const shouldHide = shouldHideSidebar();
     if (shouldHide) {
         sidebarCollapsed = true;
+        aiDisabled = true;  // Completely disable AI functionality
         sidebar.classList.add('collapsed');
         toggleIcon.textContent = '▶';
-        sidebarToggle.style.right = '0px';
-        addTerminalOutput(`Sidebar hidden by default (warmup mode)`, 'info');
+        addTerminalOutput(`⚠️ AI Assistant completely disabled (warmup mode)`, 'warning');
+        addTerminalOutput(`   No AI analysis or suggestions will be generated`, 'info');
+        
+        // Disable suggestion buttons
+        const suggestionButtons = document.querySelectorAll('.suggestion-button');
+        suggestionButtons.forEach(btn => {
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            btn.style.cursor = 'not-allowed';
+        });
+        
+        // Disable history buttons
+        const historyButtons = document.querySelectorAll('.history-button');
+        historyButtons.forEach(btn => {
+            btn.style.display = 'none';
+        });
+        
+        // Update analysis text
+        const analysisEl = document.getElementById('analysis');
+        if (analysisEl) {
+            analysisEl.innerHTML = '<span style="color: #888; font-style: italic;">AI analysis disabled for this assignment</span>';
+        }
+        
+        // Update suggestion texts
+        const suggestionGuess = document.getElementById('suggestionGuess');
+        const suggestionDesc = document.getElementById('suggestionDesc');
+        const suggestionOnly = document.getElementById('suggestionOnly');
+        
+        if (suggestionGuess) {
+            suggestionGuess.innerHTML = '<span style="color: #888; font-style: italic;">Suggestions disabled</span>';
+        }
+        if (suggestionDesc) {
+            suggestionDesc.innerHTML = '<span style="color: #888; font-style: italic;">Suggestions disabled</span>';
+        }
+        if (suggestionOnly) {
+            suggestionOnly.innerHTML = '<span style="color: #888; font-style: italic;">Suggestions disabled</span>';
+        }
     } else {
         sidebarCollapsed = false;
+        aiDisabled = false;
         sidebar.classList.remove('collapsed');
         toggleIcon.textContent = '◀';
-        sidebarToggle.style.right = '30vw';
     }
+    
+    // Set initial button position
+    updateToggleButtonPosition();
 }
 
 // Setup toggle event listener
@@ -5111,12 +5433,43 @@ function setupSidebarToggle() {
     }
     
     sidebarToggle.addEventListener('click', () => {
+        // Prevent toggling if AI is disabled
+        if (aiDisabled) {
+            addTerminalOutput('⚠️ AI Assistant is disabled for this assignment', 'warning');
+            return;
+        }
+        
         sidebarCollapsed = !sidebarCollapsed;
         sidebar.classList.toggle('collapsed');
         toggleIcon.textContent = sidebarCollapsed ? '▶' : '◀';
-        sidebarToggle.style.right = sidebarCollapsed ? '0px' : '30vw';
-        sidebarToggle.style.borderRadius = sidebarCollapsed ? '8px 0 0 8px' : '8px 0 0 8px';
+        
+        // Update button position immediately
+        updateToggleButtonPosition();
+        
+        // Also update after CSS transition completes (300ms)
+        setTimeout(() => {
+            updateToggleButtonPosition();
+        }, 350);
+        
+        // Log the toggle action
+        logActivity('sidebar_toggle', {
+            action: sidebarCollapsed ? 'collapsed' : 'expanded',
+            sidebar_width: sidebar.offsetWidth
+        });
     });
+    
+    // Update button position on window resize
+    window.addEventListener('resize', () => {
+        updateToggleButtonPosition();
+    });
+    
+    // Use ResizeObserver to continuously track sidebar width changes
+    if (typeof ResizeObserver !== 'undefined') {
+        const resizeObserver = new ResizeObserver(() => {
+            updateToggleButtonPosition();
+        });
+        resizeObserver.observe(sidebar);
+    }
 }
 
 // Make restore functions globally accessible

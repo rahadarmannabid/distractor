@@ -572,6 +572,104 @@
         .container::-webkit-scrollbar-thumb:hover {
             background: #4a86c7;
         }
+
+        /* Toast Notification Styles */
+        .toast-notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #0e2f1e, #1a4d2e);
+            border: 2px solid #22c55e;
+            border-radius: 12px;
+            padding: 16px 20px;
+            color: #4ade80;
+            font-size: 14px;
+            font-weight: 600;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 300px;
+            max-width: 400px;
+            animation: slideInRight 0.4s ease-out;
+            opacity: 0;
+            transform: translateX(400px);
+        }
+
+        .toast-notification.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .toast-notification.hide {
+            animation: slideOutRight 0.4s ease-in forwards;
+        }
+
+        .toast-notification.warning {
+            background: linear-gradient(135deg, #3d2e1b, #4d3722);
+            border-color: #f59e0b;
+            color: #fbbf24;
+        }
+
+        .toast-notification.error {
+            background: linear-gradient(135deg, #2d1b1b, #3d2222);
+            border-color: #ef4444;
+            color: #ff6b6b;
+        }
+
+        .toast-icon {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+
+        .toast-content {
+            flex: 1;
+            line-height: 1.4;
+        }
+
+        .toast-title {
+            font-weight: 700;
+            margin-bottom: 2px;
+        }
+
+        .toast-message {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateX(400px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        @keyframes slideOutRight {
+            from {
+                opacity: 1;
+                transform: translateX(0);
+            }
+            to {
+                opacity: 0;
+                transform: translateX(400px);
+            }
+        }
+
+        /* Mobile responsive toast */
+        @media (max-width: 768px) {
+            .toast-notification {
+                top: 10px;
+                right: 10px;
+                left: 10px;
+                min-width: auto;
+                max-width: none;
+            }
+        }
     </style>
 </head>
 <body>
@@ -771,6 +869,45 @@
 
         let consentGiven = false;
 
+        // Toast Notification Functions
+        function showToast(title, message, type = 'success', duration = 2500) {
+            // Create toast element
+            const toast = document.createElement('div');
+            toast.className = `toast-notification ${type}`;
+            
+            // Set icon based on type
+            let icon = '✅';
+            if (type === 'warning') icon = '⚠️';
+            if (type === 'error') icon = '❌';
+            if (type === 'download') icon = '📥';
+            
+            toast.innerHTML = `
+                <div class="toast-icon">${icon}</div>
+                <div class="toast-content">
+                    <div class="toast-title">${title}</div>
+                    <div class="toast-message">${message}</div>
+                </div>
+            `;
+            
+            // Add to body
+            document.body.appendChild(toast);
+            
+            // Trigger animation
+            setTimeout(() => {
+                toast.classList.add('show');
+            }, 10);
+            
+            // Auto-dismiss
+            setTimeout(() => {
+                toast.classList.add('hide');
+                setTimeout(() => {
+                    if (document.body.contains(toast)) {
+                        document.body.removeChild(toast);
+                    }
+                }, 400); // Match animation duration
+            }, duration);
+        }
+
         // Consent checkbox handling
         consentCheckbox.addEventListener('click', () => {
             consentGiven = !consentGiven;
@@ -938,10 +1075,18 @@
                         // Clean up
                         setTimeout(() => URL.revokeObjectURL(url), 100);
                         
-                        // SUCCESS MESSAGE
-                        loginButton.innerHTML = '✅ Assignment downloaded successfully!';
+                        // Show success toast notification
+                        showToast(
+                            'Assignment Downloaded!',
+                            `File saved: ${assignmentKey}.pdf`,
+                            'download',
+                            2500
+                        );
+                        
+                        // Update button briefly
+                        loginButton.innerHTML = '✅ Download complete';
                         loginButton.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
-                        await new Promise(resolve => setTimeout(resolve, 1500));
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                         
                     } else {
                         throw new Error('Assignment PDF not found on server');
@@ -950,17 +1095,19 @@
                 } catch (downloadError) {
                     console.error('PDF download error:', downloadError);
                     
-                    // CLEAR WARNING MESSAGE
-                    loginButton.innerHTML = '⚠️ Assignment file not available';
-                    loginButton.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
-                    
-                    // Show detailed error message
-                    showError(
-                        'Assignment download failed. The assignment file may not be uploaded yet. You can still access the IDE, but please contact your instructor for the assignment details.',
-                        'warning'
+                    // Show warning toast notification
+                    showToast(
+                        'Assignment File Not Available',
+                        'Contact your instructor for assignment details',
+                        'warning',
+                        3500
                     );
                     
-                    await new Promise(resolve => setTimeout(resolve, 3000)); // Wait longer to read message
+                    // Update button
+                    loginButton.innerHTML = '⚠️ File not available';
+                    loginButton.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
+                    
+                    await new Promise(resolve => setTimeout(resolve, 2000));
                 }
                 
                 // Check if pre-survey is required and redirect accordingly
