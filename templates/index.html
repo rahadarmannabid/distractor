@@ -505,6 +505,87 @@
         .suggestion-button.green-theme::before {
             background: linear-gradient(90deg, transparent, #4ade80, transparent);
         }
+        .suggestion-button.violet-theme {
+            border-left: 3px solid #8b5cf6;
+        }
+        .suggestion-button.violet-theme:hover {
+            border-left-color: #a855f7;
+            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);
+        }
+        .suggestion-button.violet-theme::before {
+            background: linear-gradient(90deg, transparent, #8b5cf6, transparent);
+        }
+        .analysis-panel,
+        .suggestion-panel {
+            margin-top: 12px;
+            margin-bottom: 18px;
+            padding: 16px;
+            border-radius: 8px;
+            border-left: 3px solid transparent;
+            background: rgba(255, 255, 255, 0.04);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 8px 18px rgba(0,0,0,0.25);
+        }
+        .analysis-panel__title,
+        .suggestion-panel__header {
+            text-transform: uppercase;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.6px;
+            margin-bottom: 10px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .analysis-panel__title::before,
+        .suggestion-panel__header::before {
+            content: '';
+            width: 4px;
+            height: 16px;
+            border-radius: 999px;
+            background: currentColor;
+        }
+        .analysis-panel--guess {
+            background: rgba(249, 115, 22, 0.12);
+            border-left-color: #f97316;
+            color: #ffedd5;
+        }
+        .analysis-panel--guess #analysis {
+            color: #fbd38d;
+        }
+        .suggestion-panel--guess {
+            background: rgba(59, 130, 246, 0.12);
+            border-left-color: #60a5fa;
+        }
+        .analysis-panel--guess .analysis-panel__title,
+        .suggestion-panel--guess .suggestion-panel__header {
+            color: #fbbf24;
+        }
+        .analysis-panel--desc {
+            background: rgba(34, 197, 94, 0.12);
+            border-left-color: #22c55e;
+            color: #dcfce7;
+        }
+        .analysis-panel--desc #problemDescriptionDisplay {
+            color: #bbf7d0;
+        }
+        .suggestion-panel--desc {
+            background: rgba(45, 212, 191, 0.12);
+            border-left-color: #2dd4bf;
+        }
+        .analysis-panel--desc .analysis-panel__title,
+        .suggestion-panel--desc .suggestion-panel__header {
+            color: #34d399;
+        }
+        .suggestion-panel--violet {
+            background: rgba(139, 92, 246, 0.12);
+            border-left-color: #8b5cf6;
+        }
+        .suggestion-panel--violet .suggestion-panel__header {
+            color: #c4b5fd;
+        }
+        .suggestion-action {
+            position: relative;
+        }
         .suggestion-content {
             display: block;
             padding-right: 80px;
@@ -1724,14 +1805,24 @@
                     <h3>AI Problem Guess</h3>
                     <div id="history-guess" class="history-button">View History</div>
                 </div>
-                <p id="analysis"><span class="spinner"></span> Waiting for code...</p>
-                <h3>Next Line Suggestion</h3>
-                <button class="suggestion-button red-theme" id="suggestionGuessBtn" onclick="insertSuggestion('guess')">
-                    <span class="suggestion-content" id="suggestionGuess"><span class="spinner"></span> Start coding...</span>
-                </button>
-                <small style="color: #888; display: block; margin-top: 10px;">
-                    Local entries: <span id="guessLogCount">0</span>
-                </small>
+                <div class="analysis-panel analysis-panel--guess">
+                    <div class="analysis-panel__title">AI Agent's Understanding of your code</div>
+                    <p id="analysis"><span class="spinner"></span> Waiting for code...</p>
+                </div>
+                <div class="suggestion-panel suggestion-panel--guess">
+                    <div class="suggestion-panel__header">Next Line Suggestion</div>
+                    <div class="suggestion-action red-theme">
+                        <button class="suggestion-button red-theme" id="suggestionGuessBtn" onclick="insertSuggestion('guess')">
+                            <span class="suggestion-content" id="suggestionGuess"><span class="spinner"></span> Start coding...</span>
+                        </button>
+                        <div class="suggestion-callout callout-red" id="calloutGuess">
+                            <span class="callout-arrow"></span>
+                        </div>
+                    </div>
+                    <small style="color: #888; display: block; margin-top: 10px;">
+                        Local entries: <span id="guessLogCount">0</span>
+                    </small>
+                </div>
             </div>
         </div>
         
@@ -1742,14 +1833,24 @@
                     <h3>Original Problem Description</h3>
                     <div id="history-desc" class="history-button">View History</div>
                 </div>
-                <div id="problemDescriptionDisplay" style="line-height: 1.6;">Loading problem description...</div>
-                <h3>Next Line Suggestion</h3>
-                <button class="suggestion-button green-theme" id="suggestionDescBtn" onclick="insertSuggestion('desc')">
-                    <span class="suggestion-content" id="suggestionDesc">Based on correct problem...</span>
-                </button>
-                <small style="color: #888; display: block; margin-top: 10px;">
-                    Local entries: <span id="descLogCount">0</span>
-                </small>
+                <div class="analysis-panel analysis-panel--desc">
+                    <div class="analysis-panel__title">Original Problem Description</div>
+                    <div id="problemDescriptionDisplay" style="line-height: 1.6;">Loading problem description...</div>
+                </div>
+                <div class="suggestion-panel suggestion-panel--desc">
+                    <div class="suggestion-panel__header">Next Line Suggestion</div>
+                    <div class="suggestion-action green-theme">
+                        <button class="suggestion-button green-theme" id="suggestionDescBtn" onclick="insertSuggestion('desc')">
+                            <span class="suggestion-content" id="suggestionDesc">Based on correct problem...</span>
+                        </button>
+                        <div class="suggestion-callout callout-green" id="calloutDesc">
+                            <span class="callout-arrow"></span>
+                        </div>
+                    </div>
+                    <small style="color: #888; display: block; margin-top: 10px;">
+                        Local entries: <span id="descLogCount">0</span>
+                    </small>
+                </div>
             </div>
         </div>
         
@@ -1761,13 +1862,20 @@
                     <h3>AI Code Suggestions</h3>
                     <div id="history-suggestions" class="history-button">View History</div>
                 </div>
-                <h3>Next Line Suggestion</h3>
-                <button class="suggestion-button" id="suggestionOnlyBtn" onclick="insertSuggestion('suggestions')" style="border-left: 3px solid #7c3aed;">
-                    <span class="suggestion-content" id="suggestionOnly"><span class="spinner"></span> Start coding...</span>
-                </button>
-                <small style="color: #888; display: block; margin-top: 10px;">
-                    AI suggestions: <span id="suggestionsLogCount">0</span>
-                </small>
+                <div class="suggestion-panel suggestion-panel--violet">
+                    <div class="suggestion-panel__header">Next Line Suggestion</div>
+                    <div class="suggestion-action violet-theme">
+                        <button class="suggestion-button violet-theme" id="suggestionOnlyBtn" onclick="insertSuggestion('suggestions')">
+                            <span class="suggestion-content" id="suggestionOnly"><span class="spinner"></span> Start coding...</span>
+                        </button>
+                        <div class="suggestion-callout callout-violet" id="calloutOnly">
+                            <span class="callout-arrow"></span>
+                        </div>
+                    </div>
+                    <small style="color: #888; display: block; margin-top: 10px;">
+                        AI suggestions: <span id="suggestionsLogCount">0</span>
+                    </small>
+                </div>
             </div>
         </div>
     </div>
@@ -5475,6 +5583,7 @@ function setupSidebarToggle() {
 // Make restore functions globally accessible
 window.handleRestoreProgress = handleRestoreProgress;
 window.handleDismissRestore = handleDismissRestore;
+
 
 </script>
 
