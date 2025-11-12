@@ -2327,8 +2327,8 @@ let currentSession = {
     pasteAllowed: 1,
     starterCode: null,
     periodicSurveyEnabled: false,
-    periodicSurveyStart: 5,
-    periodicSurveyInterval: 10,
+    periodicSurveyStart: null,
+    periodicSurveyInterval: null,
     nextPeriodicSurveyAt: null,
     periodicSurveysCompleted: 0,
     finalSurveyDisabled: false,
@@ -2374,7 +2374,7 @@ const ACTIVITY_BATCH_SIZE = 10;
 
     let surveyData = {
     analysisCount: 0,
-    surveyInterval: 4,
+    surveyInterval: null,
     surveyResponses: [],
     finalSurveyResponse: null,
     pendingSurvey: false,
@@ -2515,7 +2515,21 @@ function restorePeriodicSurveysFromStorage() {
             surveyData.surveyResponses = parsedData.surveyResponses || [];
             surveyData.periodicSurveyOccurrenceCount = parsedData.periodicSurveyOccurrenceCount || 0;
             surveyData.analysisCount = parsedData.analysisCount || 0;
-            surveyData.surveyInterval = parsedData.surveyInterval || 4;
+            const restoredInterval = parsedData.surveyInterval;
+            if (typeof restoredInterval === 'number' && restoredInterval > 0) {
+                surveyData.surveyInterval = restoredInterval;
+                if (currentSession) {
+                    currentSession.periodicSurveyInterval = restoredInterval;
+                    if (!currentSession.periodicSurveyStart || currentSession.periodicSurveyStart < 1) {
+                        currentSession.periodicSurveyStart = restoredInterval;
+                    }
+                    if (!currentSession.nextPeriodicSurveyAt || currentSession.periodicSurveysCompleted === 0) {
+                        currentSession.nextPeriodicSurveyAt = currentSession.periodicSurveyStart;
+                    }
+                }
+            } else {
+                surveyData.surveyInterval = 4;
+            }
             return true;
         } else {
             return false;
@@ -2850,9 +2864,9 @@ async function initializeFromURL() {
             startTime: authData.timestamp,
             pasteAllowed: authData.pasteAllowed !== undefined ? authData.pasteAllowed : 1,
             periodicSurveyEnabled: authData.periodicSurveyEnabled || false,
-            periodicSurveyStart: authData.periodicSurveyStart || 5,
-            periodicSurveyInterval: 10,
-            nextPeriodicSurveyAt: authData.periodicSurveyStart || 5,
+            periodicSurveyStart: authData.periodicSurveyStart ?? null,
+            periodicSurveyInterval: authData.periodicSurveyInterval ?? null,
+            nextPeriodicSurveyAt: authData.periodicSurveyStart ?? null,
             periodicSurveysCompleted: 0,
             finalSurveyDisabled: authData.finalSurveyDisabled || false,
             guessLogCount: 0,
@@ -3985,9 +3999,8 @@ function hideAIThinking() {
 
 // Survey Functions
 function loadSurveyConfig() {
-    // This will be loaded when the session is initialized
-    // For now, set default interval
-    surveyData.surveyInterval = 4;
+    // Legacy hook retained for backwards compatibility.
+    // Actual survey cadence is configured via loadSurveyQuestions().
 }
 
 function incrementAnalysisCount() {
@@ -4691,6 +4704,12 @@ let originalSubmitToDatabase = null;
 
 
 async function loadSurveyQuestions() {
+    const defaultQuestions = [
+        "I trust the AI's responses.",
+        "I am confident in the AI's responses.", 
+        "I am suspicious of the AI's intentions.",
+        "The AI's responses are consistent."
+    ];
     try {
         const response = await fetch('/survey-config', {
             method: 'GET',
@@ -4701,26 +4720,67 @@ async function loadSurveyQuestions() {
 
         if (response.ok) {
             const config = await response.json();
-            surveyData.questions = config.questions;
-            surveyData.surveyInterval = config.feedback_interval;
+            surveyData.questions = Array.isArray(config.questions) && config.questions.length ? config.questions : defaultQuestions;
+            const interval = Number(config.feedback_interval);
+            if (!Number.isNaN(interval) && interval > 0) {
+                surveyData.surveyInterval = interval;
+                if (currentSession) {
+                    currentSession.periodicSurveyInterval = interval;
+                    if (!currentSession.periodicSurveyStart || currentSession.periodicSurveyStart < 1) {
+                        currentSession.periodicSurveyStart = interval;
+                    }
+                    if (!currentSession.nextPeriodicSurveyAt || currentSession.periodicSurveysCompleted === 0) {
+                        currentSession.nextPeriodicSurveyAt = currentSession.periodicSurveyStart;
+                    }
+                }
+            } else {
+                const fallbackInterval = 4;
+                surveyData.surveyInterval = fallbackInterval;
+                if (currentSession) {
+                    if (!currentSession.periodicSurveyInterval || currentSession.periodicSurveyInterval < 1) {
+                        currentSession.periodicSurveyInterval = fallbackInterval;
+                    }
+                    if (!currentSession.periodicSurveyStart || currentSession.periodicSurveyStart < 1) {
+                        currentSession.periodicSurveyStart = fallbackInterval;
+                    }
+                    if (!currentSession.nextPeriodicSurveyAt || currentSession.periodicSurveysCompleted === 0) {
+                        currentSession.nextPeriodicSurveyAt = currentSession.periodicSurveyStart;
+                    }
+                }
+            }
         } else {
             console.warn('Failed to load survey config, using defaults');
-            surveyData.questions = [
-                "I trust the AI's responses.",
-                "I am confident in the AI's responses.", 
-                "I am suspicious of the AI's intentions.",
-                "The AI's responses are consistent."
-            ];
+            const fallbackInterval = 4;
+            surveyData.questions = defaultQuestions;
+            surveyData.surveyInterval = fallbackInterval;
+            if (currentSession) {
+                if (!currentSession.periodicSurveyInterval || currentSession.periodicSurveyInterval < 1) {
+                    currentSession.periodicSurveyInterval = fallbackInterval;
+                }
+                if (!currentSession.periodicSurveyStart || currentSession.periodicSurveyStart < 1) {
+                    currentSession.periodicSurveyStart = fallbackInterval;
+                }
+                if (!currentSession.nextPeriodicSurveyAt || currentSession.periodicSurveysCompleted === 0) {
+                    currentSession.nextPeriodicSurveyAt = currentSession.periodicSurveyStart;
+                }
+            }
         }
     } catch (error) {
         console.error('Error loading survey config:', error);
-        // Use default questions
-        surveyData.questions = [
-            "I trust the AI's responses.",
-            "I am confident in the AI's responses.", 
-            "I am suspicious of the AI's intentions.",
-            "The AI's responses are consistent."
-        ];
+        const fallbackInterval = 4;
+        surveyData.questions = defaultQuestions;
+        surveyData.surveyInterval = fallbackInterval;
+        if (currentSession) {
+            if (!currentSession.periodicSurveyInterval || currentSession.periodicSurveyInterval < 1) {
+                currentSession.periodicSurveyInterval = fallbackInterval;
+            }
+            if (!currentSession.periodicSurveyStart || currentSession.periodicSurveyStart < 1) {
+                currentSession.periodicSurveyStart = fallbackInterval;
+            }
+            if (!currentSession.nextPeriodicSurveyAt || currentSession.periodicSurveysCompleted === 0) {
+                currentSession.nextPeriodicSurveyAt = currentSession.periodicSurveyStart;
+            }
+        }
     }
 }
 
