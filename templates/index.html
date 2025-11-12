@@ -586,6 +586,90 @@
         .suggestion-action {
             position: relative;
         }
+        .suggestion-signifier {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            color: #fff;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            box-shadow: 0 2px 8px rgba(34, 197, 94, 0.45);
+            opacity: 0;
+            transform: scale(0.85);
+            pointer-events: none;
+            transition: transform 0.2s ease, opacity 0.2s ease;
+            z-index: 15;
+        }
+        .suggestion-signifier::before {
+            content: '↓';
+            font-size: 12px;
+            animation: bounce-arrow 1s ease-in-out infinite;
+        }
+        .suggestion-signifier.active {
+            opacity: 1;
+            transform: scale(1);
+        }
+        .suggestion-button.new-suggestion {
+            border-width: 2px;
+            animation: new-suggestion-pulse 3s ease-in-out;
+        }
+        .suggestion-action.red-theme .suggestion-signifier {
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            box-shadow: 0 2px 8px rgba(249, 115, 22, 0.45);
+        }
+        .suggestion-action.green-theme .suggestion-signifier {
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            box-shadow: 0 2px 8px rgba(34, 197, 94, 0.45);
+        }
+        .suggestion-action.violet-theme .suggestion-signifier {
+            background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+            box-shadow: 0 2px 8px rgba(139, 92, 246, 0.45);
+        }
+        .suggestion-action .suggestion-signifier.active {
+            animation: pulse-signifier 2s ease-in-out infinite;
+        }
+        .suggestion-action.red-theme .suggestion-signifier.active {
+            animation: pulse-signifier-red 2s ease-in-out infinite;
+        }
+        .suggestion-action.green-theme .suggestion-signifier.active {
+            animation: pulse-signifier-green 2s ease-in-out infinite;
+        }
+        .suggestion-action.violet-theme .suggestion-signifier.active {
+            animation: pulse-signifier-violet 2s ease-in-out infinite;
+        }
+        @keyframes bounce-arrow {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(3px); }
+        }
+        @keyframes pulse-signifier {
+            0%, 100% { box-shadow: 0 2px 8px rgba(34, 197, 94, 0.45); transform: scale(1); }
+            50% { box-shadow: 0 4px 16px rgba(34, 197, 94, 0.7); transform: scale(1.05); }
+        }
+        @keyframes pulse-signifier-red {
+            0%, 100% { box-shadow: 0 2px 8px rgba(249, 115, 22, 0.45); transform: scale(1); }
+            50% { box-shadow: 0 4px 16px rgba(249, 115, 22, 0.7); transform: scale(1.05); }
+        }
+        @keyframes pulse-signifier-green {
+            0%, 100% { box-shadow: 0 2px 8px rgba(34, 197, 94, 0.45); transform: scale(1); }
+            50% { box-shadow: 0 4px 16px rgba(34, 197, 94, 0.7); transform: scale(1.05); }
+        }
+        @keyframes pulse-signifier-violet {
+            0%, 100% { box-shadow: 0 2px 8px rgba(139, 92, 246, 0.45); transform: scale(1); }
+            50% { box-shadow: 0 4px 16px rgba(139, 92, 246, 0.7); transform: scale(1.05); }
+        }
+        @keyframes new-suggestion-pulse {
+            0% { box-shadow: 0 0 0 0 rgba(86, 156, 214, 0.5); }
+            70% { box-shadow: 0 0 0 12px rgba(86, 156, 214, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(86, 156, 214, 0); }
+        }
         .suggestion-content {
             display: block;
             padding-right: 80px;
@@ -1812,6 +1896,7 @@
                 <div class="suggestion-panel suggestion-panel--guess">
                     <div class="suggestion-panel__header">Next Line Suggestion</div>
                     <div class="suggestion-action red-theme">
+                        <div class="suggestion-signifier" id="signifierGuess">Click to insert in your code</div>
                         <button class="suggestion-button red-theme" id="suggestionGuessBtn" onclick="insertSuggestion('guess')">
                             <span class="suggestion-content" id="suggestionGuess"><span class="spinner"></span> Start coding...</span>
                         </button>
@@ -1840,6 +1925,7 @@
                 <div class="suggestion-panel suggestion-panel--desc">
                     <div class="suggestion-panel__header">Next Line Suggestion</div>
                     <div class="suggestion-action green-theme">
+                        <div class="suggestion-signifier" id="signifierDesc">Click to insert in your code</div>
                         <button class="suggestion-button green-theme" id="suggestionDescBtn" onclick="insertSuggestion('desc')">
                             <span class="suggestion-content" id="suggestionDesc">Based on correct problem...</span>
                         </button>
@@ -1865,6 +1951,7 @@
                 <div class="suggestion-panel suggestion-panel--violet">
                     <div class="suggestion-panel__header">Next Line Suggestion</div>
                     <div class="suggestion-action violet-theme">
+                        <div class="suggestion-signifier" id="signifierOnly">Click to insert in your code</div>
                         <button class="suggestion-button violet-theme" id="suggestionOnlyBtn" onclick="insertSuggestion('suggestions')">
                             <span class="suggestion-content" id="suggestionOnly"><span class="spinner"></span> Start coding...</span>
                         </button>
@@ -3448,6 +3535,78 @@ function hideAIThinkingInBox(type) {
     // Note: We don't restore content here since animateAnalysisResults will handle that
 }
 
+function showSuggestionSignifier(type) {
+    let signifierId, buttonId, suggestionElementId;
+    if (type === 'guess') {
+        signifierId = 'signifierGuess';
+        buttonId = 'suggestionGuessBtn';
+        suggestionElementId = 'suggestionGuess';
+    } else if (type === 'desc') {
+        signifierId = 'signifierDesc';
+        buttonId = 'suggestionDescBtn';
+        suggestionElementId = 'suggestionDesc';
+    } else if (type === 'suggestions') {
+        signifierId = 'signifierOnly';
+        buttonId = 'suggestionOnlyBtn';
+        suggestionElementId = 'suggestionOnly';
+    }
+
+    const signifier = signifierId ? document.getElementById(signifierId) : null;
+    const button = buttonId ? document.getElementById(buttonId) : null;
+    const suggestionElement = suggestionElementId ? document.getElementById(suggestionElementId) : null;
+
+    if (!signifier || !button || !suggestionElement) {
+        return;
+    }
+
+    const suggestionText = suggestionElement.textContent.trim();
+    const invalid = !suggestionText ||
+        suggestionText.includes('Start coding...') ||
+        suggestionText.includes('spinner') ||
+        suggestionText.includes('Waiting for code...') ||
+        suggestionText.includes('Based on correct problem...') ||
+        suggestionText.includes('No suggestions available');
+
+    if (invalid) {
+        return;
+    }
+
+    signifier.classList.remove('active');
+    button.classList.remove('new-suggestion');
+    void signifier.offsetWidth;
+
+    signifier.classList.add('active');
+    button.classList.add('new-suggestion');
+
+    setTimeout(() => {
+        signifier.classList.remove('active');
+        button.classList.remove('new-suggestion');
+    }, 3000);
+}
+
+function clearSuggestionSignifier(type) {
+    let signifierId, buttonId;
+    if (type === 'guess') {
+        signifierId = 'signifierGuess';
+        buttonId = 'suggestionGuessBtn';
+    } else if (type === 'desc') {
+        signifierId = 'signifierDesc';
+        buttonId = 'suggestionDescBtn';
+    } else if (type === 'suggestions') {
+        signifierId = 'signifierOnly';
+        buttonId = 'suggestionOnlyBtn';
+    }
+
+    const signifier = signifierId ? document.getElementById(signifierId) : null;
+    const button = buttonId ? document.getElementById(buttonId) : null;
+
+    if (signifier) {
+        signifier.classList.remove('active');
+    }
+    if (button) {
+        button.classList.remove('new-suggestion');
+    }
+}
 
 function typeTextAnimation(element, text, speed = 50) {
     return new Promise((resolve) => {
@@ -3505,6 +3664,13 @@ if (currentSession.condition === 1) {
     if (correctNextLineCode) {
         document.getElementById('suggestionDesc').textContent = correctNextLineCode;
     }
+
+    setTimeout(() => {
+        showSuggestionSignifier('guess');
+        if (correctNextLineCode) {
+            showSuggestionSignifier('desc');
+        }
+    }, 300);
     
 } else if (currentSession.condition === 2) {
         // Shake red box
@@ -3514,12 +3680,20 @@ if (currentSession.condition === 1) {
         analysis.textContent = problemDescription;
         document.getElementById('suggestionGuess').textContent = nextLineCode;
         
+        setTimeout(() => {
+            showSuggestionSignifier('guess');
+        }, 300);
+        
     } else if (currentSession.condition === 3) {
         // Shake violet box
         shakeAndGlowBox(violetBox);
         
         // Display instantly
         document.getElementById('suggestionOnly').textContent = nextLineCode;
+
+        setTimeout(() => {
+            showSuggestionSignifier('suggestions');
+        }, 300);
     }
     
     // Add terminal notification
@@ -3753,6 +3927,8 @@ function insertSuggestion(type) {
         column: newColumn
     });
     window.editor.focus();
+
+    clearSuggestionSignifier(type);
 
     if (suggestionText.includes('{') || suggestionText.includes('}') || suggestionText.includes(';')) {
         setTimeout(() => {
