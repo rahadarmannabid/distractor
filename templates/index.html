@@ -38,10 +38,17 @@
             height: 100vh;
             overflow: hidden;
         }
+        .editor-wrapper {
+            position: relative;
+            flex: 1;
+            min-height: 0;
+            display: flex;
+        }
         #editor {
             flex: 1;
             min-height: 0;
             position: relative;
+            height: 100%;
         }
         #terminal {
             height: 35vh;
@@ -379,6 +386,88 @@
             border-radius: 50%;
             border-top-color: #f59e0b;
             animation: spin 1s ease-in-out infinite;
+        }
+
+        .teaser-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(17, 17, 17, 0.96);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 24px;
+            z-index: 100;
+            backdrop-filter: blur(2px);
+        }
+        .teaser-card {
+            max-width: 520px;
+            width: min(90%, 520px);
+            background: linear-gradient(145deg, #1f1f24, #26262c);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 32px;
+            box-shadow: 0 20px 45px rgba(0, 0, 0, 0.6);
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            color: #f5f5f5;
+            text-align: left;
+        }
+        .teaser-progress {
+            font-size: 12px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: #9ca3af;
+            display: flex;
+            justify-content: flex-end;
+        }
+        .teaser-slide {
+            display: none;
+            font-size: 16px;
+            line-height: 1.6;
+        }
+        .teaser-slide.active {
+            display: block;
+        }
+        .teaser-slide h3 {
+            font-size: 20px;
+            margin-bottom: 12px;
+            color: #fbbf24;
+            font-weight: 700;
+        }
+        .teaser-slide p {
+            margin-bottom: 0;
+            color: #e5e7eb;
+        }
+        .teaser-overlay-footer {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .teaser-note {
+            font-size: 12px;
+            color: #9ca3af;
+            text-align: center;
+        }
+        .teaser-next-button {
+            align-self: flex-end;
+            background: linear-gradient(135deg, #6366f1, #4338ca);
+            color: #ffffff;
+            border: none;
+            border-radius: 9999px;
+            padding: 12px 28px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+        }
+        .teaser-next-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 24px rgba(99, 102, 241, 0.35);
+        }
+        .teaser-next-button:active {
+            transform: translateY(0);
         }
 
         /* Sidebar Styling */
@@ -1738,6 +1827,17 @@
         padding: 8px 6px;
         font-size: 10px;
     }
+    
+    .teaser-card {
+        padding: 28px;
+        gap: 18px;
+    }
+    .teaser-slide {
+        font-size: 15px;
+    }
+    .teaser-slide h3 {
+        font-size: 18px;
+    }
 }
 
 /* Mobile Phone (< 768px) */
@@ -1788,6 +1888,20 @@
     .sidebar-toggle {
         font-size: 12px;
         padding: 8px 6px;
+    }
+    
+    .teaser-card {
+        padding: 20px;
+    }
+    .teaser-slide {
+        font-size: 14px;
+    }
+    .teaser-slide h3 {
+        font-size: 17px;
+    }
+    .teaser-next-button {
+        width: 100%;
+        text-align: center;
     }
 }
 
@@ -1848,7 +1962,28 @@
                     <button class="logout-btn" id="logoutBtn">End Session</button>
                 </div>
             </div>
-            <div id="editor"></div>
+            <div class="editor-wrapper">
+                <div id="editor"></div>
+                <div id="teaserOverlay" class="teaser-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="teaserSlideTitle" tabindex="-1">
+                    <div class="teaser-card">
+                        <div class="teaser-progress">
+                            <span id="teaserStepIndicator">1 / 2</span>
+                        </div>
+                        <div class="teaser-slide active" data-step="1">
+                            <h3 id="teaserSlideTitle">1. GUIDE is NOT a productivity tool!</h3>
+                            <p>✅ GUIDE provides all the same functionality of autocompletion tools, like GitHub Copilot; however, it also shows you an interpretation of your goal in the “AI Agent’s Understanding” panel.</p>
+                        </div>
+                        <div class="teaser-slide" data-step="2" aria-hidden="true">
+                            <h3 id="teaserSlideTitle2">2. ✅ GUIDE creates code suggestions using the state-of-the-art model from OpenAI</h3>
+                            <p>The goal of this study is to help you understand how AI coding assistants work.</p>
+                        </div>
+                        <div class="teaser-overlay-footer">
+                            <span class="teaser-note">Read both cards and click next to start coding.</span>
+                            <button class="teaser-next-button" id="teaserNextButton">Next</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div id="resize-terminal"></div>
             <div class="terminal" id="terminal">
                 <div class="header">
@@ -2399,6 +2534,124 @@ let isSubmissionInProgress = false;
     const analysis = document.getElementById('analysis');
     const suggestionGuess = document.getElementById('suggestionGuess');
     const suggestionDesc = document.getElementById('suggestionDesc');
+    const teaserOverlay = document.getElementById('teaserOverlay');
+    const teaserNextButton = document.getElementById('teaserNextButton');
+    const teaserStepIndicator = document.getElementById('teaserStepIndicator');
+    const teaserSlides = Array.from(document.querySelectorAll('.teaser-slide'));
+    const teaserAssignmentKeyTemplate = "{{ teaser_assignment | default('', true) | replace('\"', '\\\"') }}";
+    const teaserAssignmentKey = teaserAssignmentKeyTemplate ? teaserAssignmentKeyTemplate.toLowerCase().trim() : "";
+    let teaserCurrentIndex = 0;
+    let teaserActive = false;
+    let teaserAcknowledged = false;
+
+function updateTeaserSlide() {
+    if (!teaserOverlay || teaserSlides.length === 0) {
+        return;
+    }
+
+    teaserSlides.forEach((slide, index) => {
+        const isActive = index === teaserCurrentIndex;
+        slide.classList.toggle('active', isActive);
+        slide.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+    });
+
+    if (teaserStepIndicator) {
+        teaserStepIndicator.textContent = `${teaserCurrentIndex + 1} / ${teaserSlides.length}`;
+    }
+
+    const activeSlide = teaserSlides[teaserCurrentIndex];
+    if (activeSlide) {
+        const heading = activeSlide.querySelector('h3');
+        if (heading && heading.id) {
+            teaserOverlay.setAttribute('aria-labelledby', heading.id);
+        }
+    }
+
+    if (teaserNextButton) {
+        teaserNextButton.textContent = teaserCurrentIndex === teaserSlides.length - 1 ? 'Start coding' : 'Next';
+    }
+}
+
+function showTeaserOverlay() {
+    if (!teaserOverlay || teaserSlides.length === 0) {
+        return;
+    }
+
+    teaserActive = true;
+    teaserOverlay.classList.remove('hidden');
+    teaserCurrentIndex = 0;
+    updateTeaserSlide();
+
+    if (window.editor && typeof window.editor.updateOptions === 'function') {
+        window.editor.updateOptions({ readOnly: true });
+    }
+
+    setTimeout(() => {
+        try {
+            teaserOverlay.focus();
+        } catch (e) {
+            console.warn('Unable to focus teaser overlay:', e);
+        }
+    }, 0);
+}
+
+function hideTeaserOverlay() {
+    if (!teaserOverlay) {
+        return;
+    }
+
+    teaserActive = false;
+    teaserAcknowledged = true;
+
+    teaserOverlay.classList.add('hidden');
+
+    if (window.editor && typeof window.editor.updateOptions === 'function') {
+        window.editor.updateOptions({ readOnly: false });
+        try {
+            window.editor.focus();
+        } catch (e) {
+            console.warn('Unable to focus editor after teaser:', e);
+        }
+    }
+}
+
+function maybeShowTeaser() {
+    if (!teaserAssignmentKey) {
+        teaserAcknowledged = true;
+        return;
+    }
+
+    if (!currentSession.assignmentKey) {
+        return;
+    }
+
+    const normalizedAssignmentKey = currentSession.assignmentKey.toLowerCase();
+    if (!normalizedAssignmentKey.startsWith(teaserAssignmentKey)) {
+        teaserAcknowledged = true;
+        return;
+    }
+
+    if (teaserAcknowledged) {
+        return;
+    }
+
+    showTeaserOverlay();
+}
+
+if (teaserNextButton) {
+    teaserNextButton.addEventListener('click', () => {
+        if (!teaserActive) {
+            return;
+        }
+
+        if (teaserCurrentIndex < teaserSlides.length - 1) {
+            teaserCurrentIndex += 1;
+            updateTeaserSlide();
+        } else {
+            hideTeaserOverlay();
+        }
+    });
+}
 
 
     // Enhanced Activity Logging with Time Tracking
@@ -2984,6 +3237,7 @@ async function initializeFromURL() {
         await initializeEditor();
         updateLoadingMessage('Finalizing setup...');
         showMainApp();
+        maybeShowTeaser();
         
         // Initialize sidebar state based on prefix
         initializeSidebar();
@@ -3134,6 +3388,10 @@ async function initializeEditor() {
                     matchBrackets: 'always',
                     fontSize: 12
                 });
+
+                if (teaserActive) {
+                    window.editor.updateOptions({ readOnly: true });
+                }
 
                 // Enhanced Monaco Editor event handlers with time tracking
                 window.editor.onDidChangeModelContent((e) => {

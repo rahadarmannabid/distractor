@@ -1512,10 +1512,11 @@ async def serve_ide(request: Request):
     
     # Serve the IDE page - authentication will be handled by JavaScript
     return templates.TemplateResponse("index.html", {
-    "request": request,
-    "session_token": session_token,
-    "user_id": user_id,
-    "side_panel_hidden": get_side_panel_hidden_assignment_keys()
+        "request": request,
+        "session_token": session_token,
+        "user_id": user_id,
+        "side_panel_hidden": get_side_panel_hidden_assignment_keys(),
+        "teaser_assignment": os.getenv("TEASER", "")
     })
 
 @app.get("/health")
