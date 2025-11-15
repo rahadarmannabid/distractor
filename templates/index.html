@@ -56,9 +56,17 @@
             max-height: 50vh;
         }
         #sidebar {
-            width: 30vw;
-            min-width: 250px;
-            max-width: 60vw;
+            width: 35vw;
+            min-width: 25vw;
+            max-width: 50vw;
+            transition: min-width 0.2s ease;
+        }
+        #sidebar.collapsed {
+            width: 0px !important;
+            min-width: 0px !important;
+            padding: 0;
+            border-left: none;
+            overflow: hidden;
         }
 
         /* Resizing */
@@ -496,15 +504,18 @@
             line-height: 2;
             color: #4ade80;
             box-shadow: 0 4px 15px rgba(34, 197, 94, 0.2);
+            overflow: visible;
         }
         .sidebar-section .red-box {
             background: linear-gradient(135deg, #2d1b0e, #3d2616);
             border: 2px solid #f97316;
             border-radius: 8px;
-            padding: 20px;
+            padding: 30px 20px 20px;
             line-height: 2;
             color: #f97316;
             box-shadow: 0 4px 15px rgba(249, 115, 22, 0.2);
+            position: relative;
+            overflow: visible;
         }
         .sidebar-section code {
             white-space: pre-wrap;
@@ -521,21 +532,35 @@
             background: linear-gradient(135deg, #1e1e1e, #2d2d2d);
             border: 1px solid #404040;
             border-radius: 4px;
-            padding: 12px 16px;
+            padding: 2px 45px 2px 8px;
             color: #d4d4d4;
             font-family: 'Consolas', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 12px;
+            font-size: 11px;
             cursor: pointer;
             display: block;
             width: 100%;
             text-align: left;
             transition: all 0.2s ease;
-            margin-top: 8px;
+            margin-top: 6px;
             position: relative;
-            overflow: hidden;
-            line-height: 1.5;
-            min-height: 40px;
+            overflow: visible;
+            line-height: 1.2;
+            min-height: 20px;
             word-break: break-word;
+            white-space: pre-wrap;
+            box-sizing: border-box;
+        }
+        .suggestion-content {
+            display: block;
+            width: 100%;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            word-break: break-word;
+            min-height: auto;
+            line-height: 1.2;
+            padding: 0;
+            margin: 0;
         }
         .suggestion-button:hover {
             background: linear-gradient(135deg, #2d2d2d, #3d3d3d);
@@ -563,9 +588,9 @@
         .suggestion-button::after {
             content: 'Click to insert';
             position: absolute;
-            top: 4px;
-            right: 8px;
-            font-size: 10px;
+            top: 2px;
+            right: 6px;
+            font-size: 8px;
             color: #888;
             opacity: 0;
             transition: opacity 0.2s ease;
@@ -573,6 +598,310 @@
         }
         .suggestion-button:hover::after {
             opacity: 1;
+        }
+        .ai-thinking-layout {
+            display: flex;
+            gap: 3px;
+            margin-top: 8px;
+            align-items: stretch;
+            overflow: visible;
+        }
+        .ai-avatar-column {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 70px;
+            position: relative;
+            flex: 0 0 auto;
+        }
+        .ai-avatar-orb {
+            width: 70px;
+            height: 110px;
+            border-radius: 40px;
+            background: radial-gradient(circle at 30% 20%, #ffffff, #c7d2fe);
+            border: 4px solid #60a5fa;
+            box-shadow: 0 12px 24px rgba(0,0,0,0.35);
+            padding: 10px;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            position: relative;
+            animation: bot-float 3s ease-in-out infinite;
+            box-sizing: border-box;
+        }
+        .ai-avatar-column.is-thinking .ai-avatar-orb {
+            border-color: #fbbf24;
+            box-shadow: 0 0 25px rgba(251,191,36,0.6);
+        }
+        .ai-bot {
+            position: relative;
+            width: 60px;
+            height: 100px;
+        }
+        .ai-bot-head {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            width: 56px;
+            height: 56px;
+            transform: translateX(-50%);
+        }
+        .ai-bot-band {
+            position: absolute;
+            top: 4px;
+            left: 8px;
+            right: 8px;
+            height: 20px;
+            background: linear-gradient(180deg, #61bad1, #2c879f);
+            border-radius: 40px 40px 30px 30px;
+            box-shadow: inset 0 -4px 8px rgba(0,0,0,0.25);
+        }
+        .ai-bot-pad {
+            position: absolute;
+            top: 18px;
+            width: 16px;
+            height: 28px;
+            background: #1b5a70;
+            border-radius: 12px;
+            box-shadow: inset -2px 2px 6px rgba(255,255,255,0.15), inset 2px -2px 6px rgba(0,0,0,0.35);
+        }
+        .ai-bot-pad.left { left: -6px; }
+        .ai-bot-pad.right { right: -6px; }
+        .ai-bot-helmet {
+            position: absolute;
+            top: 10px;
+            left: 8px;
+            right: 8px;
+            bottom: 8px;
+            border-radius: 50%;
+            background: linear-gradient(180deg, #ffe98c, #ffc52c);
+            box-shadow: inset 0 6px 10px rgba(255,255,255,0.75), inset 0 -8px 12px rgba(0,0,0,0.25);
+        }
+        .ai-bot-face {
+            position: absolute;
+            left: 16px;
+            right: 16px;
+            bottom: 10px;
+            height: 26px;
+            border-radius: 16px;
+            background: linear-gradient(180deg, #0f172a, #000);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            box-shadow: inset 0 3px 5px rgba(255,255,255,0.2), inset 0 -4px 6px rgba(0,0,0,0.4);
+            overflow: hidden;
+        }
+        .ai-bot-eye {
+            width: 12px;
+            height: 10px;
+            border-radius: 999px;
+            border: 3px solid #d7faff;
+            border-color: #d7faff transparent transparent transparent;
+            animation: bot-blink 4s infinite;
+            transition: box-shadow 0.2s ease, border-color 0.2s ease;
+        }
+        .ai-bot-eye.right { animation-delay: .2s; }
+        .ai-bot-eye.flash {
+            border-color: #7ff5ff transparent transparent transparent;
+            box-shadow: 0 0 6px #7ff5ff, 0 0 14px #7ff5ff, 0 0 22px #7ff5ff;
+        }
+        .ai-bot-gloss {
+            position: absolute;
+            top: 4px;
+            left: 18px;
+            width: 26px;
+            height: 8px;
+            background: rgba(255,255,255,0.35);
+            border-radius: 999px;
+            filter: blur(1px);
+        }
+        .ai-bot-body {
+            position: absolute;
+            top: 56px;
+            left: 50%;
+            width: 46px;
+            height: 36px;
+            transform: translateX(-50%);
+            border-radius: 18px;
+            background: linear-gradient(180deg, #f4f4f5, #cbd5e1);
+            box-shadow: inset 0 4px 6px rgba(255,255,255,0.7), 0 4px 8px rgba(0,0,0,0.25);
+        }
+        .ai-bot-chest {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            width: 18px;
+            height: 10px;
+            transform: translateX(-50%);
+            border-radius: 10px;
+            background: linear-gradient(180deg, #a5f3fc, #0ea5e9);
+            box-shadow: 0 0 10px rgba(14,165,233,0.6);
+        }
+        .ai-bot-arm {
+            position: absolute;
+            top: 64px;
+            width: 12px;
+            height: 28px;
+            background: linear-gradient(180deg, #e5e7eb, #d1d5db);
+            border-radius: 10px;
+            box-shadow: inset 0 4px 6px rgba(255,255,255,0.4), 0 4px 8px rgba(0,0,0,0.25);
+            animation: bot-arm 3s ease-in-out infinite;
+            z-index: 1;
+        }
+        .ai-bot-arm.left { left: 2px; }
+        .ai-bot-arm.right { right: 2px; animation-delay: .2s; }
+        .ai-bot-hand {
+            position: absolute;
+            bottom: -5px;
+            left: 50%;
+            width: 14px;
+            height: 10px;
+            transform: translateX(-50%);
+            border-radius: 8px;
+            background: #1f2937;
+            box-shadow: inset 0 2px 3px rgba(255,255,255,0.2), 0 2px 4px rgba(0,0,0,0.4);
+        }
+        .ai-bot-leg {
+            position: absolute;
+            top: 88px;
+            width: 14px;
+            height: 26px;
+            background: linear-gradient(180deg, #e5e7eb, #cdd3da);
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.25);
+        }
+        .ai-bot-leg.left { left: 4px; }
+        .ai-bot-leg.right { right: 4px; }
+        .ai-bot-foot {
+            position: absolute;
+            bottom: -6px;
+            left: 50%;
+            width: 20px;
+            height: 12px;
+            transform: translateX(-50%);
+            border-radius: 8px;
+            background: linear-gradient(180deg, #111827, #020617);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.45), inset 0 2px 3px rgba(255,255,255,0.1);
+        }
+        @keyframes bot-blink {
+            0%,5%,100% { transform: scaleY(1); }
+            2% { transform: scaleY(.1); }
+        }
+        @keyframes bot-float {
+            0%,100% { transform: translateY(0); }
+            50% { transform: translateY(-4px); }
+        }
+        @keyframes bot-arm {
+            0%,100% { transform: rotate(2deg); }
+            50% { transform: rotate(-2deg); }
+        }
+        .ai-bubble-stack {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            position: relative;
+            padding-left: 50px;
+            overflow: visible;
+        }
+        .ai-bubble-stack::before {
+            content: '';
+            position: absolute;
+            left: 20px;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(180deg, rgba(96,165,250,0.5), rgba(14,116,144,0.15));
+            border-radius: 999px;
+            opacity: 0.8;
+        }
+        .ai-bubble-card {
+            position: relative;
+            border-radius: 24px;
+            padding: 8px 16px 8px;
+            width: 100%;
+            box-sizing: border-box;
+            overflow: visible;
+        }
+        .ai-bubble-card::before {
+            content: '';
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            left: -10px;
+            top: 32px;
+            background: inherit;
+            transform: rotate(45deg);
+            border-radius: 4px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+        }
+        .ai-timeline-node {
+            position: absolute;
+            left: -40px;
+            top: 32px;
+            width: 18px;
+            height: 18px;
+            border-radius: 999px;
+            border: 3px solid currentColor;
+            background: rgba(15,23,42,0.95);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+        }
+        .ai-timeline-node::after {
+            content: '';
+            position: absolute;
+            right: -12px;
+            top: 50%;
+            width: 18px;
+            height: 2px;
+            background: currentColor;
+            opacity: 0.6;
+            transform: translateY(-50%);
+        }
+        .ai-timeline-node--analysis {
+            color: #f97316;
+        }
+        .ai-timeline-node--suggestion {
+            color: #60a5fa;
+        }
+        .ai-avatar-badge, .ai-avatar-badge--inline {
+            width: 100%;
+            background: linear-gradient(135deg, #1d4ed8, #0f172a);
+            border-radius: 18px;
+            padding: 8px 10px;
+            border: 1px solid rgba(147,197,253,0.5);
+            box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            text-transform: uppercase;
+            box-sizing: border-box;
+        }
+        .ai-avatar-badge--inline {
+            position: absolute;
+            top: 6px;
+            left: 6px;
+            width: auto;
+            max-width: calc(100% - 12px);
+            align-items: flex-start;
+        }
+        .ai-avatar-badge__title {
+            width: 100%;
+            text-align: center;
+            font-size: 11px;
+            letter-spacing: 0.18em;
+            color: #f1f5f9;
+            white-space: nowrap;
+        }
+        .ai-avatar-badge__subtitle {
+            width: 100%;
+            text-align: center;
+            font-size: 6px;
+            letter-spacing: 0.35em;
+            color: #a5b4fc;
+            white-space: nowrap;
         }
         .suggestion-button.red-theme {
             border-left: 3px solid #ea580c;
@@ -604,15 +933,24 @@
         .suggestion-button.violet-theme::before {
             background: linear-gradient(90deg, transparent, #8b5cf6, transparent);
         }
+        /* Ensure theme variants also wrap correctly */
+        .suggestion-button.red-theme,
+        .suggestion-button.green-theme,
+        .suggestion-button.violet-theme {
+            white-space: pre-wrap;
+            word-break: break-word;
+            overflow: visible;
+        }
         .analysis-panel,
         .suggestion-panel {
-            margin-top: 12px;
-            margin-bottom: 18px;
-            padding: 16px;
+            margin-top: 4px;
+            margin-bottom: 4px;
+            padding: 8px;
             border-radius: 8px;
             border-left: 3px solid transparent;
             background: rgba(255, 255, 255, 0.04);
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 8px 18px rgba(0,0,0,0.25);
+            overflow: visible;
         }
         .analysis-panel__title,
         .suggestion-panel__header {
@@ -674,6 +1012,7 @@
         }
         .suggestion-action {
             position: relative;
+            overflow: visible;
         }
         .suggestion-signifier {
             position: absolute;
@@ -759,11 +1098,6 @@
             70% { box-shadow: 0 0 0 12px rgba(86, 156, 214, 0); }
             100% { box-shadow: 0 0 0 0 rgba(86, 156, 214, 0); }
         }
-        .suggestion-content {
-            display: block;
-            padding-right: 80px;
-            white-space: pre-wrap;
-        }
         .sidebar-section p {
             line-height: 1.4;
             font-size: 12px;
@@ -771,9 +1105,17 @@
         .sidebar-header {
             display: flex;
             flex-direction: row;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 4px;
         }
         h2, h3 {
             flex: 1;
+        }
+        #aiGuessSection .sidebar-header {
+            justify-content: flex-end;
+            gap: 12px;
         }
         
         /* Different colors for different sections */
@@ -1508,12 +1850,6 @@
         }
         
         /* Ensure consistent heights across all conditions */
-        .suggestion-content {
-            display: block;
-            padding-right: 60px;
-            min-height: 20px;
-            overflow-wrap: break-word;
-        }
 
         /* Temporary paste banner */
 .paste-banner {
@@ -1970,11 +2306,11 @@
                             <span id="teaserStepIndicator">1 / 2</span>
                         </div>
                         <div class="teaser-slide active" data-step="1">
-                            <h3 id="teaserSlideTitle">1. GUIDE is NOT a productivity tool!</h3>
-                            <p>✅ GUIDE provides all the same functionality of autocompletion tools, like GitHub Copilot; however, it also shows you an interpretation of your goal in the “AI Agent’s Understanding” panel.</p>
+                            <h3 id="teaserSlideTitle">1. CODEORACLE is NOT a productivity tool!</h3>
+                            <p>✅ CodeOracle provides all the same functionality of autocompletion tools, like GitHub Copilot; however, it also shows you an interpretation of your goal in the “AI Agent’s Understanding” panel.</p>
                         </div>
                         <div class="teaser-slide" data-step="2" aria-hidden="true">
-                            <h3 id="teaserSlideTitle2">2. ✅ GUIDE creates code suggestions using the state-of-the-art model from OpenAI</h3>
+                            <h3 id="teaserSlideTitle2">2. ✅ CodeOracle creates code suggestions using the state-of-the-art model from OpenAI</h3>
                             <p>The goal of this study is to help you understand how AI coding assistants work.</p>
                         </div>
                         <div class="teaser-overlay-footer">
@@ -2020,28 +2356,61 @@
         <!-- AI Problem Guess Section (Conditions 1 & 2) -->
         <div class="sidebar-section" id="aiGuessSection">
             <div class="red-box">
+                <div class="ai-avatar-badge ai-avatar-badge--inline">
+                    <span class="ai-avatar-badge__title">codeoracle</span>
+                    <span class="ai-avatar-badge__subtitle">powered by chatgpt</span>
+                </div>
                 <div class="sidebar-header">
-                    <h3>AI Problem Guess</h3>
                     <div id="history-guess" class="history-button">View History</div>
                 </div>
-                <div class="analysis-panel analysis-panel--guess">
-                    <div class="analysis-panel__title">AI Agent's Understanding of your code</div>
-                    <p id="analysis"><span class="spinner"></span> Waiting for code...</p>
-                </div>
-                <div class="suggestion-panel suggestion-panel--guess">
-                    <div class="suggestion-panel__header">Next Line Suggestion</div>
-                    <div class="suggestion-action red-theme">
-                        <div class="suggestion-signifier" id="signifierGuess">Click to insert in your code</div>
-                        <button class="suggestion-button red-theme" id="suggestionGuessBtn" onclick="insertSuggestion('guess')">
-                            <span class="suggestion-content" id="suggestionGuess"><span class="spinner"></span> Start coding...</span>
-                        </button>
-                        <div class="suggestion-callout callout-red" id="calloutGuess">
-                            <span class="callout-arrow"></span>
+                <div class="ai-thinking-layout">
+                    <div class="ai-avatar-column" id="aiAvatarColumn">
+                        <div class="ai-avatar-orb">
+                            <div class="ai-bot">
+                                <div class="ai-bot-head">
+                                    <div class="ai-bot-band"></div>
+                                    <div class="ai-bot-pad left"></div>
+                                    <div class="ai-bot-pad right"></div>
+                                    <div class="ai-bot-helmet"></div>
+                                    <div class="ai-bot-face">
+                                        <div class="ai-bot-gloss"></div>
+                                        <div class="ai-bot-eye left"></div>
+                                        <div class="ai-bot-eye right"></div>
+                                    </div>
+                                </div>
+                                <div class="ai-bot-body">
+                                    <div class="ai-bot-chest"></div>
+                                </div>
+                                <div class="ai-bot-arm left"><div class="ai-bot-hand"></div></div>
+                                <div class="ai-bot-arm right"><div class="ai-bot-hand"></div></div>
+                                <div class="ai-bot-leg left"><div class="ai-bot-foot"></div></div>
+                                <div class="ai-bot-leg right"><div class="ai-bot-foot"></div></div>
+                            </div>
                         </div>
                     </div>
-                    <small style="color: #888; display: block; margin-top: 10px;">
-                        Local entries: <span id="guessLogCount">0</span>
-                    </small>
+                    <div class="ai-bubble-stack">
+                        <div class="ai-bubble-card analysis-panel analysis-panel--guess">
+                            <span class="ai-timeline-node ai-timeline-node--analysis" aria-hidden="true"></span>
+                            <div class="analysis-panel__title">AI Agent's Understanding of your code</div>
+                            <p id="analysis"><span class="spinner"></span> Waiting for code...</p>
+                        </div>
+                        <div class="ai-bubble-card suggestion-panel suggestion-panel--guess">
+                            <span class="ai-timeline-node ai-timeline-node--suggestion" aria-hidden="true"></span>
+                            <div class="suggestion-panel__header">Next Line Suggestion</div>
+                            <div class="suggestion-action red-theme">
+                                <div class="suggestion-signifier" id="signifierGuess">Click to insert in your code</div>
+                                <button class="suggestion-button red-theme" id="suggestionGuessBtn" onclick="insertSuggestion('guess')">
+                                    <span class="suggestion-content" id="suggestionGuess"><span class="spinner"></span> Start coding...</span>
+                                </button>
+                                <div class="suggestion-callout callout-red" id="calloutGuess">
+                                    <span class="callout-arrow"></span>
+                                </div>
+                            </div>
+                            <small style="color: #888; display: block; margin-top: 10px;">
+                                Local entries: <span id="guessLogCount">0</span>
+                            </small>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2534,6 +2903,7 @@ let isSubmissionInProgress = false;
     const analysis = document.getElementById('analysis');
     const suggestionGuess = document.getElementById('suggestionGuess');
     const suggestionDesc = document.getElementById('suggestionDesc');
+    const aiAvatarColumn = document.getElementById('aiAvatarColumn');
     const teaserOverlay = document.getElementById('teaserOverlay');
     const teaserNextButton = document.getElementById('teaserNextButton');
     const teaserStepIndicator = document.getElementById('teaserStepIndicator');
@@ -3241,6 +3611,7 @@ async function initializeFromURL() {
         
         // Initialize sidebar state based on prefix
         initializeSidebar();
+        updateSidebarMinWidth();
         
         // Check for saved progress
         setTimeout(() => {
@@ -3718,6 +4089,7 @@ logActivity('ai_analysis_complete', {
 
         // ANIMATE THE RESULTS with typing effect and box shaking
         await animateAnalysisResults(problemDescription, nextLineCode, correctNextLineCode);
+        updateSidebarMinWidth();
         incrementAnalysisCount();
 
 
@@ -3910,6 +4282,9 @@ function shakeAndGlowBox(boxElement) {
 }
 
 async function animateAnalysisResults(problemDescription, nextLineCode, correctNextLineCode = null) {
+    // Flash robot eyes when new AI output arrives
+    flashRobotEyes();
+    
     // Add attention effects to boxes
     const redBox = document.querySelector('.red-box');
     const greenBox = document.querySelector('.green-box');
@@ -4242,6 +4617,10 @@ function showAIThinking() {
         showAIThinkingInBox('suggestions');
     }
     
+    if (aiAvatarColumn) {
+        aiAvatarColumn.classList.add('is-thinking');
+    }
+    
     // DON'T disable editor - let user continue typing
 }
 
@@ -4251,6 +4630,10 @@ function hideAIThinking() {
     hideAIThinkingInBox('guess');
     hideAIThinkingInBox('desc'); 
     hideAIThinkingInBox('suggestions');
+    
+    if (aiAvatarColumn) {
+        aiAvatarColumn.classList.remove('is-thinking');
+    }
     
     // DON'T re-enable editor since we never disabled it
 }
@@ -4574,8 +4957,9 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
                 </div>
             `;
         });
-    }
-    
+    updateSidebarMinWidth();
+}
+
     // CONDITION 3: Show only AI code suggestions (no problem analysis)
     else if (condition === 3) {
         if (aiHistoryContext.suggestions_only_history && aiHistoryContext.suggestions_only_history.length > 0) {
@@ -4622,6 +5006,10 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
     `;
     
     return historyHTML;
+}
+
+function updateSidebarMinWidth() {
+    // No-op placeholder to maintain backward compatibility
 }
 
 
@@ -5682,35 +6070,54 @@ if (historySuggestionsButton) {
    resize.sidebar = false;
    resize.terminal = false;
    
-   document.getElementById('resize-sidebar').addEventListener('mousedown', (e) => {
+   const sidebarHandle = document.getElementById('resize-sidebar');
+   const terminalHandle = document.getElementById('resize-terminal');
+   
+   sidebarHandle.addEventListener('mousedown', (e) => {
+       e.preventDefault();
        resize.sidebar = true;
+       document.body.style.cursor = 'ew-resize';
        document.addEventListener('mousemove', handleSidebarResize);
        document.addEventListener('mouseup', handleMouseUp);
    });
 
-   document.getElementById('resize-terminal').addEventListener('mousedown', (e) => {
+   terminalHandle.addEventListener('mousedown', (e) => {
+       e.preventDefault();
        resize.terminal = true;
+       document.body.style.cursor = 'ns-resize';
        document.addEventListener('mousemove', handleTerminalResize);
        document.addEventListener('mouseup', handleMouseUp);
    });
 
-    function handleSidebarResize(e) {
-        if (!resize.sidebar) return;
-        const sidebar = document.getElementById('sidebar');
-        sidebar.style.width = `${window.innerWidth - e.clientX}px`;
-        
-        // Update toggle button position during resize - use requestAnimationFrame for smooth updates
-        requestAnimationFrame(() => {
-            updateToggleButtonPosition();
-        });
-    }
+   function handleSidebarResize(e) {
+       if (!resize.sidebar) return;
+       e.preventDefault();
+       const sidebar = document.getElementById('sidebar');
+       const minSidebarWidth = window.innerWidth * 0.25;
+       const maxSidebarWidth = window.innerWidth * 0.5;
+       const desiredWidth = window.innerWidth - e.clientX;
+       const newWidth = Math.max(minSidebarWidth, Math.min(maxSidebarWidth, desiredWidth));
+       sidebar.style.width = `${newWidth}px`;
+       sidebar.style.minWidth = `${newWidth}px`;
+
+       requestAnimationFrame(() => {
+           updateToggleButtonPosition();
+       });
+   }
 
    function handleTerminalResize(e) {
        if (!resize.terminal) return;
-       document.getElementById('terminal').style.height = `${window.innerHeight - e.clientY}px`;
+       e.preventDefault();
+       const terminal = document.getElementById('terminal');
+       const minTerminalHeight = 200;
+       const maxTerminalHeight = window.innerHeight * 0.5;
+       const desiredHeight = window.innerHeight - e.clientY;
+       const newHeight = Math.max(minTerminalHeight, Math.min(maxTerminalHeight, desiredHeight));
+       terminal.style.height = `${newHeight}px`;
    }
 
    function handleMouseUp() {
+       document.body.style.cursor = '';
        resize.sidebar = false;
        resize.terminal = false;
        document.removeEventListener('mouseup', handleMouseUp);
@@ -5719,21 +6126,21 @@ if (historySuggestionsButton) {
        document.removeEventListener('touchend', handleMouseUp);
        document.removeEventListener('touchmove', handleSidebarResizeTouch);
        document.removeEventListener('touchmove', handleTerminalResizeTouch);
-       
-       // Final position update after resize completes
+
        if (!resize.sidebar && !resize.terminal) {
            updateToggleButtonPosition();
        }
    }
 
-   // Touch support for resize handles
-   document.getElementById('resize-sidebar').addEventListener('touchstart', (e) => {
+   sidebarHandle.addEventListener('touchstart', (e) => {
+       e.preventDefault();
        resize.sidebar = true;
        document.addEventListener('touchmove', handleSidebarResizeTouch, { passive: false });
        document.addEventListener('touchend', handleMouseUp);
    }, { passive: false });
 
-   document.getElementById('resize-terminal').addEventListener('touchstart', (e) => {
+   terminalHandle.addEventListener('touchstart', (e) => {
+       e.preventDefault();
        resize.terminal = true;
        document.addEventListener('touchmove', handleTerminalResizeTouch, { passive: false });
        document.addEventListener('touchend', handleMouseUp);
@@ -5744,9 +6151,13 @@ if (historySuggestionsButton) {
        e.preventDefault();
        const touch = e.touches[0];
        const sidebar = document.getElementById('sidebar');
-       sidebar.style.width = `${window.innerWidth - touch.clientX}px`;
-       
-       // Update toggle button position during touch resize - use requestAnimationFrame for smooth updates
+       const minSidebarWidth = window.innerWidth * 0.25;
+       const maxSidebarWidth = window.innerWidth * 0.5;
+       const desiredWidth = window.innerWidth - touch.clientX;
+       const newWidth = Math.max(minSidebarWidth, Math.min(maxSidebarWidth, desiredWidth));
+       sidebar.style.width = `${newWidth}px`;
+       sidebar.style.minWidth = `${newWidth}px`;
+
        requestAnimationFrame(() => {
            updateToggleButtonPosition();
        });
@@ -5756,7 +6167,12 @@ if (historySuggestionsButton) {
        if (!resize.terminal) return;
        e.preventDefault();
        const touch = e.touches[0];
-       document.getElementById('terminal').style.height = `${window.innerHeight - touch.clientY}px`;
+       const terminal = document.getElementById('terminal');
+       const minTerminalHeight = 200;
+       const maxTerminalHeight = window.innerHeight * 0.5;
+       const desiredHeight = window.innerHeight - touch.clientY;
+       const newHeight = Math.max(minTerminalHeight, Math.min(maxTerminalHeight, desiredHeight));
+       terminal.style.height = `${newHeight}px`;
    }
 
 // Responsive window resize handler
@@ -5781,6 +6197,7 @@ window.addEventListener('resize', () => {
         
         // Update sidebar toggle button position after window resize
         updateToggleButtonPosition();
+        updateSidebarMinWidth();
     }, 250);
 });
 
@@ -5907,6 +6324,7 @@ document.addEventListener('visibilitychange', function() {
 // Sidebar toggle functionality
 let sidebarCollapsed = false;
 let aiDisabled = false;  // Flag to completely disable AI functionality
+let previousSidebarWidth = null;
 
 // Function to calculate and update toggle button position
 function updateToggleButtonPosition() {
@@ -5915,17 +6333,22 @@ function updateToggleButtonPosition() {
     
     if (!sidebar || !toggleButton) return;
     
-    // Force a reflow to ensure we get accurate measurements
-    sidebar.getBoundingClientRect();
-    
     if (sidebarCollapsed) {
-        // When collapsed, button sits at screen edge
         toggleButton.style.right = '0px';
     } else {
-        // When expanded, button sits at sidebar's left edge
-        // Use getBoundingClientRect for more accurate width during transitions
-        const sidebarWidth = sidebar.getBoundingClientRect().width;
-        toggleButton.style.right = `${sidebarWidth}px`;
+        // Ensure sidebar width is within bounds when restoring
+        const currentWidth = sidebar.offsetWidth;
+        const minWidth = window.innerWidth * 0.25;
+        const maxWidth = window.innerWidth * 0.5;
+        const defaultWidth = window.innerWidth * 0.35;
+        
+        // If width is out of bounds, reset to default
+        if (currentWidth < minWidth || currentWidth > maxWidth) {
+            sidebar.style.width = `${defaultWidth}px`;
+            toggleButton.style.right = `${defaultWidth}px`;
+        } else {
+            toggleButton.style.right = `${currentWidth}px`;
+        }
     }
 }
 
@@ -6023,6 +6446,20 @@ function initializeSidebar() {
     updateToggleButtonPosition();
 }
 
+// Flash robot eyes when new AI output arrives
+function flashRobotEyes() {
+    const eyes = document.querySelectorAll('.ai-bot-eye');
+    if (!eyes || eyes.length === 0) return;
+    
+    // Add flash class
+    eyes.forEach(eye => eye.classList.add('flash'));
+    
+    // Remove flash after 3 seconds
+    setTimeout(() => {
+        eyes.forEach(eye => eye.classList.remove('flash'));
+    }, 3000);
+}
+
 // Setup toggle event listener
 function setupSidebarToggle() {
     const sidebarToggle = document.getElementById('sidebarToggle');
@@ -6044,14 +6481,20 @@ function setupSidebarToggle() {
         sidebarCollapsed = !sidebarCollapsed;
         sidebar.classList.toggle('collapsed');
         toggleIcon.textContent = sidebarCollapsed ? '▶' : '◀';
+        const resizeDivider = document.getElementById('resize-sidebar');
+        if (resizeDivider) {
+            resizeDivider.style.display = sidebarCollapsed ? 'none' : 'block';
+        }
         
-        // Update button position immediately
+        if (sidebarCollapsed) {
+            previousSidebarWidth = sidebar.style.width || `${sidebar.offsetWidth}px`;
+            sidebar.style.width = '0px';
+        } else {
+            const restoreWidth = previousSidebarWidth || sidebar.style.minWidth || '360px';
+            sidebar.style.width = restoreWidth;
+        }
+        
         updateToggleButtonPosition();
-        
-        // Also update after CSS transition completes (300ms)
-        setTimeout(() => {
-            updateToggleButtonPosition();
-        }, 350);
         
         // Log the toggle action
         logActivity('sidebar_toggle', {
@@ -6061,8 +6504,12 @@ function setupSidebarToggle() {
     });
     
     // Update button position on window resize
+    let toggleResizeTimeout;
     window.addEventListener('resize', () => {
-        updateToggleButtonPosition();
+        clearTimeout(toggleResizeTimeout);
+        toggleResizeTimeout = setTimeout(() => {
+            updateToggleButtonPosition();
+        }, 100);
     });
     
     // Use ResizeObserver to continuously track sidebar width changes
