@@ -1,0 +1,147 @@
+{
+    "version": "1.0",
+    "assignment_key": "proteus",
+    "metadata": {
+      "created_at": "2025-01-28T00:00:00Z",
+      "updated_at": "2025-01-28T00:00:00Z",
+      "author": "Research Team",
+      "description": "Proteus coding task surveys with AI intent display study"
+    },
+    
+    "pre_survey": {
+      "title": "Pre-Study Survey",
+      "description": "Please answer the following questions before starting the coding task. All questions are required.",
+      "estimated_time_minutes": 5,
+      "questions": [
+        {
+          "id": "pre_demo_q1",
+          "type": "multiple_choice",
+          "question": "What is your current education level?",
+          "required": true,
+          "options": [
+            "Freshman",
+            "Sophomore",
+            "Junior",
+            "Senior",
+            "Graduate Student",
+            "Other"
+          ]
+        },
+        {
+          "id": "pre_demo_q2",
+          "type": "multiple_choice",
+          "question": "How much experience do you have in programming?",
+          "required": true,
+          "options": [
+            "No experience",
+            "Beginner (< 6 months)",
+            "Intermediate (6–24 months)",
+            "Advanced (2–4 years)",
+            "Expert (4+ years or professional)"
+          ]
+        },
+        {
+          "id": "pre_demo_q3",
+          "type": "multiple_choice",
+          "question": "How frequently do you use AI coding assistants like GitHub Copilot, Cursor, or other coding agents?",
+          "required": true,
+          "options": [
+            "Never",
+            "Rarely (once a month or less)",
+            "Occasionally (a few times a month)",
+            "Frequently (a few times a week)",
+            "Very frequently (daily or almost daily)"
+          ]
+        },
+        {
+          "id": "pre_trust_intro",
+          "type": "info_block",
+          "content": "Please answer the following questions with respect to your usage of AI coding assistants such as GitHub Copilot. Choose N/A if you have no experience with the tool.",
+          "image": {
+            "src": "github-copilot-animation.gif",
+            "alt": "GitHub Copilot AI coding assistant demonstration",
+            "width": "100%",
+            "max_width": "600px"
+          }
+        },
+        {
+          "id": "pre_trust_q1",
+          "type": "likert_7_with_na",
+          "question": "I can trust Github Copilot to solve programming problems.",
+          "required": true,
+          "scale": {
+            "min": 1,
+            "max": 7,
+            "minLabel": "Strongly disagree",
+            "maxLabel": "Strongly agree"
+          },
+          "help_text": "Choose N/A if you have no experience with the tool"
+        },
+        {
+          "id": "pre_trust_q5",
+          "type": "open_ended",
+          "question": "Please describe why you trust or distrust AI for use in coding in your own words.",
+          "required": true,
+          "placeholder": "Describe the factors that influence your trust or distrust in AI coding assistants...",
+          "max_length": 1000,
+          "min_length": 30
+        },
+        {
+          "id": "pre_mental_q1",
+          "type": "open_ended",
+          "question": "Please describe in your own words, how you think AI Coding Assistants generate code suggestions?",
+          "required": true,
+          "placeholder": "Explain your understanding of how AI generates code suggestions...",
+          "max_length": 1000,
+          "min_length": 30
+        },
+        {
+          "id": "pre_accuracy_q1",
+          "type": "slider",
+          "question": "How accurate do you believe AI-generated code suggestions are?",
+          "required": true,
+          "scale": {
+            "min": 0,
+            "max": 100,
+            "step": 5,
+            "default": 50,
+            "unit": "%"
+          },
+          "help_text": "Move the slider to indicate your perceived accuracy (0% = completely inaccurate, 100% = perfectly accurate)"
+        },
+        {
+          "id": "pre_accuracy_q2",
+          "type": "open_ended",
+          "question": "Please describe what you believe might cause AI-generated code to be incorrect.",
+          "required": true,
+          "placeholder": "Describe potential causes of incorrect AI-generated code...",
+          "max_length": 1000,
+          "min_length": 30
+        },
+        {
+          "id": "pre_impact_q1",
+          "type": "open_ended",
+          "question": "How do you think AI-generated code suggestions affect your ability to complete programming assignments?",
+          "required": true,
+          "placeholder": "Describe how AI coding assistants impact your programming work...",
+          "max_length": 1000,
+          "min_length": 30
+        }
+      ]
+    },
+    
+    "post_survey": {
+      "title": "Post-Study Survey",
+      "description": "Thank you for completing the task! Please share your experience with the AI coding assistant. All questions are required.",
+      "estimated_time_minutes": 10,
+      "questions": []
+    },
+    
+    "periodic_survey": {
+      "enabled": false,
+      "interval": 4,
+      "title": "Quick Check-in",
+      "description": "Please rate your current experience",
+      "questions": []
+    }
+  }

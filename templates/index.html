@@ -397,7 +397,7 @@
         }
 
         .teaser-overlay {
-            position: absolute;
+            position: fixed;
             inset: 0;
             background: rgba(17, 17, 17, 0.96);
             display: flex;
@@ -405,7 +405,7 @@
             align-items: center;
             justify-content: center;
             padding: 40px 24px;
-            z-index: 100;
+            z-index: 10000;
             backdrop-filter: blur(2px);
         }
         .teaser-card {
@@ -2446,26 +2446,61 @@
         
         <!-- AI Suggestions Only Section (Condition 3 only) -->
         <div class="sidebar-section hidden" id="suggestionsOnlySection">
-        <div class="violet-box" style="background: linear-gradient(135deg, #2d1b69, #3d2777); border: 2px solid #8b5cf6; border-radius: 8px; padding: 20px; line-height: 2; color: #e9d5ff; box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);">
-
+        <div class="violet-box" style="background: linear-gradient(135deg, #2d1b69, #3d2777); border: 2px solid #8b5cf6; border-radius: 8px; padding: 30px 20px 20px; line-height: 2; color: #e9d5ff; box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3); position: relative; overflow: visible;">
+                <div class="ai-avatar-badge ai-avatar-badge--inline">
+                    <span class="ai-avatar-badge__title">codeoracle</span>
+                    <span class="ai-avatar-badge__subtitle">powered by chatgpt</span>
+                </div>
                 <div class="sidebar-header">
-                    <h3>AI Code Suggestions</h3>
+                    <h3></h3>
                     <div id="history-suggestions" class="history-button">View History</div>
                 </div>
-                <div class="suggestion-panel suggestion-panel--violet">
-                    <div class="suggestion-panel__header">Next Line Suggestion</div>
-                    <div class="suggestion-action violet-theme">
-                        <div class="suggestion-signifier" id="signifierOnly">Click to insert in your code</div>
-                        <button class="suggestion-button violet-theme" id="suggestionOnlyBtn" onclick="insertSuggestion('suggestions')">
-                            <span class="suggestion-content" id="suggestionOnly"><span class="spinner"></span> Start coding...</span>
-                        </button>
-                        <div class="suggestion-callout callout-violet" id="calloutOnly">
-                            <span class="callout-arrow"></span>
+                <div class="ai-thinking-layout">
+                    <div class="ai-avatar-column" id="aiAvatarColumnSuggestions">
+                        <div class="ai-avatar-orb">
+                            <div class="ai-bot">
+                                <div class="ai-bot-head">
+                                    <div class="ai-bot-band"></div>
+                                    <div class="ai-bot-pad left"></div>
+                                    <div class="ai-bot-pad right"></div>
+                                    <div class="ai-bot-helmet"></div>
+                                    <div class="ai-bot-face">
+                                        <div class="ai-bot-gloss"></div>
+                                        <div class="ai-bot-eye left"></div>
+                                        <div class="ai-bot-eye right"></div>
+                                    </div>
+                                </div>
+                                <div class="ai-bot-body">
+                                    <div class="ai-bot-chest"></div>
+                                </div>
+                                <div class="ai-bot-arm left"><div class="ai-bot-hand"></div></div>
+                                <div class="ai-bot-arm right"><div class="ai-bot-hand"></div></div>
+                                <div class="ai-bot-leg left"><div class="ai-bot-foot"></div></div>
+                                <div class="ai-bot-leg right"><div class="ai-bot-foot"></div></div>
+                            </div>
                         </div>
                     </div>
-                    <small style="color: #888; display: block; margin-top: 10px;">
-                        AI suggestions: <span id="suggestionsLogCount">0</span>
-                    </small>
+                    <div class="ai-bubble-stack">
+                        <div class="ai-bubble-card suggestion-panel suggestion-panel--violet">
+                            <span class="ai-timeline-node ai-timeline-node--suggestion" aria-hidden="true"></span>
+                            <div class="suggestion-panel__header">Next Line Suggestion</div>
+                            <div id="suggestionsHistoryDisplay" style="display: none;"></div>
+                            <div id="suggestionOnlyContainer">
+                                <div class="suggestion-action violet-theme">
+                                    <div class="suggestion-signifier" id="signifierOnly">Click to insert in your code</div>
+                                    <button class="suggestion-button violet-theme" id="suggestionOnlyBtn" onclick="insertSuggestion('suggestions')">
+                                        <span class="suggestion-content" id="suggestionOnly"><span class="spinner"></span> Start coding...</span>
+                                    </button>
+                                    <div class="suggestion-callout callout-violet" id="calloutOnly">
+                                        <span class="callout-arrow"></span>
+                                    </div>
+                                </div>
+                                <small style="color: #888; display: block; margin-top: 10px;">
+                                    AI suggestions: <span id="suggestionsLogCount">0</span>
+                                </small>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2909,7 +2944,10 @@ let isSubmissionInProgress = false;
     const teaserStepIndicator = document.getElementById('teaserStepIndicator');
     const teaserSlides = Array.from(document.querySelectorAll('.teaser-slide'));
     const teaserAssignmentKeyTemplate = "{{ teaser_assignment | default('', true) | replace('\"', '\\\"') }}";
-    const teaserAssignmentKey = teaserAssignmentKeyTemplate ? teaserAssignmentKeyTemplate.toLowerCase().trim() : "";
+    // Parse comma-separated list into array of assignment keys
+    const teaserAssignmentKeys = teaserAssignmentKeyTemplate ? 
+        teaserAssignmentKeyTemplate.toLowerCase().split(',').map(key => key.trim()).filter(key => key.length > 0) : 
+        [];
     let teaserCurrentIndex = 0;
     let teaserActive = false;
     let teaserAcknowledged = false;
@@ -2986,21 +3024,29 @@ function hideTeaserOverlay() {
 }
 
 function maybeShowTeaser() {
-    if (!teaserAssignmentKey) {
+    // Check if any teaser keys are configured
+    if (!teaserAssignmentKeys || teaserAssignmentKeys.length === 0) {
         teaserAcknowledged = true;
         return;
     }
 
+    // Check if current session has an assignment key
     if (!currentSession.assignmentKey) {
         return;
     }
 
-    const normalizedAssignmentKey = currentSession.assignmentKey.toLowerCase();
-    if (!normalizedAssignmentKey.startsWith(teaserAssignmentKey)) {
+    // Normalize current assignment key
+    const normalizedAssignmentKey = currentSession.assignmentKey.toLowerCase().trim();
+    
+    // Check if current assignment key matches ANY of the teaser keys (exact match)
+    const shouldShowTeaser = teaserAssignmentKeys.includes(normalizedAssignmentKey);
+    
+    if (!shouldShowTeaser) {
         teaserAcknowledged = true;
         return;
     }
 
+    // Don't show if already acknowledged
     if (teaserAcknowledged) {
         return;
     }
@@ -4360,7 +4406,7 @@ function showHistoryInline(type) {
     const isDescHistory = type === 'desc';
     const isSuggestionsHistory = type === 'suggestions';
     
-    let history, targetElement, buttonElement, historyType;
+    let history, targetElement, buttonElement, historyType, historyDisplayElement, contentContainer;
     
     if (isGuessHistory) {
         history = currentSession.guessHistory;
@@ -4377,9 +4423,13 @@ function showHistoryInline(type) {
         targetElement = document.getElementById('suggestionOnly');
         buttonElement = document.getElementById('history-suggestions');
         historyType = 'suggestions_history';
+        historyDisplayElement = document.getElementById('suggestionsHistoryDisplay');
+        contentContainer = document.getElementById('suggestionOnlyContainer');
     }
         
-    const isShowingHistory = targetElement.getAttribute('data-showing-history') === 'true';
+    const isShowingHistory = isSuggestionsHistory ? 
+        (historyDisplayElement && historyDisplayElement.style.display !== 'none') :
+        targetElement.getAttribute('data-showing-history') === 'true';
     const action = isShowingHistory ? 'hide_history' : 'show_history';
     logActivity('history_interaction', {
         start_time: new Date(historyStartTime).toISOString(),
@@ -4397,6 +4447,7 @@ function showHistoryInline(type) {
                 currentSession.guessHistory[currentSession.guessHistory.length - 1].problemAnalysis : 
                 'Waiting for code...';
             targetElement.textContent = currentAnalysis;
+            targetElement.setAttribute('data-showing-history', 'false');
         } else if (isDescHistory) {
             if (currentSession.problemDescription) {
                 try {
@@ -4414,13 +4465,21 @@ function showHistoryInline(type) {
             } else {
                 targetElement.innerHTML = 'Loading problem description...';
             }
+            targetElement.setAttribute('data-showing-history', 'false');
         } else if (isSuggestionsHistory) {
+            // Hide history display and show current suggestion
+            if (historyDisplayElement) {
+                historyDisplayElement.style.display = 'none';
+                historyDisplayElement.innerHTML = '';
+            }
+            if (contentContainer) {
+                contentContainer.style.display = 'block';
+            }
             const lastSuggestion = currentSession.suggestionsHistory.length > 0 ? 
                 currentSession.suggestionsHistory[currentSession.suggestionsHistory.length - 1].nextLine : 
                 'Start coding...';
             targetElement.textContent = lastSuggestion;
         }
-        targetElement.setAttribute('data-showing-history', 'false');
         buttonElement.textContent = 'View History';
     } else {
         // Show history
@@ -4478,9 +4537,23 @@ function showHistoryInline(type) {
             
             historyHTML += `</div>`;
         }
-                
-        targetElement.innerHTML = historyHTML;
-        targetElement.setAttribute('data-showing-history', 'true');
+        
+        // Display history in appropriate container
+        if (isSuggestionsHistory) {
+            // For suggestions, use dedicated history display and hide current suggestion
+            if (historyDisplayElement) {
+                historyDisplayElement.innerHTML = historyHTML;
+                historyDisplayElement.style.display = 'block';
+            }
+            if (contentContainer) {
+                contentContainer.style.display = 'none';
+            }
+        } else {
+            // For other types, replace content in target element
+            targetElement.innerHTML = historyHTML;
+            targetElement.setAttribute('data-showing-history', 'true');
+        }
+        
         buttonElement.textContent = 'Hide History';
     }
 }

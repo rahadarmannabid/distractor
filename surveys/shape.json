@@ -1,0 +1,211 @@
+{
+    "version": "1.0",
+    "assignment_key": "proteus",
+    "metadata": {
+      "created_at": "2025-01-28T00:00:00Z",
+      "updated_at": "2025-01-28T00:00:00Z",
+      "author": "Research Team",
+      "description": "Proteus coding task with post-survey only"
+    },
+    
+    "pre_survey": {
+      "title": "Pre-Study Survey",
+      "description": "No pre-survey required for this assignment.",
+      "estimated_time_minutes": 0,
+      "questions": []
+    },
+    
+    "post_survey": {
+      "title": "Post-Study Survey",
+      "description": "Thank you for completing the task! Please share your experience with the AI coding assistant. All questions are required.",
+      "estimated_time_minutes": 15,
+      "questions": [
+        {
+          "id": "post_trust_q1",
+          "type": "likert",
+          "question": "How much do you trust CodeOracle generated code suggestions?",
+          "required": true,
+          "scale": {
+            "min": 1,
+            "max": 5,
+            "minLabel": "Strongly distrust",
+            "maxLabel": "Strongly trust"
+          },
+          "help_text": "1 = Strongly distrust, 2 = Distrust, 3 = Neither trust nor distrust, 4 = Trust, 5 = Strongly trust"
+        },
+        {
+          "id": "post_trust_q2",
+          "type": "open_ended",
+          "question": "Please describe why you trust or distrust CodeOracle in your own words.",
+          "required": true,
+          "placeholder": "Describe the factors that influenced your trust or distrust in CodeOracle during this assignment...",
+          "max_length": 1000,
+          "min_length": 30
+        },
+        {
+          "id": "post_mental_q1",
+          "type": "open_ended",
+          "question": "Please describe in your own words, how CodeOracle generates code suggestions?",
+          "required": true,
+          "placeholder": "Explain your understanding of how CodeOracle generates code suggestions...",
+          "max_length": 1000,
+          "min_length": 30
+        },
+        {
+          "id": "post_accuracy_q1",
+          "type": "slider",
+          "question": "How accurate do you believe CodeOracle generated code suggestions are?",
+          "required": true,
+          "scale": {
+            "min": 0,
+            "max": 100,
+            "step": 5,
+            "default": 50,
+            "unit": "%"
+          },
+          "help_text": "Move the slider to indicate your perceived accuracy (0% = completely inaccurate, 100% = perfectly accurate)"
+        },
+        {
+          "id": "post_accuracy_q2",
+          "type": "open_ended",
+          "question": "Why do you believe AI-generated code might be incorrect?",
+          "required": true,
+          "placeholder": "Explain your reasoning about why AI-generated code suggestions might be incorrect...",
+          "max_length": 1000,
+          "min_length": 30
+        },
+        {
+          "id": "post_impact_q1",
+          "type": "open_ended",
+          "question": "How do you think CodeOracle generated code suggestions affect your ability to complete programming assignments?",
+          "required": true,
+          "placeholder": "Describe how CodeOracle's suggestions affected your programming performance...",
+          "max_length": 1000,
+          "min_length": 30
+        },
+        {
+          "id": "post_understanding_q1",
+          "type": "likert",
+          "question": "The AI assistant appeared to understand my goals really well.",
+          "required": true,
+          "scale": {
+            "min": 1,
+            "max": 5,
+            "minLabel": "Strongly disagree",
+            "maxLabel": "Strongly agree"
+          },
+          "help_text": "1 = Strongly disagree, 2 = Disagree, 3 = Neither agree nor disagree, 4 = Agree, 5 = Strongly agree"
+        },
+        {
+          "id": "post_experience_q1",
+          "type": "open_ended",
+          "question": "The CodeOracle system provides next-line code suggestions alongside a guess of the problem you were attempting to solve. Share your overall experience with how this system helped or hindered you in solving the programming assignment.",
+          "required": true,
+          "placeholder": "Describe your overall experience with CodeOracle during this assignment...",
+          "max_length": 1500,
+          "min_length": 50
+        },
+        {
+          "id": "post_strategy_q1",
+          "type": "likert",
+          "question": "Seeing only the next line code suggestions was:",
+          "required": true,
+          "scale": {
+            "min": 1,
+            "max": 5,
+            "minLabel": "Very unhelpful",
+            "maxLabel": "Very helpful"
+          },
+          "help_text": "1 = Very unhelpful, 2 = Unhelpful, 3 = Neither helpful nor unhelpful, 4 = Helpful, 5 = Very helpful"
+        },
+        {
+          "id": "post_strategy_q2",
+          "type": "likert",
+          "question": "Seeing the AI guess was:",
+          "required": true,
+          "scale": {
+            "min": 1,
+            "max": 5,
+            "minLabel": "Very unhelpful",
+            "maxLabel": "Very helpful"
+          },
+          "help_text": "1 = Very unhelpful, 2 = Unhelpful, 3 = Neither helpful nor unhelpful, 4 = Helpful, 5 = Very helpful"
+        },
+        {
+          "id": "post_strategy_q3",
+          "type": "open_ended",
+          "question": "Explain how you used the next-line code suggestions during the activity.",
+          "required": true,
+          "placeholder": "Describe how you used the next-line code suggestions...",
+          "max_length": 1000,
+          "min_length": 30
+        },
+        {
+          "id": "post_strategy_q4",
+          "type": "open_ended",
+          "question": "Explain how you used the AI's understanding during this activity.",
+          "required": true,
+          "placeholder": "Describe how you used the AI's understanding of your problem...",
+          "max_length": 1000,
+          "min_length": 30
+        },
+        {
+          "id": "post_strategy_q5",
+          "type": "open_ended",
+          "question": "Would you continue to use this tool, why or why not?",
+          "required": true,
+          "placeholder": "Explain whether you would use this tool again and your reasoning...",
+          "max_length": 1000,
+          "min_length": 30
+        },
+        {
+          "id": "post_misalignment_q1",
+          "type": "open_ended",
+          "question": "In this system, the AI coding assistant provided next-line code suggestions alongside a guess of the problem you were attempting to solve. How often was the AI's understanding different from your intention, and how did you interpret those misalignments?",
+          "required": true,
+          "placeholder": "Describe instances where the AI's understanding differed from yours and how you dealt with it...",
+          "max_length": 1000,
+          "min_length": 30
+        },
+        {
+          "id": "post_reflection_q1",
+          "type": "open_ended",
+          "question": "Has using this tool helped you to change your view on how AI coding assistants work, and if so, why?",
+          "required": true,
+          "placeholder": "Reflect on whether and how your understanding of AI assistants has changed...",
+          "max_length": 1000,
+          "min_length": 30
+        },
+        {
+          "id": "post_suggestions_q1",
+          "type": "open_ended",
+          "question": "What suggestions do you have for improving this tool?",
+          "required": true,
+          "placeholder": "Share your ideas for how this AI coding assistant could be improved...",
+          "max_length": 1000,
+          "min_length": 30
+        },
+        {
+          "id": "post_difficulty_q1",
+          "type": "likert",
+          "question": "How difficult did you find this assignment?",
+          "required": true,
+          "scale": {
+            "min": 1,
+            "max": 5,
+            "minLabel": "Very easy",
+            "maxLabel": "Very difficult"
+          },
+          "help_text": "1 = Very easy, 2 = Easy, 3 = Moderate, 4 = Difficult, 5 = Very difficult"
+        }
+      ]
+    },
+    
+    "periodic_survey": {
+      "enabled": false,
+      "interval": 4,
+      "title": "Quick Check-in",
+      "description": "Please rate your current experience",
+      "questions": []
+    }
+  }
