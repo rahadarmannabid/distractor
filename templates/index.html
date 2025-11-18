@@ -113,6 +113,31 @@
             flex-wrap: wrap;
         }
 
+        /* Hide unwanted header elements */
+        .url-display,
+        #sessionIndicator,
+        #conditionIndicator,
+        #logoutBtn {
+            display: none !important;
+        }
+
+        /* Hide local entries counter */
+        .local-entries-counter {
+            display: none !important;
+        }
+
+        /* Assignment Key Display */
+        .assignment-key {
+            background: rgba(64, 64, 64, 0.3);
+            color: #569cd6;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: 'Consolas', monospace;
+            margin-right: 10px;
+        }
+
         /* Header Button Styling */
         .user-info {
             margin-left: auto;
@@ -171,17 +196,23 @@
             box-shadow: none;
         }
         .clear-button {
-            background: #404040;
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
             border: none;
             border-radius: 4px;
             padding: 8px 14px;
-            color: #cccccc;
+            color: white;
             font-size: 12px;
+            font-weight: 600;
             cursor: pointer;
             transition: all 0.3s ease;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             min-height: 36px;
+        }
+        .clear-button:hover {
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            transform: translateY(-1px);
+            box-shadow: 0 3px 8px rgba(59, 130, 246, 0.4);
         }
         .submit-button {
             background: linear-gradient(135deg, #f97316, #ea580c);
@@ -601,8 +632,8 @@
         }
         .ai-thinking-layout {
             display: flex;
-            gap: 3px;
-            margin-top: 8px;
+            gap: 30px;
+            margin-top: 0px;
             align-items: stretch;
             overflow: visible;
         }
@@ -611,6 +642,7 @@
             flex-direction: column;
             align-items: center;
             width: 70px;
+            margin-top: 50px;
             position: relative;
             flex: 0 0 auto;
         }
@@ -724,7 +756,7 @@
             height: 36px;
             transform: translateX(-50%);
             border-radius: 18px;
-            background: linear-gradient(180deg, #f4f4f5, #cbd5e1);
+            background: linear-gradient(180deg, #ffe98c, #ffc52c);
             box-shadow: inset 0 4px 6px rgba(255,255,255,0.7), 0 4px 8px rgba(0,0,0,0.25);
         }
         .ai-bot-chest {
@@ -743,7 +775,7 @@
             top: 64px;
             width: 12px;
             height: 28px;
-            background: linear-gradient(180deg, #e5e7eb, #d1d5db);
+            background: linear-gradient(180deg, #ffe98c, #ffc52c);
             border-radius: 10px;
             box-shadow: inset 0 4px 6px rgba(255,255,255,0.4), 0 4px 8px rgba(0,0,0,0.25);
             animation: bot-arm 3s ease-in-out infinite;
@@ -759,7 +791,7 @@
             height: 10px;
             transform: translateX(-50%);
             border-radius: 8px;
-            background: #1f2937;
+            background: linear-gradient(180deg, #ffd96b, #ffb700);
             box-shadow: inset 0 2px 3px rgba(255,255,255,0.2), 0 2px 4px rgba(0,0,0,0.4);
         }
         .ai-bot-leg {
@@ -767,7 +799,7 @@
             top: 88px;
             width: 14px;
             height: 26px;
-            background: linear-gradient(180deg, #e5e7eb, #cdd3da);
+            background: linear-gradient(180deg, #ffe98c, #ffc52c);
             border-radius: 10px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.25);
         }
@@ -781,7 +813,7 @@
             height: 12px;
             transform: translateX(-50%);
             border-radius: 8px;
-            background: linear-gradient(180deg, #111827, #020617);
+            background: linear-gradient(180deg, #ffd96b, #ffb700);
             box-shadow: 0 2px 4px rgba(0,0,0,0.45), inset 0 2px 3px rgba(255,255,255,0.1);
         }
         @keyframes bot-blink {
@@ -1135,8 +1167,26 @@
             font-weight: 600;
         }
         .history-button {
-            text-decoration: underline;
+            background: rgba(255, 255, 255, 0.05);
+            color: #cccccc;
+            padding: 6px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
             cursor: pointer;
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            text-decoration: none;
+        }
+        .history-button:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.3);
+            transform: translateY(-1px);
+        }
+        .history-count {
+            font-weight: 600;
+            margin-left: 4px;
         }
 
         .spinner {
@@ -1656,7 +1706,7 @@
 
 .likert-scale {
     display: grid;
-    grid-template-columns: repeat(7, minmax(72px, 1fr)); /* 7 options */
+    grid-template-columns: repeat(5, minmax(72px, 1fr)); /* 5 options */
     gap: 10px;
     width: 100%;
 }
@@ -1683,38 +1733,28 @@
     position: relative;
 }
 
-/* Option 1: Not at all - Dark Red */
+/* Option 1: Disagree Strongly - Dark Red */
 .likert-option:nth-child(1) input[type="radio"] {
     background: linear-gradient(135deg, #dc2626, #ef4444);
 }
 
-/* Option 2: Slightly - Red-Orange */
+/* Option 2: Disagree Somewhat - Orange */
 .likert-option:nth-child(2) input[type="radio"] {
-    background: linear-gradient(135deg, #ea580c, #f97316);
+    background: linear-gradient(135deg, #f97316, #fb923c);
 }
 
-/* Option 3: Somewhat - Orange */
+/* Option 3: Neutral - Yellow */
 .likert-option:nth-child(3) input[type="radio"] {
-    background: linear-gradient(135deg, #f59e0b, #fbbf24);
-}
-
-/* Option 4: Moderately - Yellow (Middle) */
-.likert-option:nth-child(4) input[type="radio"] {
     background: linear-gradient(135deg, #fbbf24, #facc15);
 }
 
-/* Option 5: Very - Yellow-Green */
-.likert-option:nth-child(5) input[type="radio"] {
-    background: linear-gradient(135deg, #a3e635, #84cc16);
-}
-
-/* Option 6: Quite - Light Green (NEW!) */
-.likert-option:nth-child(6) input[type="radio"] {
+/* Option 4: Agree Somewhat - Light Green */
+.likert-option:nth-child(4) input[type="radio"] {
     background: linear-gradient(135deg, #4ade80, #22c55e);
 }
 
-/* Option 7: Extremely - Dark Green (NEW!) */
-.likert-option:nth-child(7) input[type="radio"] {
+/* Option 5: Agree Strongly - Dark Green */
+.likert-option:nth-child(5) input[type="radio"] {
     background: linear-gradient(135deg, #22c55e, #16a34a);
 }
 
@@ -1753,21 +1793,28 @@
 
 @media (max-width: 768px) {
   .likert-scale {
-    grid-template-columns: repeat(3, minmax(64px, 1fr)); /* 3 per row */
+    grid-template-columns: repeat(5, minmax(60px, 1fr)); /* 5 per row on tablets */
   }
   .likert-option input[type="radio"] {
     width: 22px;
     height: 22px;
   }
+  .likert-option label {
+    font-size: 9px;
+  }
 }
 
 @media (max-width: 480px) {
   .likert-scale {
-    grid-template-columns: repeat(2, minmax(64px, 1fr)); /* 2 per row */
-    gap: 8px;
+    grid-template-columns: repeat(5, minmax(50px, 1fr)); /* 5 per row on mobile */
+    gap: 6px;
+  }
+  .likert-option input[type="radio"] {
+    width: 20px;
+    height: 20px;
   }
   .likert-option label {
-    font-size: 9px;
+    font-size: 8px;
   }
 }
 
@@ -2070,7 +2117,7 @@
     }
     
     .url-display {
-        display: none;
+        display: none !important;
     }
     
     .header h2 {
@@ -2291,6 +2338,7 @@
                     <span class="font-size-display" id="fontSizeDisplay">14px</span>
                     <button class="font-button" id="increaseFontBtn">A+</button>
                 </div>
+                <div class="assignment-key" id="assignmentKey">pattern</div>
                 <div class="user-info">
                     <span class="session-indicator" id="sessionIndicator">Session: --</span>
                     <span class="condition-indicator" id="conditionIndicator">Condition ?</span>
@@ -2303,18 +2351,21 @@
                 <div id="teaserOverlay" class="teaser-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="teaserSlideTitle" tabindex="-1">
                     <div class="teaser-card">
                         <div class="teaser-progress">
-                            <span id="teaserStepIndicator">1 / 2</span>
+                            <span id="teaserStepIndicator">1 / 4</span>
                         </div>
                         <div class="teaser-slide active" data-step="1">
-                            <h3 id="teaserSlideTitle">1. CODEORACLE is NOT a productivity tool!</h3>
-                            <p>✅ CodeOracle provides all the same functionality of autocompletion tools, like GitHub Copilot; however, it also shows you an interpretation of your goal in the “AI Agent’s Understanding” panel.</p>
+                            <h3 id="teaserSlideTitle">CodeOracle is Not a Productivity Tool</h3>
                         </div>
                         <div class="teaser-slide" data-step="2" aria-hidden="true">
-                            <h3 id="teaserSlideTitle2">2. ✅ CodeOracle creates code suggestions using the state-of-the-art model from OpenAI</h3>
-                            <p>The goal of this study is to help you understand how AI coding assistants work.</p>
+                            <h3 id="teaserSlideTitle2">CodeOracle tries to interpret your code in real time and provide next line suggestions like Github Copilot</h3>
+                        </div>
+                        <div class="teaser-slide" data-step="3" aria-hidden="true">
+                            <h3 id="teaserSlideTitle3">CodeOracle is Powered by ChatGPT</h3>
+                        </div>
+                        <div class="teaser-slide" data-step="4" aria-hidden="true">
+                            <h3 id="teaserSlideTitle4">Ultimately CodeOracle teaches you how AI coding Assistant works</h3>
                         </div>
                         <div class="teaser-overlay-footer">
-                            <span class="teaser-note">Read both cards and click next to start coding.</span>
                             <button class="teaser-next-button" id="teaserNextButton">Next</button>
                         </div>
                     </div>
@@ -2325,9 +2376,9 @@
                 <div class="header">
                     <h2>Terminal</h2>
                     <div class="terminal-controls">
-                        <button class="run-button" id="runButton">Run</button>
-                        <button class="clear-button" id="clearButton">Clear</button>
-                        <button class="submit-button" id="submitButton">Submit & Logout</button>
+                        <button class="run-button" id="runButton">▶ Run</button>
+                        <button class="clear-button" id="clearButton">✕ Clear</button>
+                        <button class="submit-button" id="submitButton">✓ Submit Code</button>
                     </div>
                 </div>
                 <div class="terminal-output" id="terminalOutput">
@@ -2357,11 +2408,8 @@
         <div class="sidebar-section" id="aiGuessSection">
             <div class="red-box">
                 <div class="ai-avatar-badge ai-avatar-badge--inline">
-                    <span class="ai-avatar-badge__title">codeoracle</span>
+                    <span class="ai-avatar-badge__title">CodeOracle</span>
                     <span class="ai-avatar-badge__subtitle">powered by chatgpt</span>
-                </div>
-                <div class="sidebar-header">
-                    <div id="history-guess" class="history-button">View History</div>
                 </div>
                 <div class="ai-thinking-layout">
                     <div class="ai-avatar-column" id="aiAvatarColumn">
@@ -2391,7 +2439,7 @@
                     <div class="ai-bubble-stack">
                         <div class="ai-bubble-card analysis-panel analysis-panel--guess">
                             <span class="ai-timeline-node ai-timeline-node--analysis" aria-hidden="true"></span>
-                            <div class="analysis-panel__title">AI Agent's Understanding of your code</div>
+                            <div class="analysis-panel__title">AI's Understanding of your code</div>
                             <p id="analysis"><span class="spinner"></span> Waiting for code...</p>
                         </div>
                         <div class="ai-bubble-card suggestion-panel suggestion-panel--guess">
@@ -2406,11 +2454,14 @@
                                     <span class="callout-arrow"></span>
                                 </div>
                             </div>
-                            <small style="color: #888; display: block; margin-top: 10px;">
+                            <small class="local-entries-counter" style="color: #888; display: block; margin-top: 10px;">
                                 Local entries: <span id="guessLogCount">0</span>
                             </small>
                         </div>
                     </div>
+                </div>
+                <div style="text-align: center; margin-top: 15px;">
+                    <div id="history-guess" class="history-button">View History <span class="history-count">(0)</span></div>
                 </div>
             </div>
         </div>
@@ -2420,7 +2471,6 @@
             <div class="green-box">
                 <div class="sidebar-header">
                     <h3>Original Problem Description</h3>
-                    <div id="history-desc" class="history-button">View History</div>
                 </div>
                 <div class="analysis-panel analysis-panel--desc">
                     <div class="analysis-panel__title">Original Problem Description</div>
@@ -2437,9 +2487,12 @@
                             <span class="callout-arrow"></span>
                         </div>
                     </div>
-                    <small style="color: #888; display: block; margin-top: 10px;">
+                    <small class="local-entries-counter" style="color: #888; display: block; margin-top: 10px;">
                         Local entries: <span id="descLogCount">0</span>
                     </small>
+                </div>
+                <div style="text-align: center; margin-top: 15px;">
+                    <div id="history-desc" class="history-button">View History <span class="history-count">(0)</span></div>
                 </div>
             </div>
         </div>
@@ -2448,12 +2501,8 @@
         <div class="sidebar-section hidden" id="suggestionsOnlySection">
         <div class="violet-box" style="background: linear-gradient(135deg, #2d1b69, #3d2777); border: 2px solid #8b5cf6; border-radius: 8px; padding: 30px 20px 20px; line-height: 2; color: #e9d5ff; box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3); position: relative; overflow: visible;">
                 <div class="ai-avatar-badge ai-avatar-badge--inline">
-                    <span class="ai-avatar-badge__title">codeoracle</span>
+                    <span class="ai-avatar-badge__title">CodeOracle</span>
                     <span class="ai-avatar-badge__subtitle">powered by chatgpt</span>
-                </div>
-                <div class="sidebar-header">
-                    <h3></h3>
-                    <div id="history-suggestions" class="history-button">View History</div>
                 </div>
                 <div class="ai-thinking-layout">
                     <div class="ai-avatar-column" id="aiAvatarColumnSuggestions">
@@ -2501,6 +2550,9 @@
                             </div>
                         </div>
                     </div>
+                </div>
+                <div style="text-align: center; margin-top: 15px;">
+                    <div id="history-suggestions" class="history-button">View History <span class="history-count">(0)</span></div>
                 </div>
             </div>
         </div>
@@ -2741,6 +2793,14 @@ function applyRestoredProgress(progressData) {
             if (guessCount) guessCount.textContent = currentSession.guessLogCount;
             if (descCount) descCount.textContent = currentSession.descLogCount;
             if (suggestionsCount) suggestionsCount.textContent = currentSession.suggestionsLogCount;
+            
+            // Update history button counters
+            const historyGuessButton = document.querySelector('#history-guess .history-count');
+            const historyDescButton = document.querySelector('#history-desc .history-count');
+            const historySuggestionsButton = document.querySelector('#history-suggestions .history-count');
+            if (historyGuessButton) historyGuessButton.textContent = `(${currentSession.guessLogCount})`;
+            if (historyDescButton) historyDescButton.textContent = `(${currentSession.descLogCount})`;
+            if (historySuggestionsButton) historySuggestionsButton.textContent = `(${currentSession.suggestionsLogCount})`;
         }
         
         if (progressData.activityBuffer && Array.isArray(progressData.activityBuffer)) {
@@ -3562,6 +3622,12 @@ async function initializeFromURL() {
         const currentURL = window.location.href;
         urlDisplay.textContent = `URL: ${currentURL.substring(0, 50)}${currentURL.length > 50 ? '...' : ''}`;
         
+        // Update assignment key display
+        const assignmentKeyDisplay = document.getElementById('assignmentKey');
+        if (assignmentKeyDisplay && authData.assignmentKey) {
+            assignmentKeyDisplay.textContent = authData.assignmentKey;
+        }
+        
         // ✅ CHECK FOR PRE-SURVEY REQUIREMENT (FLEXIBLE)
         if (authData.hasPreSurvey) {
             try {
@@ -4109,6 +4175,12 @@ logActivity('ai_analysis_complete', {
         // Update log counts
         currentSession.guessLogCount++;
         guessLogCount.textContent = currentSession.guessLogCount;
+        
+        // Update history button counter
+        const historyGuessButton = document.querySelector('#history-guess .history-count');
+        if (historyGuessButton) {
+            historyGuessButton.textContent = `(${currentSession.guessLogCount})`;
+        }
 
         // For condition 1, also store correct description data
         if (currentSession.condition === 1) {
@@ -4120,6 +4192,12 @@ logActivity('ai_analysis_complete', {
             
             currentSession.descLogCount++;
             descLogCount.textContent = currentSession.descLogCount;
+            
+            // Update history button counter
+            const historyDescButton = document.querySelector('#history-desc .history-count');
+            if (historyDescButton) {
+                historyDescButton.textContent = `(${currentSession.descLogCount})`;
+            }
         }
 
         // For condition 3, store suggestions data
@@ -4131,6 +4209,12 @@ logActivity('ai_analysis_complete', {
             
             currentSession.suggestionsLogCount++;
             document.getElementById('suggestionsLogCount').textContent = currentSession.suggestionsLogCount;
+            
+            // Update history button counter
+            const historySuggestionsButton = document.querySelector('#history-suggestions .history-count');
+            if (historySuggestionsButton) {
+                historySuggestionsButton.textContent = `(${currentSession.suggestionsLogCount})`;
+            }
         }
 
         // ANIMATE THE RESULTS with typing effect and box shaking
@@ -4480,7 +4564,9 @@ function showHistoryInline(type) {
                 'Start coding...';
             targetElement.textContent = lastSuggestion;
         }
-        buttonElement.textContent = 'View History';
+        // Update button text with count
+        const count = history.length;
+        buttonElement.innerHTML = `View History <span class="history-count">(${count})</span>`;
     } else {
         // Show history
         let historyHTML = '';
@@ -4554,7 +4640,9 @@ function showHistoryInline(type) {
             targetElement.setAttribute('data-showing-history', 'true');
         }
         
-        buttonElement.textContent = 'Hide History';
+        // Update button text with count
+        const count = history.length;
+        buttonElement.innerHTML = `Hide History <span class="history-count">(${count})</span>`;
     }
 }
 function insertSuggestion(type) {
@@ -4887,31 +4975,23 @@ function generateSurveyHTML(questions) {
             <div class="likert-scale">
                 <div class="likert-option">
                     <input type="radio" id="q${index}_1" name="question_${index}" value="1">
-                    <label for="q${index}_1">Not at<br>all</label>
+                    <label for="q${index}_1">Disagree<br>Strongly</label>
                 </div>
                 <div class="likert-option">
                     <input type="radio" id="q${index}_2" name="question_${index}" value="2">
-                    <label for="q${index}_2">Slightly</label>
+                    <label for="q${index}_2">Disagree<br>Somewhat</label>
                 </div>
                 <div class="likert-option">
                     <input type="radio" id="q${index}_3" name="question_${index}" value="3">
-                    <label for="q${index}_3">Somewhat</label>
+                    <label for="q${index}_3">Neutral</label>
                 </div>
                 <div class="likert-option">
                     <input type="radio" id="q${index}_4" name="question_${index}" value="4">
-                    <label for="q${index}_4">Moderately</label>
+                    <label for="q${index}_4">Agree<br>Somewhat</label>
                 </div>
                 <div class="likert-option">
                     <input type="radio" id="q${index}_5" name="question_${index}" value="5">
-                    <label for="q${index}_5">Very</label>
-                </div>
-                <div class="likert-option">
-                    <input type="radio" id="q${index}_6" name="question_${index}" value="6">
-                    <label for="q${index}_6">Quite</label>
-                </div>
-                <div class="likert-option">
-                    <input type="radio" id="q${index}_7" name="question_${index}" value="7">
-                    <label for="q${index}_7">Extremely</label>
+                    <label for="q${index}_5">Agree<br>Strongly</label>
                 </div>
             </div>
         </div>
@@ -5646,7 +5726,7 @@ async function executeCode() {
     } finally {
         isRunning = false;
         runButton.disabled = false;
-        runButton.innerHTML = 'Run';
+        runButton.innerHTML = '▶ Run';
     }
 }
 
@@ -5932,7 +6012,7 @@ async function proceedWithActualSubmission() {
     addTerminalOutput(`   Code: ${code.length} characters from cache`, 'info');
     
     submitButton.disabled = true;
-    submitButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Submitting & Logging out...</div>';
+    submitButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Submitting Code...</div>';
 
     try {
         const response = await fetch('/submit', {
@@ -6012,7 +6092,7 @@ async function proceedWithActualSubmission() {
         addTerminalOutput(`Submission failed: ${error.message}`, 'error');
         addTerminalOutput(`Data preserved locally in session logs`, 'warning');
         submitButton.disabled = false;
-        submitButton.innerHTML = 'Submit & Logout';
+        submitButton.innerHTML = '✓ Submit Code';
         isSubmissionInProgress = false;
     }
     

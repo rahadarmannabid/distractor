@@ -1621,8 +1621,8 @@ async def test_firebase_write():
     
 
 @app.get("/survey-config", response_model=SurveyConfig)
-async def get_survey_config():
-    """Get survey configuration from environment variables"""
+async def get_survey_config_endpoint():
+    """Get periodic survey configuration from environment variables"""
     try:
         # Get questions from environment variables
         questions = []
@@ -1863,7 +1863,7 @@ async def submit_survey(request: SurveySubmission):
             "status": "success",
             "message": f"{request.survey_type.title()} survey saved successfully",
             "timestamp": request.timestamp,
-            "ai_history_entries": len(request.ai_history_context.get('ai_guess_history', []) if request.ai_history_context else 0)
+            "ai_history_entries": len(request.ai_history_context.get('ai_guess_history', []) if request.ai_history_context else [])
         }
         
     except Exception as e:
