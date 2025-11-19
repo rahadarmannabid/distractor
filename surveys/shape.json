@@ -23,7 +23,7 @@
       {
         "id": "post_trust_q2",
         "type": "open_ended",
-        "question": "Please describe why you trust or distrust CodeOracle in your own words.",
+        "question": "Please describe why you trust or distrust CodeOracle.",
         "required": true,
         "placeholder": "Describe the factors that influenced your trust or distrust in CodeOracle during this assignment...",
         "max_length": 1000,
@@ -32,7 +32,7 @@
       {
         "id": "post_mental_q1",
         "type": "open_ended",
-        "question": "Please describe in your own words, how CodeOracle generates code suggestions?",
+        "question": "Please describe, how CodeOracle generates code suggestions?",
         "required": true,
         "placeholder": "Explain your understanding of how CodeOracle generates code suggestions...",
         "max_length": 1000,
@@ -67,15 +67,6 @@
         "question": "Why do you believe CodeOracle-generated code might be incorrect?",
         "required": true,
         "placeholder": "Explain your reasoning about why AI-generated code suggestions might be incorrect...",
-        "max_length": 1000,
-        "min_length": 30
-      },
-      {
-        "id": "post_impact_q1",
-        "type": "open_ended",
-        "question": "How do you think CodeOracle generated code suggestions affect your ability to complete programming assignments?",
-        "required": true,
-        "placeholder": "Describe how CodeOracle's suggestions affected your programming performance...",
         "max_length": 1000,
         "min_length": 30
       },
@@ -128,15 +119,6 @@
         "help_text": "1 = Very unhelpful, 2 = Unhelpful, 3 = Neither helpful nor unhelpful, 4 = Helpful, 5 = Very helpful"
       },
       {
-        "id": "post_strategy_q3",
-        "type": "open_ended",
-        "question": "Explain how you used the next-line code suggestions during the activity.",
-        "required": true,
-        "placeholder": "Describe how you used the next-line code suggestions...",
-        "max_length": 1000,
-        "min_length": 30
-      },
-      {
         "id": "post_strategy_q4",
         "type": "open_ended",
         "question": "Explain how you used the AI's understanding during this activity.",
@@ -171,28 +153,6 @@
         "placeholder": "Reflect on whether and how your understanding of AI assistants has changed...",
         "max_length": 1000,
         "min_length": 30
-      },
-      {
-        "id": "post_suggestions_q1",
-        "type": "open_ended",
-        "question": "What suggestions do you have for improving this tool?",
-        "required": true,
-        "placeholder": "Share your ideas for how this AI coding assistant could be improved...",
-        "max_length": 1000,
-        "min_length": 30
-      },
-      {
-        "id": "post_difficulty_q1",
-        "type": "likert",
-        "question": "How difficult did you find this assignment?",
-        "required": true,
-        "scale": {
-          "min": 1,
-          "max": 5,
-          "minLabel": "Very easy",
-          "maxLabel": "Very difficult"
-        },
-        "help_text": "1 = Very easy, 2 = Easy, 3 = Moderate, 4 = Difficult, 5 = Very difficult"
       }
     ]
   },

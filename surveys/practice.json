@@ -80,7 +80,7 @@
       {
         "id": "pre_trust_q5",
         "type": "open_ended",
-        "question": "Please describe why you trust or distrust GitHub Copilot for use in coding in your own words.",
+        "question": "Please describe why you trust or distrust GitHub Copilot for use in coding.",
         "required": true,
         "placeholder": "Describe the factors that influence your trust or distrust in AI coding assistants...",
         "max_length": 1000,
@@ -89,7 +89,7 @@
       {
         "id": "pre_mental_q1",
         "type": "open_ended",
-        "question": "Please describe in your own words, how you think GitHub Copilot generates code suggestions?",
+        "question": "Please describe, how you think GitHub Copilot generates code suggestions?",
         "required": true,
         "placeholder": "Explain your understanding of how AI generates code suggestions...",
         "max_length": 1000,
@@ -112,7 +112,7 @@
       {
         "id": "pre_accuracy_q2",
         "type": "open_ended",
-        "question": "Please describe what you believe might cause GitHub Copilot's code suggestions to be incorrect.",
+        "question": "Please describe what might cause GitHub Copilot's code suggestions to be incorrect.",
         "required": true,
         "placeholder": "Describe potential causes of incorrect AI-generated code...",
         "max_length": 1000,

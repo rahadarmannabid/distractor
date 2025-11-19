@@ -33,39 +33,6 @@
             z-index: -1;
         }
 
-        .bg-animation::before,
-        .bg-animation::after {
-            content: '';
-            position: absolute;
-            width: 200px;
-            height: 200px;
-            border-radius: 50%;
-            opacity: 0.1;
-            animation: float 6s ease-in-out infinite;
-        }
-
-        .bg-animation::before {
-            background: linear-gradient(135deg, #f97316, #ea580c);
-            top: 20%;
-            left: 10%;
-            animation-delay: 0s;
-        }
-
-        .bg-animation::after {
-            background: linear-gradient(135deg, #569cd6, #4a86c7);
-            bottom: 20%;
-            right: 10%;
-            animation-delay: 3s;
-        }
-
-        @keyframes float {
-            0%, 100% {
-                transform: translateY(0px) scale(1);
-            }
-            50% {
-                transform: translateY(-20px) scale(1.1);
-            }
-        }
 
         .container {
             background: linear-gradient(135deg, #252526, #2d2d30);
@@ -319,29 +286,6 @@
             margin-bottom: 20px;
         }
 
-        .features {
-            display: flex;
-            justify-content: space-around;
-            margin: 20px 0;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-
-        .feature {
-            background: rgba(64, 64, 64, 0.3);
-            padding: 8px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            color: #569cd6;
-            border: 1px solid rgba(86, 156, 214, 0.3);
-            transition: all 0.3s ease;
-        }
-
-        .feature:hover {
-            background: rgba(86, 156, 214, 0.1);
-            border-color: #569cd6;
-            transform: translateY(-2px);
-        }
 
         .login-form {
             display: flex;
@@ -538,15 +482,6 @@
             
             .consent-title, .login-title {
                 font-size: 22px;
-            }
-            
-            .features {
-                flex-direction: column;
-                gap: 8px;
-            }
-            
-            .feature {
-                text-align: center;
             }
 
             .consent-section {
@@ -764,12 +699,6 @@
                 <div class="login-title">AI Code Assistant</div>
                 <div class="login-subtitle">
                      Coding environment with real-time AI assistance
-                </div>
-                    <div class="features">
-                    <div class="feature">🤖 AI Copilot</div>
-                    <div class="feature">🧑‍💻 IDE</div>
-                    <div class="feature">🔬 Research</div> <!-- or 🔒 Secure Research if privacy-focused -->
-                    <div class="feature">⚡ Real-time Coding</div>
                 </div>
             </div>
             

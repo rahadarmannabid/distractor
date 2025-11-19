@@ -22,57 +22,13 @@
             padding: 20px;
         }
 
-        /* Animated background elements */
-        .bg-animation {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            z-index: -1;
-        }
-
-        .bg-animation::before,
-        .bg-animation::after {
-            content: '';
-            position: absolute;
-            width: 200px;
-            height: 200px;
-            border-radius: 50%;
-            opacity: 0.1;
-            animation: float 6s ease-in-out infinite;
-        }
-
-        .bg-animation::before {
-            background: linear-gradient(135deg, #f97316, #ea580c);
-            top: 20%;
-            left: 10%;
-            animation-delay: 0s;
-        }
-
-        .bg-animation::after {
-            background: linear-gradient(135deg, #569cd6, #4a86c7);
-            bottom: 20%;
-            right: 10%;
-            animation-delay: 3s;
-        }
-
-        @keyframes float {
-            0%, 100% {
-                transform: translateY(0px) scale(1);
-            }
-            50% {
-                transform: translateY(-20px) scale(1.1);
-            }
-        }
 
         .survey-container {
             background: linear-gradient(135deg, #252526, #2d2d30);
             border: 2px solid #404040;
             border-radius: 16px;
             box-shadow: 0 15px 40px rgba(0,0,0,0.6);
-            max-width: 900px;
+            max-width: 1200px;
             width: 100%;
             padding: 40px;
             max-height: 90vh;
@@ -178,6 +134,16 @@
             border-left-color: #f97316;
         }
 
+        .question.answered {
+            border-left-color: #22c55e;
+            background: rgba(34, 197, 94, 0.05);
+        }
+
+        .question.answered:hover {
+            border-left-color: #22c55e;
+            background: rgba(34, 197, 94, 0.08);
+        }
+
         .question-label {
             display: block;
             color: #d4d4d4;
@@ -202,6 +168,11 @@
             border-left: 3px solid #569cd6;
             border-radius: 4px;
             line-height: 1.4;
+            transition: all 0.3s ease;
+        }
+
+        .question.answered .question-help-text {
+            border-left-color: #22c55e;
         }
 
         /* Likert Scale */
@@ -1383,6 +1354,13 @@
 
             handleResponse(questionId, answer) {
                 this.responses[questionId] = answer;
+                
+                // Add visual feedback - mark question as answered
+                const questionElement = document.querySelector(`[data-question-id="${questionId}"]`);
+                if (questionElement) {
+                    questionElement.classList.add('answered');
+                }
+                
                 this.updateProgress();
             }
 

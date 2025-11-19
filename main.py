@@ -256,13 +256,17 @@ def get_assignment_condition(assignment_key):
     """
     Determine which condition the assignment key belongs to
     Returns: 1 for full UI, 2 for partial UI (guess only), 3 for suggestions only, None for invalid
-    CASE-INSENSITIVE: 'proteus', 'Proteus', 'PROTEUS' all work the same
+    EXACT MATCH ONLY: Case-insensitive and whitespace-trimmed, but no prefix/suffix variations allowed
+    Examples:
+      - "pattern", "Pattern", " pattern " → Valid (exact match)
+      - "pattern_groupA", "pattern123" → Invalid (not exact match)
     """
     if not assignment_key:
         return None
     
     condition_1_keys, condition_2_keys, condition_3_keys = get_condition_keys()
-    # ✅ CHANGED: Convert to lowercase for case-insensitive comparison
+    
+    # Normalize: trim whitespace and convert to lowercase
     assignment_key = assignment_key.strip().lower()
     
     # Convert all condition keys to lowercase for comparison
@@ -270,32 +274,15 @@ def get_assignment_condition(assignment_key):
     condition_2_keys = [key.lower() for key in condition_2_keys]
     condition_3_keys = [key.lower() for key in condition_3_keys]
     
-    # Check for exact match in condition 1 keys
+    # EXACT MATCH ONLY - No prefix matching
     if assignment_key in condition_1_keys:
         return 1
     
-    # Check for exact match in condition 2 keys
     if assignment_key in condition_2_keys:
         return 2
         
-    # Check for exact match in condition 3 keys
     if assignment_key in condition_3_keys:
         return 3
-    
-    # Check for prefix match in condition 1
-    for prefix in condition_1_keys:
-        if assignment_key.startswith(prefix):
-            return 1
-    
-    # Check for prefix match in condition 2
-    for prefix in condition_2_keys:
-        if assignment_key.startswith(prefix):
-            return 2
-            
-    # Check for prefix match in condition 3
-    for prefix in condition_3_keys:
-        if assignment_key.startswith(prefix):
-            return 3
     
     # STRICT VALIDATION: Return None for unrecognized keys
     return None
