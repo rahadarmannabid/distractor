@@ -5308,7 +5308,23 @@ async function submitFinalSurvey() {
         addTerminalOutput('Final periodic survey completed!', 'success');
         addTerminalOutput(`Final AI History: ${aiHistoryCount} total analyses captured`, 'info');
         
-        // Check for post-survey (file already downloaded before this survey)
+        // Check if post-survey exists
+        const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
+        
+        if (!authData.hasPostSurvey) {
+            // No post-survey, download code now
+            addTerminalOutput('📥 Downloading your code...', 'info');
+            const downloadSuccess = downloadCodeFile();
+            
+            if (downloadSuccess) {
+                addTerminalOutput('✅ Code file downloaded successfully!', 'success');
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            } else {
+                addTerminalOutput('⚠️ Code download encountered an issue, but submission will continue', 'warning');
+            }
+        }
+        
+        // Check for post-survey
         await checkAndShowPostSurvey();
         
     } catch (error) {
@@ -5914,17 +5930,6 @@ async function submitToDatabase() {
     // Set submission flag to prevent any periodic surveys during submission process
     isSubmissionInProgress = true;
 
-    // ✅ DOWNLOAD CODE FILE FIRST (before any surveys)
-    addTerminalOutput('📥 Downloading your code...', 'info');
-    const downloadSuccess = downloadCodeFile();
-    
-    if (downloadSuccess) {
-        addTerminalOutput('✅ Code file downloaded successfully!', 'success');
-        await new Promise(resolve => setTimeout(resolve, 1000));
-    } else {
-        addTerminalOutput('⚠️ Code download encountered an issue, but submission will continue', 'warning');
-    }
-
     // Check if final periodic survey is needed
     if (surveyData.questions.length > 0 && 
         !surveyData.finalSurveyResponse && 
@@ -5934,6 +5939,24 @@ async function submitToDatabase() {
         return; // Will continue after final survey
     } else if (currentSession.finalSurveyDisabled) {
         addTerminalOutput('✅ Final periodic survey skipped (disabled for this assignment)', 'success');
+    }
+    
+    // If no final periodic survey was shown, check if we need to download now
+    if ((surveyData.questions.length === 0 || surveyData.finalSurveyResponse || currentSession.finalSurveyDisabled)) {
+        const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
+        
+        if (!authData.hasPostSurvey) {
+            // No surveys at all, download code now
+            addTerminalOutput('📥 Downloading your code...', 'info');
+            const downloadSuccess = downloadCodeFile();
+            
+            if (downloadSuccess) {
+                addTerminalOutput('✅ Code file downloaded successfully!', 'success');
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            } else {
+                addTerminalOutput('⚠️ Code download encountered an issue, but submission will continue', 'warning');
+            }
+        }
     }
     
     // Check for post-survey

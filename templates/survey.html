@@ -1518,10 +1518,18 @@
                         if (isSubmissionPending) {
                             sessionStorage.removeItem('postSurveySubmissionPending');
                             
-                            submitBtn.textContent = 'Submitting Your Code...';
+                            submitBtn.textContent = 'Downloading Your Code...';
                             
                             try {
                                 const cachedData = this.retrieveCachedSubmissionData();
+                                
+                                // Download code file after post-survey completion
+                                if (cachedData && cachedData.code) {
+                                    this.downloadCodeFromCache(cachedData);
+                                    await new Promise(resolve => setTimeout(resolve, 1500));
+                                }
+                                
+                                submitBtn.textContent = 'Submitting Your Code...';
                                 
                                 if (!cachedData) {
                                     throw new Error('Could not find submission data. Please return to IDE and submit again.');
@@ -1607,6 +1615,56 @@
                     sessionStorage.removeItem('pendingSubmissionData');
                 } catch (error) {
                     console.error('Failed to clear cached data:', error);
+                }
+            }
+
+            downloadCodeFromCache(cachedData) {
+                try {
+                    const code = cachedData.code;
+                    if (!code || code.trim().length === 0) {
+                        console.warn('No code to download');
+                        return false;
+                    }
+                    
+                    // Determine file extension based on programming language
+                    const languageExtensions = {
+                        'javascript': '.js',
+                        'python': '.py',
+                        'c': '.c',
+                        'cpp': '.cpp',
+                        'java': '.java',
+                        'csharp': '.cs',
+                        'html': '.html',
+                        'css': '.css',
+                        'sql': '.sql'
+                    };
+                    
+                    const language = cachedData.session.programmingLanguage || 'javascript';
+                    const extension = languageExtensions[language] || '.txt';
+                    
+                    // Create filename with user and assignment info
+                    const fileName = `${cachedData.session.userId}_${cachedData.session.assignmentKey}_code${extension}`;
+                    
+                    // Create blob and download
+                    const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = fileName;
+                    
+                    // Trigger download
+                    document.body.appendChild(link);
+                    link.click();
+                    
+                    // Cleanup
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                    
+                    console.log(`✅ Code downloaded as: ${fileName}`);
+                    return true;
+                } catch (error) {
+                    console.error('Download error:', error);
+                    return false;
                 }
             }
 
