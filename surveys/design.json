@@ -32,23 +32,21 @@
       {
         "id": "post_mental_q1",
         "type": "open_ended",
-        "question": "Please describe, how CodeOracle generates code suggestions?",
+        "question": "Please describe how CodeOracle generates code suggestions.",
         "required": true,
         "placeholder": "Explain your understanding of how CodeOracle generates code suggestions...",
         "max_length": 1000,
         "min_length": 30
       },
-
       {
         "id": "post_data_mental_q1",
         "type": "open_ended",
-        "question": "How do you think GitHub Copilot learns from both your code and code written by other developers?",
+        "question": "How do you think CodeOracle learns from both your code and code written by other developers?",
         "required": true,
-        "placeholder": "Describe your understanding of how Copilot learns from data...",
+        "placeholder": "Describe your understanding of how CodeOracle learns from data...",
         "max_length": 1000,
         "min_length": 30
       },
-
       {
         "id": "post_accuracy_q1",
         "type": "slider",
@@ -133,6 +131,19 @@
         "placeholder": "Describe instances where the AI's understanding differed from yours and how you dealt with it...",
         "max_length": 1000,
         "min_length": 30
+      },
+      {
+        "id": "post_confidence_q1",
+        "type": "likert",
+        "question": "How confident are you that you correctly solved the programming problem?",
+        "required": true,
+        "scale": {
+          "min": 1,
+          "max": 5,
+          "minLabel": "Not confident at all",
+          "maxLabel": "Very confident"
+        },
+        "help_text": "1 = Not confident at all, 2 = Slightly confident, 3 = Moderately confident, 4 = Confident, 5 = Very confident"
       },
       {
         "id": "post_reflection_q1",

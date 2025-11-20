@@ -7,14 +7,12 @@
     "author": "Research Team",
     "description": "Proteus coding task with post-survey only"
   },
-  
   "pre_survey": {
     "title": "Pre-Study Survey",
     "description": "No pre-survey required for this assignment.",
     "estimated_time_minutes": 0,
     "questions": []
   },
-  
   "post_survey": {
     "title": "Post-Study Survey",
     "description": "Thank you for completing the task! Please share your experience with the AI coding assistant. All questions are required.",
@@ -146,6 +144,19 @@
         "min_length": 30
       },
       {
+        "id": "post_confidence_q1",
+        "type": "likert",
+        "question": "How confident are you that you correctly solved the programming problem?",
+        "required": true,
+        "scale": {
+          "min": 1,
+          "max": 5,
+          "minLabel": "Not confident at all",
+          "maxLabel": "Very confident"
+        },
+        "help_text": "1 = Not confident at all, 2 = Slightly confident, 3 = Moderately confident, 4 = Confident, 5 = Very confident"
+      },
+      {
         "id": "post_reflection_q1",
         "type": "open_ended",
         "question": "Has using this tool helped you to change your view on how AI coding assistants work, and if so, why?",
@@ -156,7 +167,6 @@
       }
     ]
   },
-  
   "periodic_survey": {
     "enabled": false,
     "interval": 4,
