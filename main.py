@@ -2671,6 +2671,23 @@ async def download_assignment(assignment_key: str):
         raise HTTPException(status_code=500, detail=f"Failed to download assignment: {str(e)}")
 
 
+@app.get("/assignment-text/{assignment_key}")
+async def get_assignment_text(assignment_key: str):
+    """Return the assignment .txt file content for the left problem panel."""
+    try:
+        assignment_file = get_assignment_file_path(assignment_key)
+        if not assignment_file or not assignment_file.exists():
+            raise HTTPException(status_code=404, detail="Assignment text not found")
+        with open(assignment_file, 'r', encoding='utf-8') as f:
+            content = f.read().strip()
+        return {"text": content}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reading assignment text: {e}")
+        raise HTTPException(status_code=500, detail="Failed to read assignment text")
+
+
 @app.get("/survey-images/{image_filename}")
 async def get_survey_image(image_filename: str):
     """

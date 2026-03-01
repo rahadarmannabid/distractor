@@ -69,6 +69,62 @@
             overflow: hidden;
         }
 
+        /* ── Left Problem Panel ─────────────────────────── */
+        #problemPanel {
+            width: 28vw;
+            min-width: 200px;
+            max-width: 45vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background: #1e1e1e;
+            border-right: 1px solid #333;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+        .problem-panel__header {
+            padding: 8px 15px;
+            min-height: 40px;
+            display: flex;
+            align-items: center;
+            background: #333334;
+            border-bottom: 1px solid #333;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            flex-shrink: 0;
+        }
+        .problem-panel__header h3 {
+            margin: 0;
+            font-size: 14px;
+            font-weight: 600;
+            color: #cccccc;
+            letter-spacing: 0.3px;
+        }
+        .problem-panel__body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 18px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 15px;
+            line-height: 1.75;
+            color: #d4d4d4;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .problem-panel__placeholder {
+            color: #666;
+            font-style: italic;
+        }
+        #resize-problem {
+            width: 5px;
+            background-color: #333;
+            cursor: ew-resize;
+            flex-shrink: 0;
+            transition: background-color 0.15s;
+        }
+        #resize-problem:hover {
+            background-color: #007acc;
+        }
+
         /* Resizing */
         #resize-sidebar {
             width: 5px;
@@ -2495,6 +2551,17 @@
 
     <!-- Main App (Initially Hidden) -->
     <div id="application" class="hidden">
+        <!-- Left Problem Description Panel -->
+        <div id="problemPanel">
+            <div class="problem-panel__header">
+                <h2>Problem</h2>
+            </div>
+            <div class="problem-panel__body" id="problemPanelBody">
+                Loading problem...
+            </div>
+        </div>
+        <div id="resize-problem"></div>
+
         <div id="content">
             <div id="header" class="header">
                 <h2>Code Editor</h2>
@@ -3819,6 +3886,27 @@ async function initializeFromURL() {
         if (assignmentKeyDisplay && authData.assignmentKey) {
             assignmentKeyDisplay.textContent = authData.assignmentKey;
         }
+
+        // Populate left problem panel from assignment .txt file
+        (function loadProblemPanel() {
+            var problemBody = document.getElementById('problemPanelBody');
+            if (!problemBody || !authData.assignmentKey) return;
+            fetch('/assignment-text/' + encodeURIComponent(authData.assignmentKey))
+                .then(function(res) {
+                    if (!res.ok) throw new Error(res.status);
+                    return res.json();
+                })
+                .then(function(data) {
+                    if (data.text) {
+                        problemBody.textContent = data.text;
+                    } else {
+                        problemBody.innerHTML = '<span class="problem-panel__placeholder">No problem description available for this assignment.</span>';
+                    }
+                })
+                .catch(function() {
+                    problemBody.innerHTML = '<span class="problem-panel__placeholder">No problem description available for this assignment.</span>';
+                });
+        })();
         
         // ✅ CHECK FOR PRE-SURVEY REQUIREMENT (FLEXIBLE)
         if (authData.hasPreSurvey) {
@@ -6717,6 +6805,49 @@ if (historySuggestionsButton) {
    const sidebarHandle = document.getElementById('resize-sidebar');
    const terminalHandle = document.getElementById('resize-terminal');
    
+   // Problem panel resize
+   resize.problem = false;
+   const problemHandle = document.getElementById('resize-problem');
+   if (problemHandle) {
+       problemHandle.addEventListener('mousedown', (e) => {
+           e.preventDefault();
+           resize.problem = true;
+           document.body.style.cursor = 'ew-resize';
+           document.addEventListener('mousemove', handleProblemResize);
+           document.addEventListener('mouseup', handleMouseUp);
+       });
+       problemHandle.addEventListener('touchstart', (e) => {
+           e.preventDefault();
+           resize.problem = true;
+           document.addEventListener('touchmove', handleProblemResizeTouch, { passive: false });
+           document.addEventListener('touchend', handleMouseUp);
+       }, { passive: false });
+   }
+
+   function handleProblemResize(e) {
+       if (!resize.problem) return;
+       e.preventDefault();
+       var panel = document.getElementById('problemPanel');
+       if (!panel) return;
+       var minW = 200;
+       var maxW = window.innerWidth * 0.45;
+       var newW = Math.max(minW, Math.min(maxW, e.clientX));
+       panel.style.width = newW + 'px';
+       if (window.editor) window.editor.layout();
+   }
+
+   function handleProblemResizeTouch(e) {
+       if (!resize.problem || !e.touches[0]) return;
+       e.preventDefault();
+       var panel = document.getElementById('problemPanel');
+       if (!panel) return;
+       var minW = 200;
+       var maxW = window.innerWidth * 0.45;
+       var newW = Math.max(minW, Math.min(maxW, e.touches[0].clientX));
+       panel.style.width = newW + 'px';
+       if (window.editor) window.editor.layout();
+   }
+
    sidebarHandle.addEventListener('mousedown', (e) => {
        e.preventDefault();
        resize.sidebar = true;
@@ -6764,16 +6895,20 @@ if (historySuggestionsButton) {
        document.body.style.cursor = '';
        resize.sidebar = false;
        resize.terminal = false;
+       resize.problem = false;
        document.removeEventListener('mouseup', handleMouseUp);
        document.removeEventListener('mousemove', handleSidebarResize);
        document.removeEventListener('mousemove', handleTerminalResize);
+       document.removeEventListener('mousemove', handleProblemResize);
        document.removeEventListener('touchend', handleMouseUp);
        document.removeEventListener('touchmove', handleSidebarResizeTouch);
        document.removeEventListener('touchmove', handleTerminalResizeTouch);
+       document.removeEventListener('touchmove', handleProblemResizeTouch);
 
        if (!resize.sidebar && !resize.terminal) {
            updateToggleButtonPosition();
        }
+       if (window.editor) window.editor.layout();
    }
 
    sidebarHandle.addEventListener('touchstart', (e) => {

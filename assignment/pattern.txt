@@ -1,6 +1,9 @@
-```markdown
-Create a program that prints a pattern of alternating ‘+’ and ‘*’ characters. 
-Given a fixed height in the program (eg. height = 5), 
-the top row should print 'height' characters and print 1 less character each for each subsequent row. 
-The output should contain exactly 'height' rows.
-```
+Create a program that prints a pattern of alternating ‘+’ and ‘*’ characters. Given a fixed height in the program (eg. height = 5 ), the top row should print height characters and print 1 less character each for each subsequent row. The output should contain exactly height rows.
+
+Example Output:
+height = 5
++++++
+****
++++
+**
++
