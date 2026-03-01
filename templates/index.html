@@ -125,6 +125,86 @@
             background-color: #007acc;
         }
 
+        /* ── File Tree Panel ────────────────────────────── */
+        .editor-row {
+            display: flex;
+            flex-direction: row;
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+        }
+        .editor-col {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-width: 0;
+            min-height: 0;
+        }
+        #fileTreePanel {
+            width: 180px;
+            min-width: 120px;
+            display: flex;
+            flex-direction: column;
+            background: #252526;
+            border-right: 1px solid #333;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+        .file-tree__header {
+            padding: 8px 15px;
+            min-height: 40px;
+            display: flex;
+            align-items: center;
+            background: #333334;
+            border-bottom: 1px solid #333;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            flex-shrink: 0;
+        }
+        .file-tree__header h3 {
+            margin: 0;
+            font-size: 12px;
+            font-weight: 600;
+            color: #999;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }
+        .file-tree__list {
+            list-style: none;
+            margin: 0;
+            padding: 6px 0;
+            flex: 1;
+            overflow-y: auto;
+        }
+        .file-tree__item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 16px;
+            font-family: 'Consolas', 'Menlo', monospace;
+            font-size: 13px;
+            color: #ccc;
+            cursor: default;
+            user-select: none;
+            transition: background 0.1s;
+        }
+        .file-tree__item:hover {
+            background: rgba(255,255,255,0.05);
+        }
+        .file-tree__item.active {
+            background: #094771;
+            color: #fff;
+        }
+        .file-tree__icon {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            fill: none;
+            stroke: #6997d5;
+            stroke-width: 1.5;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
         /* Resizing */
         #resize-sidebar {
             width: 5px;
@@ -2563,6 +2643,16 @@
         <div id="resize-problem"></div>
 
         <div id="content">
+          <div class="editor-row">
+            <!-- File Tree Sidebar -->
+            <div id="fileTreePanel">
+                <div class="file-tree__header">
+                    <h3>Files</h3>
+                </div>
+                <ul class="file-tree__list" id="fileTreeList">
+                </ul>
+            </div>
+            <div class="editor-col">
             <div id="header" class="header">
                 <h2>Code Editor</h2>
                 <div class="url-display" id="urlDisplay">Loading...</div>
@@ -2630,6 +2720,8 @@
                     </div>
                 </div>
             </div>
+            </div><!-- /.editor-col -->
+          </div><!-- /.editor-row -->
             <div id="resize-terminal"></div>
             <div class="terminal" id="terminal">
                 <div class="header">
@@ -3907,7 +3999,22 @@ async function initializeFromURL() {
                     problemBody.innerHTML = '<span class="problem-panel__placeholder">No problem description available for this assignment.</span>';
                 });
         })();
-        
+
+        // Populate file tree sidebar
+        (function loadFileTree() {
+            var fileTreeList = document.getElementById('fileTreeList');
+            if (!fileTreeList || !authData.assignmentKey) return;
+            var extMap = { javascript: 'js', python: 'py', c: 'c' };
+            var lang = authData.programmingLanguage || 'javascript';
+            var ext = extMap[lang] || 'txt';
+            var fileName = authData.assignmentKey + '.' + ext;
+
+            var li = document.createElement('li');
+            li.className = 'file-tree__item active';
+            li.innerHTML = '<svg class="file-tree__icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>' + fileName;
+            fileTreeList.appendChild(li);
+        })();
+
         // ✅ CHECK FOR PRE-SURVEY REQUIREMENT (FLEXIBLE)
         if (authData.hasPreSurvey) {
             try {
