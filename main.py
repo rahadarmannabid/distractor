@@ -2823,10 +2823,21 @@ if __name__ == "__main__":
     logger.info(f"API Docs: http://localhost:{port}/docs")
     logger.info(f"Firebase Status: {'Connected' if firebase_db else 'Disconnected'}")
     
-    uvicorn.run(
-        app, 
-        host=host, 
-        port=port,
-        log_level=log_level,
-        reload=reload
-    )
+    if reload:
+        # When reload is enabled, pass app as import string
+        uvicorn.run(
+            "main:app",  # Import string format: "module:variable"
+            host=host, 
+            port=port,
+            log_level=log_level,
+            reload=reload
+        )
+    else:
+        # When reload is disabled, can pass app object directly
+        uvicorn.run(
+            app, 
+            host=host, 
+            port=port,
+            log_level=log_level,
+            reload=reload
+        )
