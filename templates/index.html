@@ -78,7 +78,7 @@
             display: flex;
             flex-direction: column;
             background: #1e1e1e;
-            border-right: 1px solid #333;
+            border-left: 1px solid #333;
             overflow: hidden;
             flex-shrink: 0;
         }
@@ -2631,17 +2631,6 @@
 
     <!-- Main App (Initially Hidden) -->
     <div id="application" class="hidden">
-        <!-- Left Problem Description Panel -->
-        <div id="problemPanel">
-            <div class="problem-panel__header">
-                <h2>Problem</h2>
-            </div>
-            <div class="problem-panel__body" id="problemPanelBody">
-                Loading problem...
-            </div>
-        </div>
-        <div id="resize-problem"></div>
-
         <div id="content">
           <div class="editor-row">
             <!-- File Tree Sidebar -->
@@ -2743,6 +2732,17 @@
                         <span class="output-prompt">>>> </span><span class="output-info">Ready to start coding!</span>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <div id="resize-problem"></div>
+        <!-- Right Problem Description Panel -->
+        <div id="problemPanel">
+            <div class="problem-panel__header">
+                <h2>Problem</h2>
+            </div>
+            <div class="problem-panel__body" id="problemPanelBody">
+                Loading problem...
             </div>
         </div>
 
@@ -6938,7 +6938,7 @@ if (historySuggestionsButton) {
        if (!panel) return;
        var minW = 200;
        var maxW = window.innerWidth * 0.45;
-       var newW = Math.max(minW, Math.min(maxW, e.clientX));
+       var newW = Math.max(minW, Math.min(maxW, window.innerWidth - e.clientX));
        panel.style.width = newW + 'px';
        if (window.editor) window.editor.layout();
    }
@@ -6950,7 +6950,7 @@ if (historySuggestionsButton) {
        if (!panel) return;
        var minW = 200;
        var maxW = window.innerWidth * 0.45;
-       var newW = Math.max(minW, Math.min(maxW, e.touches[0].clientX));
+       var newW = Math.max(minW, Math.min(maxW, window.innerWidth - e.touches[0].clientX));
        panel.style.width = newW + 'px';
        if (window.editor) window.editor.layout();
    }
