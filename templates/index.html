@@ -55,19 +55,6 @@
             min-height: 200px;
             max-height: 50vh;
         }
-        #sidebar {
-            width: 35vw;
-            min-width: 25vw;
-            max-width: 50vw;
-            transition: min-width 0.2s ease;
-        }
-        #sidebar.collapsed {
-            width: 0px !important;
-            min-width: 0px !important;
-            padding: 0;
-            border-left: none;
-            overflow: hidden;
-        }
 
         /* ── Left Problem Panel ─────────────────────────── */
         #problemPanel {
@@ -206,11 +193,6 @@
         }
 
         /* Resizing */
-        #resize-sidebar {
-            width: 5px;
-            background-color: darkgray;
-            cursor: ew-resize;
-        }
         #resize-terminal {
             height: 5px;
             background-color: darkgray;
@@ -645,684 +627,6 @@
             transform: translateY(0);
         }
 
-        /* Sidebar Styling */
-        #sidebar {
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-            background: #252526;
-            border-left: 1px solid #333;
-        }
-        .sidebar-content {
-            overflow-y: auto;
-            flex: 1;
-            min-height: 0;
-        }
-        .sidebar-section {
-            padding: 16px;
-            border-bottom: 1px solid #333;
-            font-family: 'Consolas', 'Menlo', 'Ubuntu Mono', monospace;
-        }
-        .sidebar-section .green-box {
-            background: linear-gradient(135deg, #0e2f1e, #1a4d2e);
-            border: 2px solid #22c55e;
-            border-radius: 8px;
-            padding: 20px;
-            line-height: 2;
-            color: #4ade80;
-            box-shadow: 0 4px 15px rgba(34, 197, 94, 0.2);
-            overflow: visible;
-        }
-        .sidebar-section .red-box {
-            background: linear-gradient(135deg, #2d1b0e, #3d2616);
-            border: 2px solid #f97316;
-            border-radius: 8px;
-            padding: 30px 20px 20px;
-            line-height: 2;
-            color: #f97316;
-            box-shadow: 0 4px 15px rgba(249, 115, 22, 0.2);
-            position: relative;
-            overflow: visible;
-        }
-        .sidebar-section code {
-            white-space: pre-wrap;
-            background: #2d2d2d;
-            padding: 3px 8px;
-            border-radius: 4px;
-            color: #f8f8f2;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 12px;
-            border: 1px solid #404040;
-            display: block;
-        }
-        .suggestion-button {
-            background: linear-gradient(135deg, #1e1e1e, #2d2d2d);
-            border: 1px solid #404040;
-            border-radius: 4px;
-            padding: 2px 45px 2px 8px;
-            color: #d4d4d4;
-            font-family: 'Consolas', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 11px;
-            cursor: pointer;
-            display: block;
-            width: 100%;
-            text-align: left;
-            transition: all 0.2s ease;
-            margin-top: 6px;
-            position: relative;
-            overflow: visible;
-            line-height: 1.2;
-            min-height: 20px;
-            word-break: break-word;
-            white-space: pre-wrap;
-            box-sizing: border-box;
-        }
-        .suggestion-content {
-            display: block;
-            width: 100%;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-            word-break: break-word;
-            min-height: auto;
-            line-height: 1.2;
-            padding: 0;
-            margin: 0;
-        }
-        .suggestion-button:hover {
-            background: linear-gradient(135deg, #2d2d2d, #3d3d3d);
-            border-color: #569cd6;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        }
-        .suggestion-button:active {
-            transform: translateY(0);
-        }
-        .suggestion-button::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 2px;
-            background: linear-gradient(90deg, transparent, #569cd6, transparent);
-            opacity: 0;
-            transition: opacity 0.2s ease;
-        }
-        .suggestion-button:hover::before {
-            opacity: 1;
-        }
-        .suggestion-button::after {
-            content: 'Click to insert';
-            position: absolute;
-            top: 2px;
-            right: 6px;
-            font-size: 8px;
-            color: #888;
-            opacity: 0;
-            transition: opacity 0.2s ease;
-            pointer-events: none;
-        }
-        .suggestion-button:hover::after {
-            opacity: 1;
-        }
-        .ai-thinking-layout {
-            display: flex;
-            gap: 15px;
-            margin-top: 0px;
-            align-items: stretch;
-            overflow: visible;
-        }
-        .ai-avatar-column {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            width: 130px;
-            margin-top: 50px;
-            position: relative;
-            flex: 0 0 auto;
-        }
-        .ai-avatar-orb {
-            width: 130px;
-            height: 130px;
-            border-radius: 50%;
-            background: radial-gradient(circle at 30% 25%, #ffffff, #dcecff);
-            border: 4px solid #90d8ff;
-            box-shadow: 0 0 18px rgba(0, 157, 255, 0.35);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-            animation: bot-float 3s ease-in-out infinite;
-            transition: transform .25s ease, box-shadow .25s ease;
-            cursor: pointer;
-        }
-        .ai-avatar-orb:hover {
-            transform: translateY(-4px) scale(1.04);
-            box-shadow: 0 0 26px rgba(0, 157, 255, 0.45);
-        }
-        .ai-avatar-column.is-thinking .ai-avatar-orb {
-            border-color: #fbbf24;
-            box-shadow: 0 0 25px rgba(251,191,36,0.6);
-        }
-        .ai-bot {
-            position: relative;
-            width: 90px;
-            height: 120px;
-        }
-        .ai-bot-head {
-            width: 72px;
-            height: 72px;
-            position: absolute;
-            top: 0;
-            left: 50%;
-            transform: translateX(-50%);
-        }
-        .ai-bot-band {
-            position: absolute;
-            top: 4px;
-            left: 8px;
-            right: 8px;
-            height: 18px;
-            background: linear-gradient(to bottom, #61bad1, #2c879f);
-            border-radius: 40px 40px 32px 32px;
-            box-shadow: inset 0 -4px 7px rgba(0,0,0,0.28);
-        }
-        .ai-bot-pad {
-            position: absolute;
-            width: 10px;
-            height: 22px;
-            background: #1b5a70;
-            border-radius: 8px;
-            top: 26px;
-            box-shadow: inset -2px 2px 4px rgba(255,255,255,0.12), inset 2px -2px 4px rgba(0,0,0,0.3);
-        }
-        .ai-bot-pad.left { left: -5px; }
-        .ai-bot-pad.right { right: -5px; }
-        .ai-bot-helmet {
-            position: absolute;
-            top: 12px;
-            left: 8px;
-            right: 8px;
-            bottom: 8px;
-            background: linear-gradient(to bottom, #ffe98c, #ffc52c);
-            border-radius: 50%;
-            box-shadow: inset 0 6px 10px rgba(255,255,255,0.8), inset 0 -6px 12px rgba(0,0,0,0.2), 0 6px 12px rgba(0,0,0,0.2);
-        }
-        .ai-bot-face {
-            position: absolute;
-            left: 16px;
-            right: 16px;
-            bottom: 14px;
-            height: 32px;
-            background: linear-gradient(to bottom, #111827, #000000);
-            border-radius: 20px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        .ai-bot-eye {
-            width: 16px;
-            height: 10px;
-            border-radius: 50%;
-            border: 3px solid #d7faff;
-            border-color: #d7faff transparent transparent transparent;
-            margin: 0 6px;
-            animation: bot-blink 4s infinite;
-            transition: box-shadow .2s ease, border-color .2s ease;
-        }
-        .ai-bot-eye.right { animation-delay: .15s; }
-        .ai-bot-eye.flash {
-            border-color: #7ff5ff transparent transparent transparent;
-            box-shadow: 0 0 6px #7ff5ff, 0 0 14px #7ff5ff, 0 0 22px #7ff5ff;
-        }
-        .ai-bot-gloss {
-            position: absolute;
-            top: 3px;
-            left: 18px;
-            width: 35px;
-            height: 8px;
-            background: rgba(255,255,255,0.3);
-            border-radius: 999px;
-            filter: blur(2px);
-        }
-        .ai-bot-body {
-            position: absolute;
-            top: 58px;
-            left: 50%;
-            width: 58px;
-            height: 42px;
-            transform: translateX(-50%);
-            background: linear-gradient(to bottom, #ffe680, #ffcc33);
-            border-radius: 16px;
-            box-shadow: inset 0 6px 12px rgba(255,255,255,0.65), inset 0 -4px 10px rgba(0,0,0,0.18), 0 4px 8px rgba(0,0,0,0.25);
-        }
-        .ai-bot-chest {
-            position: absolute;
-            top: 10px;
-            left: 50%;
-            width: 18px;
-            height: 10px;
-            transform: translateX(-50%);
-            border-radius: 10px;
-            background: linear-gradient(to bottom, #a5f3fc, #0ea5e9);
-            box-shadow: 0 0 6px rgba(14,165,233,.6);
-        }
-        .ai-bot-arm {
-            position: absolute;
-            top: 66px;
-            width: 14px;
-            height: 32px;
-            background: linear-gradient(to bottom, #e5e7eb, #d1d5db);
-            border-radius: 10px;
-            animation: bot-arm 3s ease-in-out infinite;
-        }
-        .ai-bot-arm.left { left: 16px; }
-        .ai-bot-arm.right { right: 16px; }
-        .ai-bot-hand {
-            position: absolute;
-            bottom: -6px;
-            left: 50%;
-            width: 16px;
-            height: 12px;
-            transform: translateX(-50%);
-            background: #1f2937;
-            border-radius: 10px;
-        }
-        .ai-bot-leg {
-            position: absolute;
-            top: 104px;
-            width: 14px;
-            height: 32px;
-            background: linear-gradient(to bottom, #e5e7eb, #cdd3da);
-            border-radius: 10px;
-        }
-        .ai-bot-leg.left { left: 22px; }
-        .ai-bot-leg.right { right: 22px; }
-        .ai-bot-foot {
-            position: absolute;
-            bottom: -6px;
-            left: 50%;
-            width: 24px;
-            height: 12px;
-            transform: translateX(-50%);
-            background: linear-gradient(to bottom, #111827, #020617);
-            border-radius: 10px;
-        }
-        @keyframes bot-blink {
-            0%,5%,100% { transform: scaleY(1); }
-            2% { transform: scaleY(.08); }
-        }
-        @keyframes bot-float {
-            0%,100% { transform: translateY(0); }
-            50% { transform: translateY(-6px); }
-        }
-        @keyframes bot-arm {
-            0%,100% { transform: rotate(3deg); }
-            50% { transform: rotate(-3deg); }
-        }
-        .ai-bubble-stack {
-            flex: 1;
-            min-width: 0;
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            position: relative;
-            padding-left: 25px;
-            overflow: visible;
-        }
-        .ai-bubble-stack::before {
-            content: '';
-            position: absolute;
-            left: 0px;
-            top: 0;
-            bottom: 0;
-            width: 4px;
-            background: linear-gradient(180deg, rgba(96,165,250,0.5), rgba(14,116,144,0.15));
-            border-radius: 999px;
-            opacity: 0.8;
-        }
-        .ai-bubble-card {
-            position: relative;
-            border-radius: 24px;
-            padding: 8px 16px 8px;
-            width: 100%;
-            box-sizing: border-box;
-            overflow: visible;
-        }
-        .ai-bubble-card::before {
-            content: '';
-            position: absolute;
-            width: 18px;
-            height: 18px;
-            left: -10px;
-            top: 32px;
-            background: inherit;
-            transform: rotate(45deg);
-            border-radius: 4px;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.25);
-        }
-        .ai-timeline-node {
-            position: absolute;
-            left: -40px;
-            top: 32px;
-            width: 18px;
-            height: 18px;
-            border-radius: 999px;
-            border: 3px solid currentColor;
-            background: rgba(15,23,42,0.95);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.35);
-        }
-        .ai-timeline-node::after {
-            content: '';
-            position: absolute;
-            right: -12px;
-            top: 50%;
-            width: 18px;
-            height: 2px;
-            background: currentColor;
-            opacity: 0.6;
-            transform: translateY(-50%);
-        }
-        .ai-timeline-node--analysis {
-            color: #f97316;
-        }
-        .ai-timeline-node--suggestion {
-            color: #60a5fa;
-        }
-        .ai-avatar-badge, .ai-avatar-badge--inline {
-            width: 100%;
-            background: linear-gradient(135deg, #1d4ed8, #0f172a);
-            border-radius: 18px;
-            padding: 8px 10px;
-            border: 1px solid rgba(147,197,253,0.5);
-            box-shadow: 0 8px 18px rgba(0,0,0,0.35);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 4px;
-            text-transform: uppercase;
-            box-sizing: border-box;
-        }
-        .ai-avatar-badge--inline {
-            position: absolute;
-            top: 6px;
-            left: 6px;
-            width: auto;
-            max-width: calc(100% - 12px);
-            align-items: flex-start;
-        }
-        .ai-avatar-badge__title {
-            width: 100%;
-            text-align: center;
-            font-size: 11px;
-            letter-spacing: 0.18em;
-            color: #f1f5f9;
-            white-space: nowrap;
-            text-transform: none;
-        }
-        .ai-avatar-badge__subtitle {
-            width: 100%;
-            text-align: center;
-            font-size: 7px;
-            letter-spacing: 0.35em;
-            color: #a5b4fc;
-            white-space: nowrap;
-            text-transform: none;
-        }
-        .suggestion-button.red-theme {
-            border-left: 3px solid #ea580c;
-        }
-        .suggestion-button.red-theme:hover {
-            border-left-color: #f97316;
-            box-shadow: 0 4px 12px rgba(234, 88, 12, 0.2);
-        }
-        .suggestion-button.red-theme::before {
-            background: linear-gradient(90deg, transparent, #ea580c, transparent);
-        }
-        .suggestion-button.green-theme {
-            border-left: 3px solid #4ade80;
-        }
-        .suggestion-button.green-theme:hover {
-            border-left-color: #22c55e;
-            box-shadow: 0 4px 12px rgba(74, 222, 128, 0.2);
-        }
-        .suggestion-button.green-theme::before {
-            background: linear-gradient(90deg, transparent, #4ade80, transparent);
-        }
-        .suggestion-button.violet-theme {
-            border-left: 3px solid #8b5cf6;
-        }
-        .suggestion-button.violet-theme:hover {
-            border-left-color: #a855f7;
-            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);
-        }
-        .suggestion-button.violet-theme::before {
-            background: linear-gradient(90deg, transparent, #8b5cf6, transparent);
-        }
-        /* Ensure theme variants also wrap correctly */
-        .suggestion-button.red-theme,
-        .suggestion-button.green-theme,
-        .suggestion-button.violet-theme {
-            white-space: pre-wrap;
-            word-break: break-word;
-            overflow: visible;
-        }
-        .analysis-panel,
-        .suggestion-panel {
-            margin-top: 4px;
-            margin-bottom: 4px;
-            padding: 8px;
-            border-radius: 8px;
-            border-left: 3px solid transparent;
-            background: rgba(255, 255, 255, 0.04);
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 8px 18px rgba(0,0,0,0.25);
-            overflow: visible;
-        }
-        .analysis-panel__title,
-        .suggestion-panel__header {
-            text-transform: uppercase;
-            font-size: 12px;
-            font-weight: 600;
-            letter-spacing: 0.6px;
-            margin-bottom: 10px;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .analysis-panel__title::before,
-        .suggestion-panel__header::before {
-            content: '';
-            width: 4px;
-            height: 16px;
-            border-radius: 999px;
-            background: currentColor;
-        }
-        .analysis-panel--guess {
-            background: rgba(249, 115, 22, 0.12);
-            border-left-color: #f97316;
-            color: #ffedd5;
-        }
-        .analysis-panel--guess #analysis {
-            color: #fbd38d;
-        }
-        .suggestion-panel--guess {
-            background: rgba(59, 130, 246, 0.12);
-            border-left-color: #60a5fa;
-        }
-        .analysis-panel--guess .analysis-panel__title,
-        .suggestion-panel--guess .suggestion-panel__header {
-            color: #fbbf24;
-        }
-        .analysis-panel--desc {
-            background: rgba(34, 197, 94, 0.12);
-            border-left-color: #22c55e;
-            color: #dcfce7;
-        }
-        .analysis-panel--desc #problemDescriptionDisplay {
-            color: #bbf7d0;
-        }
-        .suggestion-panel--desc {
-            background: rgba(45, 212, 191, 0.12);
-            border-left-color: #2dd4bf;
-        }
-        .analysis-panel--desc .analysis-panel__title,
-        .suggestion-panel--desc .suggestion-panel__header {
-            color: #34d399;
-        }
-        .suggestion-panel--violet {
-            background: rgba(139, 92, 246, 0.12);
-            border-left-color: #8b5cf6;
-        }
-        .suggestion-panel--violet .suggestion-panel__header {
-            color: #c4b5fd;
-        }
-        .suggestion-action {
-            position: relative;
-            overflow: visible;
-        }
-        .suggestion-signifier {
-            position: absolute;
-            top: -8px;
-            right: -8px;
-            background: linear-gradient(135deg, #22c55e, #16a34a);
-            color: #fff;
-            padding: 4px 10px;
-            border-radius: 999px;
-            font-size: 9px;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-            text-transform: uppercase;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            box-shadow: 0 2px 8px rgba(34, 197, 94, 0.45);
-            opacity: 0;
-            transform: scale(0.85);
-            pointer-events: none;
-            transition: transform 0.2s ease, opacity 0.2s ease;
-            z-index: 15;
-        }
-        .suggestion-signifier::before {
-            content: '↓';
-            font-size: 12px;
-            animation: bounce-arrow 1s ease-in-out infinite;
-        }
-        .suggestion-signifier.active {
-            opacity: 1;
-            transform: scale(1);
-        }
-        .suggestion-button.new-suggestion {
-            border-width: 2px;
-            animation: new-suggestion-pulse 3s ease-in-out;
-        }
-        .suggestion-action.red-theme .suggestion-signifier {
-            background: linear-gradient(135deg, #f97316, #ea580c);
-            box-shadow: 0 2px 8px rgba(249, 115, 22, 0.45);
-        }
-        .suggestion-action.green-theme .suggestion-signifier {
-            background: linear-gradient(135deg, #22c55e, #16a34a);
-            box-shadow: 0 2px 8px rgba(34, 197, 94, 0.45);
-        }
-        .suggestion-action.violet-theme .suggestion-signifier {
-            background: linear-gradient(135deg, #8b5cf6, #7c3aed);
-            box-shadow: 0 2px 8px rgba(139, 92, 246, 0.45);
-        }
-        .suggestion-action .suggestion-signifier.active {
-            animation: pulse-signifier 2s ease-in-out infinite;
-        }
-        .suggestion-action.red-theme .suggestion-signifier.active {
-            animation: pulse-signifier-red 2s ease-in-out infinite;
-        }
-        .suggestion-action.green-theme .suggestion-signifier.active {
-            animation: pulse-signifier-green 2s ease-in-out infinite;
-        }
-        .suggestion-action.violet-theme .suggestion-signifier.active {
-            animation: pulse-signifier-violet 2s ease-in-out infinite;
-        }
-        @keyframes bounce-arrow {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(3px); }
-        }
-        @keyframes pulse-signifier {
-            0%, 100% { box-shadow: 0 2px 8px rgba(34, 197, 94, 0.45); transform: scale(1); }
-            50% { box-shadow: 0 4px 16px rgba(34, 197, 94, 0.7); transform: scale(1.05); }
-        }
-        @keyframes pulse-signifier-red {
-            0%, 100% { box-shadow: 0 2px 8px rgba(249, 115, 22, 0.45); transform: scale(1); }
-            50% { box-shadow: 0 4px 16px rgba(249, 115, 22, 0.7); transform: scale(1.05); }
-        }
-        @keyframes pulse-signifier-green {
-            0%, 100% { box-shadow: 0 2px 8px rgba(34, 197, 94, 0.45); transform: scale(1); }
-            50% { box-shadow: 0 4px 16px rgba(34, 197, 94, 0.7); transform: scale(1.05); }
-        }
-        @keyframes pulse-signifier-violet {
-            0%, 100% { box-shadow: 0 2px 8px rgba(139, 92, 246, 0.45); transform: scale(1); }
-            50% { box-shadow: 0 4px 16px rgba(139, 92, 246, 0.7); transform: scale(1.05); }
-        }
-        @keyframes new-suggestion-pulse {
-            0% { box-shadow: 0 0 0 0 rgba(86, 156, 214, 0.5); }
-            70% { box-shadow: 0 0 0 12px rgba(86, 156, 214, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(86, 156, 214, 0); }
-        }
-        .sidebar-section p {
-            line-height: 1.4;
-            font-size: 12px;
-        }
-        .sidebar-header {
-            display: flex;
-            flex-direction: row;
-            align-items: center;
-            justify-content: space-between;
-            gap: 10px;
-            margin-bottom: 4px;
-        }
-        h2, h3 {
-            flex: 1;
-        }
-        #aiGuessSection .sidebar-header {
-            justify-content: flex-end;
-            gap: 12px;
-        }
-        
-        /* Different colors for different sections */
-        #aiGuessSection h3 {
-            color: #f97316;
-            text-shadow: 0 0 5px rgba(249, 115, 22, 0.3);
-        }
-        
-        #problemDescSection h3 {
-            color: #22c55e;
-            text-shadow: 0 0 5px rgba(34, 197, 94, 0.3);
-        }
-        
-        #suggestionsOnlySection h3 {
-            color: #f97316;
-            text-shadow: 0 0 5px rgba(249, 115, 22, 0.3);
-            font-weight: 600;
-        }
-        .history-button {
-            background: rgba(255, 255, 255, 0.05);
-            color: #cccccc;
-            padding: 6px 12px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 4px;
-            cursor: pointer;
-            display: inline-block;
-            font-size: 12px;
-            font-weight: 500;
-            transition: all 0.2s ease;
-            text-decoration: none;
-        }
-        .history-button:hover {
-            background: rgba(255, 255, 255, 0.1);
-            border-color: rgba(255, 255, 255, 0.3);
-            transform: translateY(-1px);
-        }
-        .history-count {
-            font-weight: 600;
-            margin-left: 4px;
-        }
 
         .spinner {
             display: inline-block;
@@ -1544,218 +848,6 @@
             opacity: 0.8;
         }
 
-/* AI Thinking Overlay - Editor Only */
-/* ADD this new CSS for mini AI thinking animation in sidebar */
-.mini-ai-thinking {
-    text-align: center;
-    padding: 15px 20px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    box-sizing: border-box;
-}
-
-.mini-ai-loader {
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
-    position: relative;
-    margin: 0 auto 15px;
-    background: linear-gradient(45deg, #9333ea, #a855f7, #c084fc);
-    animation: ai-spin-zoom 3s ease-in-out infinite;
-    box-shadow: 0 0 30px rgba(147, 51, 234, 0.6);
-}
-
-.mini-ai-loader::before,
-.mini-ai-loader::after {
-    content: "";
-    position: absolute;
-    border: 3px solid transparent;
-    border-top: 3px solid #a855f7;
-    border-right: 3px solid #c084fc;
-    border-radius: 50%;
-    top: -3px;
-    left: -3px;
-    right: -3px;
-    bottom: -3px;
-    animation: ai-spin-fast 1.5s linear infinite;
-}
-
-.mini-ai-loader::after {
-    border-top: 3px solid #c084fc;
-    border-right: 3px solid #e879f9;
-    animation: ai-spin-slow 2.5s linear infinite reverse;
-    top: -6px;
-    left: -6px;
-    right: -6px;
-    bottom: -6px;
-}
-
-@keyframes ai-spin-zoom {
-    0%, 100% {
-        transform: scale(0.8) rotate(0deg);
-        box-shadow: 0 0 20px rgba(147, 51, 234, 0.4);
-        background: linear-gradient(45deg, #9333ea, #a855f7);
-    }
-    25% {
-        transform: scale(1.2) rotate(90deg);
-        box-shadow: 0 0 40px rgba(168, 85, 247, 0.8);
-        background: linear-gradient(45deg, #a855f7, #c084fc);
-    }
-    50% {
-        transform: scale(1.0) rotate(180deg);
-        box-shadow: 0 0 50px rgba(192, 132, 252, 0.9);
-        background: linear-gradient(45deg, #c084fc, #e879f9);
-    }
-    75% {
-        transform: scale(1.3) rotate(270deg);
-        box-shadow: 0 0 35px rgba(168, 85, 247, 0.7);
-        background: linear-gradient(45deg, #a855f7, #c084fc);
-    }
-}
-
-@keyframes ai-spin-fast {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
-@keyframes ai-spin-slow {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(-360deg); }
-}
-
-.mini-ai-text {
-    font-size: 12px;
-    font-weight: 600;
-    color: #a855f7;
-    animation: ai-text-glow 2s ease-in-out infinite;
-    text-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
-}
-
-.ai-thinking-glow {
-    animation: box-thinking-glow 2s ease-in-out infinite;
-}
-
-@keyframes box-thinking-glow {
-    0%, 100% { 
-        box-shadow: 0 4px 8px rgba(0,0,0,0.3); 
-    }
-    50% { 
-        box-shadow: 0 4px 20px rgba(147, 51, 234, 0.6), 
-                    0 0 30px rgba(147, 51, 234, 0.4),
-                    inset 0 0 10px rgba(147, 51, 234, 0.2); 
-    }
-}
-
-/* Box Shake Animation */
-@keyframes shake-attention {
-    0%, 100% { transform: translateX(0); }
-    10%, 30%, 50%, 70%, 90% { transform: translateX(-3px); }
-    20%, 40%, 60%, 80% { transform: translateX(3px); }
-}
-
-@keyframes ai-text-glow {
-    0%, 100% {
-        opacity: 0.7;
-        transform: scale(1);
-        color: #a855f7;
-        text-shadow: 0 0 5px rgba(168, 85, 247, 0.3);
-    }
-    50% {
-        opacity: 1;
-        transform: scale(1.05);
-        color: #c084fc;
-        text-shadow: 0 0 20px rgba(192, 132, 252, 0.8);
-    }
-}
-
-.shake-attention {
-    animation: shake-attention 0.6s ease-in-out 3;
-}
-
-/* Typing Animation */
-.typing-animation {
-    overflow: hidden;
-    white-space: nowrap;
-    border-right: 2px solid;
-    animation: typing-cursor 1s infinite;
-}
-
-@keyframes typing-cursor {
-    0%, 50% { border-color: transparent; }
-    51%, 100% { border-color: currentColor; }
-}
-
-/* Box Glow Effect */
-@keyframes attention-glow {
-    0%, 100% { box-shadow: 0 4px 8px rgba(0,0,0,0.3); }
-    50% { 
-        box-shadow: 0 4px 20px rgba(147, 51, 234, 0.6), 
-                    0 0 30px rgba(147, 51, 234, 0.4),
-                    inset 0 0 10px rgba(147, 51, 234, 0.2); 
-    }
-}
-
-/* AI Analysis and History Text Font Size */
-        #analysis {
-            font-size: 12px;
-            line-height: 1.4;
-        }
-        
-        /* History display font size */
-        .sidebar-section [data-showing-history="true"] {
-            font-size: 12px;
-        }
-        
-        .sidebar-section [data-showing-history="true"] div {
-            font-size: 12px;
-        }
-        
-        .sidebar-section [data-showing-history="true"] span {
-            font-size: 12px;
-        }
-
-        /* Enhanced Problem Description Visibility */
-        #problemDescriptionDisplay {
-            background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0.05));
-            border: 1px solid rgba(34, 197, 94, 0.2);
-            border-radius: 6px;
-            padding: 16px;
-            margin: 10px 0;
-        }
-        
-        #problemDescriptionDisplay h1,
-        #problemDescriptionDisplay h2, 
-        #problemDescriptionDisplay h3 {
-            color: #22c55e !important;
-            font-weight: 600;
-        }
-        
-        /* AI Analysis Text Color */
-        #analysis {
-            color: #fbbf24;
-            font-weight: 500;
-        }
-        
-        /* Make suggestion text more visible */
-        .suggestion-content {
-            color: #e5e7eb;
-            font-weight: 500;
-        }
-        
-        #suggestionGuess {
-            color: #fbbf24 !important;
-        }
-        
-        #suggestionDesc {
-            color: #22c55e !important;
-        }
-        
-        #suggestionOnly {
-            color: #f3f4f6 !important;
-            font-weight: 600 !important;
-        }
 
 /* Survey Modal Styles */
 .survey-modal {
@@ -2017,19 +1109,6 @@
     text-align: center;
 }
 
-/* Fix for Condition 3 suggestions */
-        #suggestionsOnlySection .suggestion-button {
-            background: linear-gradient(135deg, #2d1b0e, #3d2616);
-            border: 1px solid #f97316;
-            color: #f3f4f6;
-            font-weight: 600;
-        }
-        
-        #suggestionsOnlySection .suggestion-button:hover {
-            background: linear-gradient(135deg, #3d2616, #4d3626);
-            border-color: #fb923c;
-            color: #ffffff;
-        }
         
         /* Ensure consistent heights across all conditions */
 
@@ -2193,52 +1272,6 @@
     }
 }
 
-/* Sidebar Toggle Button - HIDDEN */
-.sidebar-toggle {
-    display: none !important;
-    position: fixed;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    background: linear-gradient(135deg, #569cd6, #4a86c7);
-    border: 2px solid #3a76b7;
-    border-radius: 8px 0 0 8px;
-    padding: 12px 8px;
-    color: white;
-    font-size: 16px;
-    font-weight: bold;
-    cursor: pointer;
-    transition: right 0.3s ease, transform 0.3s ease;
-    z-index: 1000;
-    box-shadow: -2px 0 10px rgba(0,0,0,0.3);
-    min-width: 40px;
-    min-height: 44px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    will-change: right;
-}
-.sidebar-toggle:hover {
-    background: linear-gradient(135deg, #4a86c7, #3a76b7);
-    transform: translateY(-50%) translateX(-3px);
-    box-shadow: -4px 0 15px rgba(86, 156, 214, 0.5);
-}
-#sidebar {
-    position: relative;
-    transition: all 0.3s ease;
-}
-#sidebar.collapsed {
-    width: 0 !important;
-    min-width: 0;
-    overflow: hidden;
-}
-#sidebar.collapsed > *:not(.sidebar-toggle) {
-    opacity: 0;
-    pointer-events: none;
-}
-#content {
-    transition: all 0.3s ease;
-}
 
 
     /* ============================================
@@ -2316,16 +1349,6 @@
         min-width: 70px;
     }
     
-    #sidebar {
-        width: 50vw !important;
-        min-width: 300px;
-    }
-    
-    .sidebar-toggle {
-        padding: 10px 6px;
-        font-size: 14px;
-    }
-    
     .terminal .header {
         flex-wrap: wrap;
     }
@@ -2399,16 +1422,6 @@
         min-height: 36px;
     }
     
-    #sidebar {
-        width: 80vw !important;
-        min-width: 250px;
-    }
-    
-    .sidebar-toggle {
-        font-size: 12px;
-        padding: 8px 6px;
-    }
-    
     .teaser-card {
         padding: 20px;
     }
@@ -2423,12 +1436,6 @@
         text-align: center;
     }
 }
-
-        /* ── Hide sidebar & resize handle when popup is active ── */
-        #sidebar.copilot-sidebar-hidden,
-        #resize-sidebar.copilot-sidebar-hidden {
-            display: none !important;
-        }
 
         /* ── Floating Copilot Popup ───────────────────────── */
         #copilotPopup {
@@ -2746,169 +1753,6 @@
             </div>
         </div>
 
-        <div id="resize-sidebar"></div>
-<div id="sidebar">
-    <button class="sidebar-toggle" id="sidebarToggle" title="Toggle Sidebar">
-        <span id="toggleIcon">◀</span>
-    </button>
-    <div class="header">
-        <h2>AI Coding Assistant</h2>
-    </div>
-    <div class="sidebar-content">
-        <!-- AI Problem Guess Section (Conditions 1 & 2) -->
-        <div class="sidebar-section" id="aiGuessSection">
-            <div class="red-box">
-                <div class="ai-avatar-badge ai-avatar-badge--inline">
-                    <span class="ai-avatar-badge__title">CodeOracle</span>
-                    <span class="ai-avatar-badge__subtitle">Powered by ChatGPT</span>
-                </div>
-                <div class="ai-thinking-layout">
-                    <div class="ai-avatar-column" id="aiAvatarColumn">
-                        <div class="ai-avatar-orb">
-                            <div class="ai-bot">
-                                <div class="ai-bot-head">
-                                    <div class="ai-bot-band"></div>
-                                    <div class="ai-bot-pad left"></div>
-                                    <div class="ai-bot-pad right"></div>
-                                    <div class="ai-bot-helmet"></div>
-                                    <div class="ai-bot-face">
-                                        <div class="ai-bot-gloss"></div>
-                                        <div class="ai-bot-eye left"></div>
-                                        <div class="ai-bot-eye right"></div>
-                                    </div>
-                                </div>
-                                <div class="ai-bot-body">
-                                    <div class="ai-bot-chest"></div>
-                                </div>
-                                <div class="ai-bot-arm left"><div class="ai-bot-hand"></div></div>
-                                <div class="ai-bot-arm right"><div class="ai-bot-hand"></div></div>
-                                <div class="ai-bot-leg left"><div class="ai-bot-foot"></div></div>
-                                <div class="ai-bot-leg right"><div class="ai-bot-foot"></div></div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="ai-bubble-stack">
-                        <div class="ai-bubble-card analysis-panel analysis-panel--guess">
-                            <span class="ai-timeline-node ai-timeline-node--analysis" aria-hidden="true"></span>
-                            <div class="analysis-panel__title">AI's Understanding of your code</div>
-                            <p id="analysis"><span class="spinner"></span> Waiting for code...</p>
-                        </div>
-                        <div class="ai-bubble-card suggestion-panel suggestion-panel--guess">
-                            <span class="ai-timeline-node ai-timeline-node--suggestion" aria-hidden="true"></span>
-                            <div class="suggestion-panel__header">Next Line Suggestion</div>
-                            <div class="suggestion-action red-theme">
-                                <div class="suggestion-signifier" id="signifierGuess">Click to insert in your code</div>
-                                <button class="suggestion-button red-theme" id="suggestionGuessBtn" onclick="insertSuggestion('guess')">
-                                    <span class="suggestion-content" id="suggestionGuess"><span class="spinner"></span> Start coding...</span>
-                                </button>
-                                <div class="suggestion-callout callout-red" id="calloutGuess">
-                                    <span class="callout-arrow"></span>
-                                </div>
-                            </div>
-                            <small class="local-entries-counter" style="color: #888; display: block; margin-top: 10px;">
-                                Local entries: <span id="guessLogCount">0</span>
-                            </small>
-                        </div>
-                    </div>
-                </div>
-                <div style="text-align: center; margin-top: 15px;">
-                    <div id="history-guess" class="history-button">View History <span class="history-count">(0)</span></div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Problem Description Section (Condition 1 only) -->
-        <div class="sidebar-section hidden" id="problemDescSection">
-            <div class="green-box">
-                <div class="sidebar-header">
-                    <h3>Original Problem Description</h3>
-                </div>
-                <div class="analysis-panel analysis-panel--desc">
-                    <div class="analysis-panel__title">Original Problem Description</div>
-                    <div id="problemDescriptionDisplay" style="line-height: 1.6;">Loading problem description...</div>
-                </div>
-                <div class="suggestion-panel suggestion-panel--desc">
-                    <div class="suggestion-panel__header">Next Line Suggestion</div>
-                    <div class="suggestion-action green-theme">
-                        <div class="suggestion-signifier" id="signifierDesc">Click to insert in your code</div>
-                        <button class="suggestion-button green-theme" id="suggestionDescBtn" onclick="insertSuggestion('desc')">
-                            <span class="suggestion-content" id="suggestionDesc">Based on correct problem...</span>
-                        </button>
-                        <div class="suggestion-callout callout-green" id="calloutDesc">
-                            <span class="callout-arrow"></span>
-                        </div>
-                    </div>
-                    <small class="local-entries-counter" style="color: #888; display: block; margin-top: 10px;">
-                        Local entries: <span id="descLogCount">0</span>
-                    </small>
-                </div>
-                <div style="text-align: center; margin-top: 15px;">
-                    <div id="history-desc" class="history-button">View History <span class="history-count">(0)</span></div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- AI Suggestions Only Section (Condition 3 only) -->
-        <div class="sidebar-section hidden" id="suggestionsOnlySection">
-            <div class="red-box">
-                <div class="ai-avatar-badge ai-avatar-badge--inline">
-                    <span class="ai-avatar-badge__title">CodeOracle</span>
-                    <span class="ai-avatar-badge__subtitle">Powered by ChatGPT</span>
-                </div>
-                <div class="ai-thinking-layout">
-                    <div class="ai-avatar-column" id="aiAvatarColumnSuggestions">
-                        <div class="ai-avatar-orb">
-                            <div class="ai-bot">
-                                <div class="ai-bot-head">
-                                    <div class="ai-bot-band"></div>
-                                    <div class="ai-bot-pad left"></div>
-                                    <div class="ai-bot-pad right"></div>
-                                    <div class="ai-bot-helmet"></div>
-                                    <div class="ai-bot-face">
-                                        <div class="ai-bot-gloss"></div>
-                                        <div class="ai-bot-eye left"></div>
-                                        <div class="ai-bot-eye right"></div>
-                                    </div>
-                                </div>
-                                <div class="ai-bot-body">
-                                    <div class="ai-bot-chest"></div>
-                                </div>
-                                <div class="ai-bot-arm left"><div class="ai-bot-hand"></div></div>
-                                <div class="ai-bot-arm right"><div class="ai-bot-hand"></div></div>
-                                <div class="ai-bot-leg left"><div class="ai-bot-foot"></div></div>
-                                <div class="ai-bot-leg right"><div class="ai-bot-foot"></div></div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="ai-bubble-stack">
-                        <div class="ai-bubble-card suggestion-panel suggestion-panel--violet">
-                            <span class="ai-timeline-node ai-timeline-node--suggestion" aria-hidden="true"></span>
-                            <div class="suggestion-panel__header">Next Line Suggestion</div>
-                            <div id="suggestionsHistoryDisplay" style="display: none;"></div>
-                            <div id="suggestionOnlyContainer">
-                                <div class="suggestion-action violet-theme">
-                                    <div class="suggestion-signifier" id="signifierOnly">Click to insert in your code</div>
-                                    <button class="suggestion-button violet-theme" id="suggestionOnlyBtn" onclick="insertSuggestion('suggestions')">
-                                        <span class="suggestion-content" id="suggestionOnly"><span class="spinner"></span> Start coding...</span>
-                                    </button>
-                                    <div class="suggestion-callout callout-violet" id="calloutOnly">
-                                        <span class="callout-arrow"></span>
-                                    </div>
-                                </div>
-                                <small style="color: #888; display: block; margin-top: 10px;">
-                                    AI suggestions: <span id="suggestionsLogCount">0</span>
-                                </small>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div style="text-align: center; margin-top: 15px;">
-                    <div id="history-suggestions" class="history-button">View History <span class="history-count">(0)</span></div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
     </div>
 
     <!-- Survey Modal -->
@@ -3014,8 +1858,7 @@ function saveProgress() {
                 currentSuggestion: document.getElementById('suggestionGuess') ? document.getElementById('suggestionGuess').innerHTML : ''
             },
             ui: {
-                fontSize: currentFontSize,
-                sidebarCollapsed: sidebarCollapsed
+                fontSize: currentFontSize
             },
             counters: {
                 guessLogCount: currentSession.guessLogCount || 0,
@@ -3124,10 +1967,6 @@ function applyRestoredProgress(progressData) {
         if (progressData.ui) {
             if (progressData.ui.fontSize && typeof updateFontSize === 'function') {
                 updateFontSize(progressData.ui.fontSize);
-            }
-            if (progressData.ui.sidebarCollapsed !== undefined && progressData.ui.sidebarCollapsed !== sidebarCollapsed) {
-                const toggleBtn = document.getElementById('sidebarToggle');
-                if (toggleBtn) toggleBtn.click();
             }
         }
         
@@ -3342,14 +2181,14 @@ let isSubmissionInProgress = false;
     const userDisplay = document.getElementById('userDisplay');
     const conditionIndicator = document.getElementById('conditionIndicator');
     const sessionIndicator = document.getElementById('sessionIndicator');
-    const problemDescriptionDisplay = document.getElementById('problemDescriptionDisplay');
-    const problemDescSection = document.getElementById('problemDescSection');
-    const guessLogCount = document.getElementById('guessLogCount');
-    const descLogCount = document.getElementById('descLogCount');
-    const analysis = document.getElementById('analysis');
-    const suggestionGuess = document.getElementById('suggestionGuess');
-    const suggestionDesc = document.getElementById('suggestionDesc');
-    const aiAvatarColumn = document.getElementById('aiAvatarColumn');
+    const problemDescriptionDisplay = null;
+    const problemDescSection = null;
+    const guessLogCount = null;
+    const descLogCount = null;
+    const analysis = null;
+    const suggestionGuess = null;
+    const suggestionDesc = null;
+    const aiAvatarColumn = null;
     const teaserOverlay = document.getElementById('teaserOverlay');
     const teaserNextButton = document.getElementById('teaserNextButton');
     const teaserStepIndicator = document.getElementById('teaserStepIndicator');
@@ -4071,32 +2910,14 @@ async function initializeFromURL() {
         const conditionIndicatorElement = document.getElementById('conditionIndicator');
         conditionIndicatorElement.parentNode.insertBefore(pasteIndicator, conditionIndicatorElement);
 
-        // Handle condition-specific UI
+        // Set condition class on body
         if (authData.condition === 1) {
-            problemDescSection.classList.remove('hidden');
-            document.getElementById('aiGuessSection').classList.remove('hidden');
-            document.getElementById('suggestionsOnlySection').classList.add('hidden');
-            if (authData.problemDescription) {
-                try {
-                    const parsedMarkdown = marked.parse(authData.problemDescription);
-                    problemDescriptionDisplay.innerHTML = parsedMarkdown;
-                } catch (e) {
-                    console.error('Markdown parsing error:', e);
-                    problemDescriptionDisplay.innerHTML = authData.problemDescription;
-                }
-            }
             document.body.classList.add('condition-1');
             document.body.classList.remove('condition-2', 'condition-3');
         } else if (authData.condition === 2) {
-            problemDescSection.classList.add('hidden');
-            document.getElementById('aiGuessSection').classList.remove('hidden');
-            document.getElementById('suggestionsOnlySection').classList.add('hidden');
             document.body.classList.add('condition-2');
             document.body.classList.remove('condition-1', 'condition-3');
         } else if (authData.condition === 3) {
-            problemDescSection.classList.add('hidden');
-            document.getElementById('aiGuessSection').classList.add('hidden');
-            document.getElementById('suggestionsOnlySection').classList.remove('hidden');
             document.body.classList.add('condition-3');
             document.body.classList.remove('condition-1', 'condition-2');
         }
@@ -4108,9 +2929,7 @@ async function initializeFromURL() {
         showMainApp();
         maybeShowTeaser();
         
-        // Initialize sidebar state based on prefix
         initializeSidebar();
-        updateSidebarMinWidth();
         
         // Check for saved progress
         setTimeout(() => {
@@ -4559,54 +3378,27 @@ logActivity('ai_analysis_complete', {
             nextLine: nextLineCode
         });
 
-        // Update log counts
         currentSession.guessLogCount++;
-        guessLogCount.textContent = currentSession.guessLogCount;
-        
-        // Update history button counter
-        const historyGuessButton = document.querySelector('#history-guess .history-count');
-        if (historyGuessButton) {
-            historyGuessButton.textContent = `(${currentSession.guessLogCount})`;
-        }
 
-        // For condition 1, also store correct description data
         if (currentSession.condition === 1) {
             currentSession.descHistory.push({
                 timestamp: new Date().toISOString(),
                 problemAnalysis: currentSession.problemDescription || problemDescription,
                 nextLine: correctNextLineCode
             });
-            
             currentSession.descLogCount++;
-            descLogCount.textContent = currentSession.descLogCount;
-            
-            // Update history button counter
-            const historyDescButton = document.querySelector('#history-desc .history-count');
-            if (historyDescButton) {
-                historyDescButton.textContent = `(${currentSession.descLogCount})`;
-            }
         }
 
-        // For condition 3, store suggestions data
         if (currentSession.condition === 3) {
             currentSession.suggestionsHistory.push({
                 timestamp: new Date().toISOString(),
                 nextLine: nextLineCode
             });
-            
             currentSession.suggestionsLogCount++;
-            document.getElementById('suggestionsLogCount').textContent = currentSession.suggestionsLogCount;
-            
-            // Update history button counter
-            const historySuggestionsButton = document.querySelector('#history-suggestions .history-count');
-            if (historySuggestionsButton) {
-                historySuggestionsButton.textContent = `(${currentSession.suggestionsLogCount})`;
-            }
         }
 
         // ANIMATE THE RESULTS with typing effect and box shaking
         await animateAnalysisResults(problemDescription, nextLineCode, correctNextLineCode);
-        updateSidebarMinWidth();
         incrementAnalysisCount();
 
         // Show the floating Copilot popup at cursor position (safe — never blocks analysis)
@@ -4624,13 +3416,7 @@ logActivity('ai_analysis_complete', {
 
     } catch (error) {
         console.error('Analysis error:', error);
-        analysis.innerHTML = `
-            <div style="color: #ff6b6b;">
-                <strong>Connection Issue:</strong> ${error.message}<br>
-                Local logging continues...
-            </div>
-        `;
-        addTerminalOutput('AI analysis failed - check connection', 'error');
+        addTerminalOutput('AI analysis failed - check connection: ' + error.message, 'error');
     } finally {
         // Always hide thinking animation and re-enable editor
         setTimeout(() => {
@@ -4642,529 +3428,23 @@ logActivity('ai_analysis_complete', {
 }
 
 
-// ADD these new functions:
-function showAIThinkingInBox(type) {
-    let targetElements = [];
-    let boxElement;
-    
-    if (type === 'guess') {
-        targetElements = [
-            document.getElementById('analysis'),
-            document.getElementById('suggestionGuess')
-        ];
-        boxElement = document.querySelector('.red-box');
-    } else if (type === 'desc') {
-        targetElements = [document.getElementById('suggestionDesc')];
-        boxElement = document.querySelector('.green-box');
-    } else if (type === 'suggestions') {
-        targetElements = [document.getElementById('suggestionOnly')];
-        boxElement = document.querySelector('#suggestionsOnlySection .red-box');
-    }
-    
-    targetElements.forEach(targetElement => {
-        if (targetElement && boxElement) {
-            // Store original height to maintain box size
-            const originalHeight = targetElement.offsetHeight;
-            
-            // Create mini AI thinking animation with fixed height
-            targetElement.innerHTML = `
-                <div class="mini-ai-thinking" style="min-height: ${Math.max(originalHeight, 60)}px; display: flex; flex-direction: column; justify-content: center;">
-                    <div class="mini-ai-loader"></div>
-                    <div class="mini-ai-text">AI is analyzing...</div>
-                </div>
-            `;
-        }
-    });
-    
-    if (boxElement) {
-        // Add glow effect to the box
-        boxElement.classList.add('ai-thinking-glow');
-    }
-}
-
-function hideAIThinkingInBox(type) {
-    let targetElements = [];
-    let boxElement;
-    
-    if (type === 'guess') {
-        targetElements = [
-            document.getElementById('analysis'),
-            document.getElementById('suggestionGuess')
-        ];
-        boxElement = document.querySelector('.red-box');
-    } else if (type === 'desc') {
-        targetElements = [document.getElementById('suggestionDesc')];
-        boxElement = document.querySelector('.green-box');
-    } else if (type === 'suggestions') {
-        targetElements = [document.getElementById('suggestionOnly')];
-        boxElement = document.querySelector('#suggestionsOnlySection .red-box');
-    }
-    
-    // Remove glow effect from the box
-    if (boxElement) {
-        boxElement.classList.remove('ai-thinking-glow');
-    }
-    
-    // Note: We don't restore content here since animateAnalysisResults will handle that
-}
-
-function showSuggestionSignifier(type) {
-    let signifierId, buttonId, suggestionElementId;
-    if (type === 'guess') {
-        signifierId = 'signifierGuess';
-        buttonId = 'suggestionGuessBtn';
-        suggestionElementId = 'suggestionGuess';
-    } else if (type === 'desc') {
-        signifierId = 'signifierDesc';
-        buttonId = 'suggestionDescBtn';
-        suggestionElementId = 'suggestionDesc';
-    } else if (type === 'suggestions') {
-        signifierId = 'signifierOnly';
-        buttonId = 'suggestionOnlyBtn';
-        suggestionElementId = 'suggestionOnly';
-    }
-
-    const signifier = signifierId ? document.getElementById(signifierId) : null;
-    const button = buttonId ? document.getElementById(buttonId) : null;
-    const suggestionElement = suggestionElementId ? document.getElementById(suggestionElementId) : null;
-
-    if (!signifier || !button || !suggestionElement) {
-        return;
-    }
-
-    const suggestionText = suggestionElement.textContent.trim();
-    const invalid = !suggestionText ||
-        suggestionText.includes('Start coding...') ||
-        suggestionText.includes('spinner') ||
-        suggestionText.includes('Waiting for code...') ||
-        suggestionText.includes('Based on correct problem...') ||
-        suggestionText.includes('No suggestions available');
-
-    if (invalid) {
-        return;
-    }
-
-    signifier.classList.remove('active');
-    button.classList.remove('new-suggestion');
-    void signifier.offsetWidth;
-
-    signifier.classList.add('active');
-    button.classList.add('new-suggestion');
-
-    setTimeout(() => {
-        signifier.classList.remove('active');
-        button.classList.remove('new-suggestion');
-    }, 3000);
-}
-
-function clearSuggestionSignifier(type) {
-    let signifierId, buttonId;
-    if (type === 'guess') {
-        signifierId = 'signifierGuess';
-        buttonId = 'suggestionGuessBtn';
-    } else if (type === 'desc') {
-        signifierId = 'signifierDesc';
-        buttonId = 'suggestionDescBtn';
-    } else if (type === 'suggestions') {
-        signifierId = 'signifierOnly';
-        buttonId = 'suggestionOnlyBtn';
-    }
-
-    const signifier = signifierId ? document.getElementById(signifierId) : null;
-    const button = buttonId ? document.getElementById(buttonId) : null;
-
-    if (signifier) {
-        signifier.classList.remove('active');
-    }
-    if (button) {
-        button.classList.remove('new-suggestion');
-    }
-}
-
-function typeTextAnimation(element, text, speed = 50) {
-    return new Promise((resolve) => {
-        element.textContent = '';
-        element.classList.add('typing-animation');
-        
-        let i = 0;
-        const typeInterval = setInterval(() => {
-            if (i < text.length) {
-                element.textContent += text.charAt(i);
-                i++;
-            } else {
-                clearInterval(typeInterval);
-                element.classList.remove('typing-animation');
-                resolve();
-            }
-        }, speed);
-    });
-}
-
-function shakeAndGlowBox(boxElement) {
-    /*
-    boxElement.classList.add('shake-attention', 'attention-glow');
-    
-    setTimeout(() => {
-        boxElement.classList.remove('shake-attention', 'attention-glow');
-    }, 3000);
-    */
-}
+// No-op stubs for removed sidebar functions
+function showAIThinkingInBox(type) {}
+function hideAIThinkingInBox(type) {}
+function showSuggestionSignifier(type) {}
+function clearSuggestionSignifier(type) {}
+function shakeAndGlowBox(boxElement) {}
 
 async function animateAnalysisResults(problemDescription, nextLineCode, correctNextLineCode = null) {
-    // Flash robot eyes when new AI output arrives
-    flashRobotEyes();
-    
-    // Add attention effects to boxes
-    const redBox = document.querySelector('#aiGuessSection .red-box');
-    const greenBox = document.querySelector('.green-box');
-    const suggestionsBox = document.querySelector('#suggestionsOnlySection .red-box');
-    
-if (currentSession.condition === 1) {
-    // Shake both red and green boxes simultaneously
-    shakeAndGlowBox(redBox);
-    shakeAndGlowBox(greenBox);
-    
-    // Show problem description instantly
-    if (currentSession.problemDescription) {
-        try {
-            const parsedMarkdown = marked.parse(currentSession.problemDescription);
-            document.getElementById('problemDescriptionDisplay').innerHTML = parsedMarkdown;
-        } catch (e) {
-            document.getElementById('problemDescriptionDisplay').innerHTML = currentSession.problemDescription;
-        }
-    }
-    
-    // Display all content instantly and simultaneously
-    analysis.textContent = problemDescription;
-    document.getElementById('suggestionGuess').textContent = nextLineCode;
-    if (correctNextLineCode) {
-        document.getElementById('suggestionDesc').textContent = correctNextLineCode;
-    }
-
-    setTimeout(() => {
-        showSuggestionSignifier('guess');
-        if (correctNextLineCode) {
-            showSuggestionSignifier('desc');
-        }
-    }, 300);
-    
-} else if (currentSession.condition === 2) {
-        // Shake red box
-        shakeAndGlowBox(redBox);
-        
-        // Display instantly
-        analysis.textContent = problemDescription;
-        document.getElementById('suggestionGuess').textContent = nextLineCode;
-        
-        setTimeout(() => {
-            showSuggestionSignifier('guess');
-        }, 300);
-        
-    } else if (currentSession.condition === 3) {
-        // Shake suggestions box
-        shakeAndGlowBox(suggestionsBox);
-        
-        // Display instantly
-        document.getElementById('suggestionOnly').textContent = nextLineCode;
-
-        setTimeout(() => {
-            showSuggestionSignifier('suggestions');
-        }, 300);
-    }
-    
-    // Add terminal notification
-    addTerminalOutput('AI analysis completed - new suggestions available in sidebar!', 'success');
-    }
-
-
-function showHistoryInline(type) {
-    if (aiDisabled) {
-        addTerminalOutput('⚠️ AI history is disabled for this assignment', 'warning');
-        return;
-    }
-    
-    const historyStartTime = Date.now();
-    
-    const isGuessHistory = type === 'guess';
-    const isDescHistory = type === 'desc';
-    const isSuggestionsHistory = type === 'suggestions';
-    
-    let history, targetElement, buttonElement, historyType, historyDisplayElement, contentContainer;
-    
-    if (isGuessHistory) {
-        history = currentSession.guessHistory;
-        targetElement = document.getElementById('analysis');
-        buttonElement = document.getElementById('history-guess');
-        historyType = 'ai_history';
-    } else if (isDescHistory) {
-        history = currentSession.descHistory;
-        targetElement = document.getElementById('problemDescriptionDisplay');
-        buttonElement = document.getElementById('history-desc');
-        historyType = 'correct_history';
-    } else if (isSuggestionsHistory) {
-        history = currentSession.suggestionsHistory;
-        targetElement = document.getElementById('suggestionOnly');
-        buttonElement = document.getElementById('history-suggestions');
-        historyType = 'suggestions_history';
-        historyDisplayElement = document.getElementById('suggestionsHistoryDisplay');
-        contentContainer = document.getElementById('suggestionOnlyContainer');
-    }
-        
-    const isShowingHistory = isSuggestionsHistory ? 
-        (historyDisplayElement && historyDisplayElement.style.display !== 'none') :
-        targetElement.getAttribute('data-showing-history') === 'true';
-    const action = isShowingHistory ? 'hide_history' : 'show_history';
-    logActivity('history_interaction', {
-        start_time: new Date(historyStartTime).toISOString(),
-        end_time: new Date().toISOString(),
-        duration: Date.now() - historyStartTime,
-        history_type: historyType,
-        action: action,
-        entries_available: history.length
-    });
-        
-    if (isShowingHistory) {
-        // Switch back to current analysis
-        if (isGuessHistory) {
-            const currentAnalysis = currentSession.guessHistory.length > 0 ? 
-                currentSession.guessHistory[currentSession.guessHistory.length - 1].problemAnalysis : 
-                'Waiting for code...';
-            targetElement.textContent = currentAnalysis;
-            targetElement.setAttribute('data-showing-history', 'false');
-        } else if (isDescHistory) {
-            if (currentSession.problemDescription) {
-                try {
-                    // FIXED: Added safety check for marked library
-                    if (typeof marked !== 'undefined' && marked.parse) {
-                        const parsedMarkdown = marked.parse(currentSession.problemDescription);
-                        targetElement.innerHTML = parsedMarkdown;
-                    } else {
-                        targetElement.innerHTML = currentSession.problemDescription;
-                    }
-                } catch (e) {
-                    console.error('Markdown parsing error:', e);
-                    targetElement.innerHTML = currentSession.problemDescription;
-                }
-            } else {
-                targetElement.innerHTML = 'Loading problem description...';
-            }
-            targetElement.setAttribute('data-showing-history', 'false');
-        } else if (isSuggestionsHistory) {
-            // Hide history display and show current suggestion
-            if (historyDisplayElement) {
-                historyDisplayElement.style.display = 'none';
-                historyDisplayElement.innerHTML = '';
-            }
-            if (contentContainer) {
-                contentContainer.style.display = 'block';
-            }
-            const lastSuggestion = currentSession.suggestionsHistory.length > 0 ? 
-                currentSession.suggestionsHistory[currentSession.suggestionsHistory.length - 1].nextLine : 
-                'Start coding...';
-            targetElement.textContent = lastSuggestion;
-        }
-        // Update button text with count
-        const count = history.length;
-        buttonElement.innerHTML = `View History <span class="history-count">(${count})</span>`;
-    } else {
-        // Show history
-        let historyHTML = '';
-
-        if (history.length === 0) {
-            const activityText = isSuggestionsHistory ? "Start coding to see AI suggestions!" : "Start coding to see AI analysis!";
-            historyHTML = `
-                <div style="text-align: center; color: #888; font-style: italic; padding: 20px;">
-                    No history entries yet. ${activityText}
-                </div>
-            `;
-        } else {
-            historyHTML = `<div style="max-height: 300px; overflow-y: auto; font-size: 12px;">`;
-            
-            const entriesToShow = history.length;
-            for (let i = history.length - 1; i >= 0; i--) {
-                const entry = history[i];
-                const timeStr = new Date(entry.timestamp).toLocaleTimeString();
-                
-                if (isSuggestionsHistory) {
-                    historyHTML += `
-                        <div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 8px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                                <span style="color: #8b5cf6; font-weight: bold;">Suggestion #${i + 1}</span>
-                                <span style="color: #d1d5db; font-size: 10px; font-weight: 500;">${timeStr}</span>
-                            </div>
-                            <div style="background: #374151; padding: 6px 8px; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 12px; color: #f9fafb; border: 1px solid #8b5cf6;">
-                                <strong style="color: #a855f7;">Code:</strong> ${entry.nextLine}
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    historyHTML += `
-                        <div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 8px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                                <span style="color: #569cd6; font-weight: bold;">Entry #${i + 1}</span>
-                                <span style="color: #888; font-size: 10px;">${timeStr}</span>
-                            </div>
-                            <div style="margin-bottom: 5px;">
-                                <strong style="color: #4ade80;">Analysis:</strong><br>
-                                <span style="color: #d4d4d4; line-height: 1.3;">${entry.problemAnalysis}</span>
-                            </div>
-                            <div style="background: #2d2d2d; padding: 4px 6px; border-radius: 3px; font-family: 'Consolas', monospace; font-size: 12px; color: #4ade80;">
-                                <strong>Suggestion:</strong> ${entry.nextLine}
-                            </div>
-                        </div>
-                    `;
-                }
-            }
-            
-            if (history.length > 0) {
-                historyHTML += `<div style="text-align: center; color: #888; font-size: 10px; font-style: italic;">Showing all ${history.length} entries</div>`;
-            }
-            
-            historyHTML += `</div>`;
-        }
-        
-        // Display history in appropriate container
-        if (isSuggestionsHistory) {
-            // For suggestions, use dedicated history display and hide current suggestion
-            if (historyDisplayElement) {
-                historyDisplayElement.innerHTML = historyHTML;
-                historyDisplayElement.style.display = 'block';
-            }
-            if (contentContainer) {
-                contentContainer.style.display = 'none';
-            }
-        } else {
-            // For other types, replace content in target element
-            targetElement.innerHTML = historyHTML;
-            targetElement.setAttribute('data-showing-history', 'true');
-        }
-        
-        // Update button text with count
-        const count = history.length;
-        buttonElement.innerHTML = `Hide History <span class="history-count">(${count})</span>`;
-    }
+    addTerminalOutput('AI analysis completed - suggestion available via popup', 'success');
 }
-function insertSuggestion(type) {
-    if (aiDisabled) {
-        addTerminalOutput('⚠️ AI suggestions are disabled for this assignment', 'warning');
-        return;
-    }
-    
-    if (!window.editor) {
-        addTerminalOutput('Editor not initialized', 'error');
-        return;
-    }
 
-    const suggestionStartTime = Date.now();
-    
-    // Determine suggestion source
-    let suggestionSource;
-    if (type === 'guess') {
-        suggestionSource = 'ai_guess';
-    } else if (type === 'desc') {
-        suggestionSource = 'correct_description';
-    } else if (type === 'suggestions') {
-        suggestionSource = 'ai_only';
-    }
-
-    currentSession.suggestionClickCount++;
-
-    let suggestionText = '';
-    if (type === 'guess') {
-        suggestionText = document.getElementById('suggestionGuess').textContent.trim();
-    } else if (type === 'desc') {
-        suggestionText = document.getElementById('suggestionDesc').textContent.trim();
-    } else if (type === 'suggestions') {
-        suggestionText = document.getElementById('suggestionOnly').textContent.trim();
-    }
-
-    const position = window.editor.getPosition();
-
-    if (!suggestionText || 
-        suggestionText.includes('Start coding...') || 
-        suggestionText.includes('Based on correct problem...') ||
-        suggestionText.includes('No suggestions available') ||
-        suggestionText.includes('spinner')) {
-        logActivity('suggestion_interaction', {
-            start_time: new Date(suggestionStartTime).toISOString(),
-            end_time: new Date().toISOString(),
-            duration: Date.now() - suggestionStartTime,
-            suggestion_type: type,
-            suggestion_source: suggestionSource,
-            suggestion_inserted: false,
-            rejection_reason: 'invalid_suggestion'
-        });
-        addTerminalOutput('No valid suggestion to insert', 'warning');
-        return;
-    }
-
-    const model = window.editor.getModel();
-    
-    const currentLineContent = model.getLineContent(position.lineNumber);
-    const currentIndentation = getCurrentIndentation(currentLineContent);
-    
-    const isAtEndOfLine = position.column > currentLineContent.length;
-    const needsNewLine = currentLineContent.trim() !== '' || !isAtEndOfLine;
-    
-    let textToInsert = needsNewLine ? '\n' + currentIndentation + suggestionText : suggestionText;
-    
-    if (!needsNewLine && position.column > 1 && !currentLineContent.endsWith(' ')) {
-        textToInsert = ' ' + textToInsert;
-    }
-
-    window.editor.executeEdits('copilot-suggestion', [{
-        range: {
-            startLineNumber: position.lineNumber,
-            startColumn: position.column,
-            endLineNumber: position.lineNumber,
-            endColumn: position.column
-        },
-        text: textToInsert
-    }]);
-
-    const insertedLines = textToInsert.split('\n');
-    const newLineNumber = position.lineNumber + insertedLines.length - 1;
-    const lastLine = insertedLines[insertedLines.length - 1];
-    const newColumn = insertedLines.length === 1 ? 
-        position.column + textToInsert.length : 
-        lastLine.length + 1;
-    
-    window.editor.setPosition({
-        lineNumber: newLineNumber,
-        column: newColumn
-    });
-    window.editor.focus();
-
-    clearSuggestionSignifier(type);
-
-    if (suggestionText.includes('{') || suggestionText.includes('}') || suggestionText.includes(';')) {
-        setTimeout(() => {
-            window.editor.getAction('editor.action.formatDocument')?.run();
-        }, 100);
-    }
-    logActivity('suggestion_interaction', {
-        start_time: new Date(suggestionStartTime).toISOString(),
-        end_time: new Date().toISOString(),
-        duration: Date.now() - suggestionStartTime,
-        suggestion_type: type,
-        suggestion_source: suggestionSource,
-        suggestion_inserted: true,
-        suggestion_content: suggestionText.substring(0, 50) + (suggestionText.length > 50 ? '...' : ''),
-        insertion_position: {line: position.lineNumber, column: position.column},
-        suggestion_length: suggestionText.length
-    });
-
-    const sourceType = type === 'guess' ? 'AI Problem Guess' : 
-                      type === 'desc' ? 'Problem Description' : 
-                      'AI Code Suggestions';
-    addTerminalOutput(`Inserted suggestion from ${sourceType}`, 'success');
-    const preview = suggestionText.split('\n')[0].substring(0, 40);
-    addTerminalOutput(`Code: ${preview}${suggestionText.length > 40 ? '...' : ''}`, 'info');
+function showHistoryInline(type) {}
+function insertSuggestion(type) {}
+function getCurrentIndentation(lineContent) {
+    const match = lineContent.match(/^(\s*)/);
+    return match ? match[1] : '';
 }
-    function getCurrentIndentation(lineContent) {
-        const match = lineContent.match(/^(\s*)/);
-        return match ? match[1] : '';
-    }
 
 // ═══════════════════════════════════════════════════════════
 //  Floating Copilot Popup — show suggestion at cursor coords
@@ -5429,38 +3709,8 @@ function _copilotDetachKeyboard() {
     _copilotKeyHandler = null;
 }
 
-// ADD this function after the hideAIThinkingInBox function:
-function showAIThinking() {
-    // Show AI thinking animation in sidebar boxes only
-    if (currentSession.condition === 1) {
-        showAIThinkingInBox('guess');
-        showAIThinkingInBox('desc');
-    } else if (currentSession.condition === 2) {
-        showAIThinkingInBox('guess');
-    } else if (currentSession.condition === 3) {
-        showAIThinkingInBox('suggestions');
-    }
-    
-    if (aiAvatarColumn) {
-        aiAvatarColumn.classList.add('is-thinking');
-    }
-    
-    // DON'T disable editor - let user continue typing
-}
-
-// ADD this function after the showAIThinking function:
-function hideAIThinking() {
-    // Hide AI thinking in sidebar boxes
-    hideAIThinkingInBox('guess');
-    hideAIThinkingInBox('desc'); 
-    hideAIThinkingInBox('suggestions');
-    
-    if (aiAvatarColumn) {
-        aiAvatarColumn.classList.remove('is-thinking');
-    }
-    
-    // DON'T re-enable editor since we never disabled it
-}
+function showAIThinking() {}
+function hideAIThinking() {}
 
 // Survey Functions
 function loadSurveyConfig() {
@@ -5773,7 +4023,6 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
                 </div>
             `;
         });
-    updateSidebarMinWidth();
 }
 
     // CONDITION 3: Show only AI code suggestions (no problem analysis)
@@ -5824,9 +4073,6 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
     return historyHTML;
 }
 
-function updateSidebarMinWidth() {
-    // No-op placeholder to maintain backward compatibility
-}
 
 
 function setupSurveyEventListeners(modalId, submitButtonId, submitFunction) {
@@ -6864,24 +5110,6 @@ async function proceedWithActualSubmission() {
    submitButton.addEventListener('click', submitToDatabase);
    logoutBtn.addEventListener('click', endSession);
 
-// History functionality
-document.getElementById("history-guess").onclick = () => {
-   showHistoryInline('guess');
-}
-
-const historyDescButton = document.getElementById("history-desc");
-if (historyDescButton) {
-   historyDescButton.onclick = () => {
-       showHistoryInline('desc');
-   }
-}
-
-const historySuggestionsButton = document.getElementById("history-suggestions");
-if (historySuggestionsButton) {
-   historySuggestionsButton.onclick = () => {
-       showHistoryInline('suggestions');
-   }
-}
 
    // Keyboard shortcuts
    document.addEventListener('keydown', (e) => {
@@ -6906,10 +5134,8 @@ if (historySuggestionsButton) {
 
    // Resize handling
    const resize = {};
-   resize.sidebar = false;
    resize.terminal = false;
    
-   const sidebarHandle = document.getElementById('resize-sidebar');
    const terminalHandle = document.getElementById('resize-terminal');
    
    // Problem panel resize
@@ -6955,14 +5181,6 @@ if (historySuggestionsButton) {
        if (window.editor) window.editor.layout();
    }
 
-   sidebarHandle.addEventListener('mousedown', (e) => {
-       e.preventDefault();
-       resize.sidebar = true;
-       document.body.style.cursor = 'ew-resize';
-       document.addEventListener('mousemove', handleSidebarResize);
-       document.addEventListener('mouseup', handleMouseUp);
-   });
-
    terminalHandle.addEventListener('mousedown', (e) => {
        e.preventDefault();
        resize.terminal = true;
@@ -6970,22 +5188,6 @@ if (historySuggestionsButton) {
        document.addEventListener('mousemove', handleTerminalResize);
        document.addEventListener('mouseup', handleMouseUp);
    });
-
-   function handleSidebarResize(e) {
-       if (!resize.sidebar) return;
-       e.preventDefault();
-       const sidebar = document.getElementById('sidebar');
-       const minSidebarWidth = window.innerWidth * 0.25;
-       const maxSidebarWidth = window.innerWidth * 0.5;
-       const desiredWidth = window.innerWidth - e.clientX;
-       const newWidth = Math.max(minSidebarWidth, Math.min(maxSidebarWidth, desiredWidth));
-       sidebar.style.width = `${newWidth}px`;
-       sidebar.style.minWidth = `${newWidth}px`;
-
-       requestAnimationFrame(() => {
-           updateToggleButtonPosition();
-       });
-   }
 
    function handleTerminalResize(e) {
        if (!resize.terminal) return;
@@ -7000,30 +5202,16 @@ if (historySuggestionsButton) {
 
    function handleMouseUp() {
        document.body.style.cursor = '';
-       resize.sidebar = false;
        resize.terminal = false;
        resize.problem = false;
        document.removeEventListener('mouseup', handleMouseUp);
-       document.removeEventListener('mousemove', handleSidebarResize);
        document.removeEventListener('mousemove', handleTerminalResize);
        document.removeEventListener('mousemove', handleProblemResize);
        document.removeEventListener('touchend', handleMouseUp);
-       document.removeEventListener('touchmove', handleSidebarResizeTouch);
        document.removeEventListener('touchmove', handleTerminalResizeTouch);
        document.removeEventListener('touchmove', handleProblemResizeTouch);
-
-       if (!resize.sidebar && !resize.terminal) {
-           updateToggleButtonPosition();
-       }
        if (window.editor) window.editor.layout();
    }
-
-   sidebarHandle.addEventListener('touchstart', (e) => {
-       e.preventDefault();
-       resize.sidebar = true;
-       document.addEventListener('touchmove', handleSidebarResizeTouch, { passive: false });
-       document.addEventListener('touchend', handleMouseUp);
-   }, { passive: false });
 
    terminalHandle.addEventListener('touchstart', (e) => {
        e.preventDefault();
@@ -7031,23 +5219,6 @@ if (historySuggestionsButton) {
        document.addEventListener('touchmove', handleTerminalResizeTouch, { passive: false });
        document.addEventListener('touchend', handleMouseUp);
    }, { passive: false });
-
-   function handleSidebarResizeTouch(e) {
-       if (!resize.sidebar) return;
-       e.preventDefault();
-       const touch = e.touches[0];
-       const sidebar = document.getElementById('sidebar');
-       const minSidebarWidth = window.innerWidth * 0.25;
-       const maxSidebarWidth = window.innerWidth * 0.5;
-       const desiredWidth = window.innerWidth - touch.clientX;
-       const newWidth = Math.max(minSidebarWidth, Math.min(maxSidebarWidth, desiredWidth));
-       sidebar.style.width = `${newWidth}px`;
-       sidebar.style.minWidth = `${newWidth}px`;
-
-       requestAnimationFrame(() => {
-           updateToggleButtonPosition();
-       });
-   }
 
    function handleTerminalResizeTouch(e) {
        if (!resize.terminal) return;
@@ -7081,9 +5252,6 @@ window.addEventListener('resize', () => {
             window.editor.layout();
         }
         
-        // Update sidebar toggle button position after window resize
-        updateToggleButtonPosition();
-        updateSidebarMinWidth();
     }, 250);
 });
 
@@ -7132,11 +5300,6 @@ async function safeInitialize() {
     try {
         await initializeFromURL();
         
-        // Initialize sidebar AFTER session data is loaded
-        setTimeout(() => {
-            setupSidebarToggle();  // Setup the toggle button
-            // initializeSidebar() is already called in initializeFromURL()
-        }, 500);
         
         isInitialized = true;
     } catch (error) {
@@ -7151,14 +5314,7 @@ async function safeInitialize() {
 document.addEventListener('DOMContentLoaded', function() {
     safeInitialize();
 
-    // Bind floating Copilot popup buttons (safe — no-ops if elements missing)
     _copilotBindButtons();
-
-    // Permanently hide sidebar and its resize handle — the popup replaces it
-    var _sb = document.getElementById('sidebar');
-    var _rh = document.getElementById('resize-sidebar');
-    if (_sb) _sb.classList.add('copilot-sidebar-hidden');
-    if (_rh) _rh.classList.add('copilot-sidebar-hidden');
 
     // Setup modal protection
     const surveyModal = document.getElementById('surveyModal');
@@ -7216,205 +5372,27 @@ document.addEventListener('visibilitychange', function() {
 });
 
 
-// Sidebar toggle functionality
-let sidebarCollapsed = false;
-let aiDisabled = false;  // Flag to completely disable AI functionality
-let previousSidebarWidth = null;
+let aiDisabled = false;
 
-// Function to calculate and update toggle button position
-function updateToggleButtonPosition() {
-    const sidebar = document.getElementById('sidebar');
-    const toggleButton = document.getElementById('sidebarToggle');
-    
-    if (!sidebar || !toggleButton) return;
-    
-    if (sidebarCollapsed) {
-        toggleButton.style.right = '0px';
-    } else {
-        // Ensure sidebar width is within bounds when restoring
-        const currentWidth = sidebar.offsetWidth;
-        const minWidth = window.innerWidth * 0.25;
-        const maxWidth = window.innerWidth * 0.5;
-        const defaultWidth = window.innerWidth * 0.35;
-        
-        // If width is out of bounds, reset to default
-        if (currentWidth < minWidth || currentWidth > maxWidth) {
-            sidebar.style.width = `${defaultWidth}px`;
-            toggleButton.style.right = `${defaultWidth}px`;
-        } else {
-            toggleButton.style.right = `${currentWidth}px`;
-        }
-    }
-}
-
-// Check if sidebar should be hidden on load based on prefix
-function shouldHideSidebar() {
+function initializeAIDisabledState() {
     const templateValue = "{{ side_panel_hidden }}";
-    
-    // ✅ CHECK: Did template render?
     if (templateValue.includes('{{') || templateValue.includes('}}')) {
-        console.error('❌ TEMPLATE NOT RENDERED!');
-        console.error('   Template value:', templateValue);
-        console.error('   You must access this page through the web server:');
-        console.error('   http://localhost:8000/index.html (NOT file:///...)');
-        addTerminalOutput('⚠️ Configuration error: Sidebar control not loaded. Using default settings.', 'warning');
-        return false; // Don't hide sidebar if config broken
+        return;
     }
-    
     const hiddenAssignmentKeys = templateValue.toLowerCase().split(',').map(k => k.trim()).filter(k => k.length > 0);
     const currentAssignmentKey = currentSession.assignmentKey ? currentSession.assignmentKey.toLowerCase().trim() : '';
-    
-    console.log('🔍 Sidebar visibility check:', {
-        templateValue: templateValue,
-        hiddenAssignmentKeys: hiddenAssignmentKeys,
-        currentAssignmentKey: currentAssignmentKey,
-        userId: currentSession.userId,
-        shouldHide: hiddenAssignmentKeys.includes(currentAssignmentKey)
-    });
-    
-    return hiddenAssignmentKeys.includes(currentAssignmentKey);
+    if (hiddenAssignmentKeys.includes(currentAssignmentKey)) {
+        aiDisabled = true;
+        addTerminalOutput('AI Assistant completely disabled (warmup mode)', 'warning');
+        addTerminalOutput('   No AI analysis or suggestions will be generated', 'info');
+    }
 }
 
-// Initialize sidebar state
-function initializeSidebar() {
-    // Query DOM elements inside the function when it's called
-    const sidebar = document.getElementById('sidebar');
-    const toggleIcon = document.getElementById('toggleIcon');
-    const sidebarToggle = document.getElementById('sidebarToggle');
-    
-    if (!sidebar || !toggleIcon || !sidebarToggle) {
-        console.error('❌ Sidebar elements not found in DOM');
-        return;
-    }
-    
-    const shouldHide = shouldHideSidebar();
-    if (shouldHide) {
-        sidebarCollapsed = true;
-        aiDisabled = true;  // Completely disable AI functionality
-        sidebar.classList.add('collapsed');
-        toggleIcon.textContent = '▶';
-        addTerminalOutput(`⚠️ AI Assistant completely disabled (warmup mode)`, 'warning');
-        addTerminalOutput(`   No AI analysis or suggestions will be generated`, 'info');
-        
-        // Disable suggestion buttons
-        const suggestionButtons = document.querySelectorAll('.suggestion-button');
-        suggestionButtons.forEach(btn => {
-            btn.disabled = true;
-            btn.style.opacity = '0.5';
-            btn.style.cursor = 'not-allowed';
-        });
-        
-        // Disable history buttons
-        const historyButtons = document.querySelectorAll('.history-button');
-        historyButtons.forEach(btn => {
-            btn.style.display = 'none';
-        });
-        
-        // Update analysis text
-        const analysisEl = document.getElementById('analysis');
-        if (analysisEl) {
-            analysisEl.innerHTML = '<span style="color: #888; font-style: italic;">AI analysis disabled for this assignment</span>';
-        }
-        
-        // Update suggestion texts
-        const suggestionGuess = document.getElementById('suggestionGuess');
-        const suggestionDesc = document.getElementById('suggestionDesc');
-        const suggestionOnly = document.getElementById('suggestionOnly');
-        
-        if (suggestionGuess) {
-            suggestionGuess.innerHTML = '<span style="color: #888; font-style: italic;">Suggestions disabled</span>';
-        }
-        if (suggestionDesc) {
-            suggestionDesc.innerHTML = '<span style="color: #888; font-style: italic;">Suggestions disabled</span>';
-        }
-        if (suggestionOnly) {
-            suggestionOnly.innerHTML = '<span style="color: #888; font-style: italic;">Suggestions disabled</span>';
-        }
-    } else {
-        sidebarCollapsed = false;
-        aiDisabled = false;
-        sidebar.classList.remove('collapsed');
-        toggleIcon.textContent = '◀';
-    }
-    
-    // Set initial button position
-    updateToggleButtonPosition();
-}
-
-// Flash robot eyes when new AI output arrives
-function flashRobotEyes() {
-    const eyes = document.querySelectorAll('.ai-bot-eye');
-    if (!eyes || eyes.length === 0) return;
-    
-    // Add flash class
-    eyes.forEach(eye => eye.classList.add('flash'));
-    
-    // Remove flash after 3 seconds
-    setTimeout(() => {
-        eyes.forEach(eye => eye.classList.remove('flash'));
-    }, 3000);
-}
-
-// Setup toggle event listener
-function setupSidebarToggle() {
-    const sidebarToggle = document.getElementById('sidebarToggle');
-    const sidebar = document.getElementById('sidebar');
-    const toggleIcon = document.getElementById('toggleIcon');
-    
-    if (!sidebarToggle || !sidebar || !toggleIcon) {
-        console.error('Cannot setup sidebar toggle - elements not found');
-        return;
-    }
-    
-    sidebarToggle.addEventListener('click', () => {
-        // Prevent toggling if AI is disabled
-        if (aiDisabled) {
-            addTerminalOutput('⚠️ AI Assistant is disabled for this assignment', 'warning');
-            return;
-        }
-        
-        sidebarCollapsed = !sidebarCollapsed;
-        sidebar.classList.toggle('collapsed');
-        toggleIcon.textContent = sidebarCollapsed ? '▶' : '◀';
-        const resizeDivider = document.getElementById('resize-sidebar');
-        if (resizeDivider) {
-            resizeDivider.style.display = sidebarCollapsed ? 'none' : 'block';
-        }
-        
-        if (sidebarCollapsed) {
-            previousSidebarWidth = sidebar.style.width || `${sidebar.offsetWidth}px`;
-            sidebar.style.width = '0px';
-        } else {
-            const restoreWidth = previousSidebarWidth || sidebar.style.minWidth || '360px';
-            sidebar.style.width = restoreWidth;
-        }
-        
-        updateToggleButtonPosition();
-        
-        // Log the toggle action
-        logActivity('sidebar_toggle', {
-            action: sidebarCollapsed ? 'collapsed' : 'expanded',
-            sidebar_width: sidebar.offsetWidth
-        });
-    });
-    
-    // Update button position on window resize
-    let toggleResizeTimeout;
-    window.addEventListener('resize', () => {
-        clearTimeout(toggleResizeTimeout);
-        toggleResizeTimeout = setTimeout(() => {
-            updateToggleButtonPosition();
-        }, 100);
-    });
-    
-    // Use ResizeObserver to continuously track sidebar width changes
-    if (typeof ResizeObserver !== 'undefined') {
-        const resizeObserver = new ResizeObserver(() => {
-            updateToggleButtonPosition();
-        });
-        resizeObserver.observe(sidebar);
-    }
-}
+function flashRobotEyes() {}
+function initializeSidebar() { initializeAIDisabledState(); }
+function setupSidebarToggle() {}
+function updateSidebarMinWidth() {}
+function updateToggleButtonPosition() {}
 
 // Make restore functions globally accessible
 window.handleRestoreProgress = handleRestoreProgress;
