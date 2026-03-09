@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{% if edit_mode %}Edit{% else %}Create{% endif %} Quiz</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0d1117; --panel: #161b22; --panel-2: #1c2333; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --dim: #484f58;
+      --primary: #58a6ff; --primary-bg: rgba(88,166,255,0.1);
+      --success: #238636; --success-light: #3fb950;
+      --danger: #da3633; --danger-light: #f85149;
+      --warning: #d29922; --warning-bg: rgba(210,153,34,0.1);
+      --input-bg: #0d1117; --radius: 10px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--bg); color: var(--text);
+      min-height: 100vh; line-height: 1.5;
+    }
+
+    /* ── Navbar ── */
+    .navbar {
+      background: rgba(22,27,34,0.95); backdrop-filter: blur(10px);
+      padding: 14px 32px; border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+      position: sticky; top: 0; z-index: 100;
+    }
+    .navbar h1 { font-size: 1.2rem; font-weight: 600; }
+    .nav-link {
+      color: var(--muted); text-decoration: none; font-size: 14px;
+      font-weight: 500; transition: color 0.2s;
+    }
+    .nav-link:hover { color: var(--text); }
+
+    /* ── Progress Steps ── */
+    .steps-bar {
+      background: var(--panel); border-bottom: 1px solid var(--border);
+      padding: 16px 32px; display: flex; justify-content: center; gap: 4px;
+      position: sticky; top: 53px; z-index: 99;
+    }
+    .step-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 16px; border-radius: 8px;
+      font-size: 13px; font-weight: 500; color: var(--dim);
+      cursor: pointer; transition: all 0.2s; white-space: nowrap;
+    }
+    .step-item:hover { color: var(--muted); background: rgba(255,255,255,0.03); }
+    .step-item.active { color: var(--primary); background: var(--primary-bg); }
+    .step-item.completed { color: var(--success-light); }
+    .step-num {
+      width: 26px; height: 26px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700;
+      border: 2px solid var(--dim); transition: all 0.2s;
+    }
+    .step-item.active .step-num { border-color: var(--primary); background: var(--primary); color: #fff; }
+    .step-item.completed .step-num { border-color: var(--success); background: var(--success); color: #fff; }
+    .step-divider { color: var(--dim); font-size: 18px; align-self: center; padding: 0 2px; }
+
+    /* ── Container ── */
+    .container { max-width: 860px; margin: 0 auto; padding: 28px 24px 100px; }
+
+    /* ── Step panels ── */
+    .step-panel { display: none; animation: fadeUp 0.3s ease; }
+    .step-panel.active { display: block; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* ── Cards / Sections ── */
+    .card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px; padding: 24px; margin-bottom: 20px;
+    }
+    .card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 4px; }
+    .card .subtitle { font-size: 13px; color: var(--muted); margin-bottom: 18px; }
+
+    /* ── Form inputs ── */
+    .fg { margin-bottom: 18px; }
+    .fg label { display: block; margin-bottom: 6px; font-size: 13px; color: #c9d1d9; font-weight: 500; }
+    .fg .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    input[type="text"], input[type="number"], input[type="datetime-local"],
+    textarea, select {
+      width: 100%; padding: 11px 14px; font-size: 14px;
+      background: var(--input-bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      font-family: 'Inter', sans-serif; transition: border-color 0.2s;
+    }
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--primary); outline: none;
+      box-shadow: 0 0 0 3px rgba(88,166,255,0.12);
+    }
+    textarea { resize: vertical; min-height: 80px; }
+    textarea.code-area { font-family: 'Fira Code', monospace; font-size: 13px; min-height: 160px; tab-size: 4; }
+
+    /* ── Checkbox / radio groups ── */
+    .chip-group { display: flex; flex-wrap: wrap; gap: 10px; }
+    .chip {
+      display: flex; align-items: center; gap: 6px;
+      padding: 9px 16px; border-radius: 8px; cursor: pointer;
+      font-size: 14px; color: var(--muted);
+      background: var(--input-bg); border: 1px solid var(--border);
+      transition: all 0.2s; user-select: none;
+    }
+    .chip:hover { border-color: var(--muted); }
+    .chip input { display: none; }
+    .chip.selected { border-color: var(--primary); color: var(--primary); background: var(--primary-bg); }
+
+    /* ── Condition cards ── */
+    .cond-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    @media (max-width: 720px) { .cond-grid { grid-template-columns: 1fr; } }
+    .cond-card {
+      background: var(--input-bg); border: 2px solid var(--border);
+      border-radius: 12px; padding: 20px; cursor: pointer;
+      transition: all 0.25s; text-align: center;
+    }
+    .cond-card:hover { border-color: var(--muted); transform: translateY(-2px); }
+    .cond-card.selected { border-color: var(--primary); background: var(--primary-bg); box-shadow: 0 0 0 1px var(--primary); }
+    .cond-card .cond-num {
+      width: 40px; height: 40px; border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 18px; font-weight: 700; margin-bottom: 10px;
+      background: var(--border); color: var(--text); transition: all 0.2s;
+    }
+    .cond-card.selected .cond-num { background: var(--primary); color: #fff; }
+    .cond-card h3 { font-size: 15px; margin-bottom: 6px; }
+    .cond-card p { font-size: 12px; color: var(--muted); line-height: 1.5; }
+
+    /* ── Starter code tabs ── */
+    .code-tabs { display: flex; gap: 0; margin-bottom: -1px; position: relative; z-index: 1; }
+    .code-tab {
+      padding: 10px 20px; font-size: 13px; font-weight: 600;
+      background: transparent; color: var(--muted); border: 1px solid transparent;
+      border-bottom: none; border-radius: 8px 8px 0 0;
+      cursor: pointer; transition: all 0.2s; font-family: 'Inter', sans-serif;
+    }
+    .code-tab:hover { color: var(--text); }
+    .code-tab.active { background: var(--input-bg); color: var(--primary); border-color: var(--border); }
+    .code-editor-box {
+      border: 1px solid var(--border); border-radius: 0 8px 8px 8px;
+      overflow: hidden;
+    }
+    .code-editor-box textarea { border: none; border-radius: 0; }
+
+    /* ── Test cases ── */
+    .tc-row { display: flex; gap: 10px; margin-bottom: 10px; align-items: flex-start; }
+    .tc-row textarea { flex: 1; min-height: 50px; }
+    .remove-btn {
+      background: none; border: none; color: var(--danger-light);
+      cursor: pointer; font-size: 20px; padding: 6px; line-height: 1;
+      opacity: 0.6; transition: opacity 0.2s;
+    }
+    .remove-btn:hover { opacity: 1; }
+
+    /* ── Survey questions ── */
+    .sq-card {
+      background: var(--input-bg); border: 1px solid var(--border);
+      border-radius: 10px; padding: 16px; margin-bottom: 12px;
+    }
+    .sq-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .sq-top .sq-badge { font-size: 11px; color: var(--primary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .sq-fields { display: flex; flex-direction: column; gap: 10px; }
+    .sq-row-inline { display: flex; gap: 10px; }
+    .sq-row-inline select { width: 160px; flex-shrink: 0; }
+    .sq-row-inline input { flex: 1; }
+    .sq-options { margin-top: 8px; padding-left: 12px; }
+    .sq-option-row { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; }
+    .sq-option-row input { flex: 1; }
+
+    .add-btn {
+      background: none; border: 1px dashed var(--border);
+      color: var(--muted); padding: 11px; width: 100%;
+      border-radius: 8px; cursor: pointer; font-size: 13px;
+      font-family: 'Inter', sans-serif; transition: all 0.2s;
+    }
+    .add-btn:hover { border-color: var(--primary); color: var(--primary); }
+
+    /* ── Survey tab bar ── */
+    .survey-tabs { display: flex; gap: 0; margin-bottom: 18px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+    .survey-tab {
+      flex: 1; padding: 10px; font-size: 13px; font-weight: 600;
+      background: var(--input-bg); color: var(--muted);
+      border: none; cursor: pointer; text-align: center;
+      font-family: 'Inter', sans-serif; transition: all 0.2s;
+    }
+    .survey-tab:not(:last-child) { border-right: 1px solid var(--border); }
+    .survey-tab.active { background: var(--primary-bg); color: var(--primary); }
+    .survey-panel { display: none; }
+    .survey-panel.active { display: block; }
+
+    /* ── Footer actions ── */
+    .footer-actions {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: rgba(22,27,34,0.95); backdrop-filter: blur(10px);
+      border-top: 1px solid var(--border);
+      padding: 14px 32px; display: flex; justify-content: space-between;
+      z-index: 100;
+    }
+    .footer-actions .footer-inner { max-width: 860px; margin: 0 auto; width: 100%; display: flex; justify-content: space-between; }
+    .btn {
+      padding: 11px 24px; border-radius: 8px; border: none;
+      cursor: pointer; font-size: 14px; font-weight: 600;
+      font-family: 'Inter', sans-serif; transition: all 0.2s;
+    }
+    .btn-secondary { background: var(--panel); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { border-color: var(--muted); }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--success), #2ea043);
+      color: white; box-shadow: 0 4px 12px rgba(35,134,54,0.3);
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(35,134,54,0.4); }
+    .btn-primary:disabled { background: var(--dim); box-shadow: none; transform: none; cursor: not-allowed; }
+    .btn-group { display: flex; gap: 10px; }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed; bottom: 80px; right: 24px;
+      padding: 12px 20px; border-radius: 8px;
+      font-size: 14px; font-weight: 500; color: white;
+      transform: translateY(80px); opacity: 0;
+      transition: all 0.3s ease; z-index: 999;
+    }
+    .toast.success { background: var(--success); }
+    .toast.error { background: var(--danger); }
+    .toast.show { transform: translateY(0); opacity: 1; }
+
+    /* ── Review list ── */
+    .review-grid { display: grid; grid-template-columns: 160px 1fr; gap: 8px 16px; font-size: 14px; }
+    .review-grid dt { color: var(--muted); font-weight: 500; }
+    .review-grid dd { color: var(--text); word-break: break-word; }
+  </style>
+</head>
+<body>
+
+<div class="navbar">
+  <h1>{% if edit_mode %}Edit{% else %}Create{% endif %} Quiz</h1>
+  <a href="/instructor/dashboard" class="nav-link">Back to Dashboard</a>
+</div>
+
+<div class="steps-bar" id="stepsBar">
+  <div class="step-item active" data-step="0" onclick="goToStep(0)">
+    <span class="step-num">1</span> <span>Info</span>
+  </div>
+  <span class="step-divider">/</span>
+  <div class="step-item" data-step="1" onclick="goToStep(1)">
+    <span class="step-num">2</span> <span>Condition</span>
+  </div>
+  <span class="step-divider">/</span>
+  <div class="step-item" data-step="2" onclick="goToStep(2)">
+    <span class="step-num">3</span> <span>Code &amp; Tests</span>
+  </div>
+  <span class="step-divider">/</span>
+  <div class="step-item" data-step="3" onclick="goToStep(3)">
+    <span class="step-num">4</span> <span>Surveys</span>
+  </div>
+  <span class="step-divider">/</span>
+  <div class="step-item" data-step="4" onclick="goToStep(4)">
+    <span class="step-num">5</span> <span>Review</span>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- ═══════════════════ STEP 1: Info & Settings ═══════════════════ -->
+<div class="step-panel active" data-step="0">
+
+  <div class="card">
+    <h2>Quiz Information</h2>
+    <p class="subtitle">Basic details about this quiz.</p>
+
+    <div class="fg">
+      <label for="title">Title *</label>
+      <input type="text" id="title" placeholder="e.g., Pattern Drawing" value="{{ quiz.title if quiz else '' }}">
+    </div>
+    <div class="fg">
+      <label for="description">Description</label>
+      <textarea id="description" rows="2" placeholder="Brief description for students...">{{ quiz.description if quiz else '' }}</textarea>
+    </div>
+    <div class="fg">
+      <label for="problem_statement">Problem Statement *</label>
+      <textarea id="problem_statement" rows="6" placeholder="Describe the problem students need to solve...">{{ quiz.problem_statement if quiz else '' }}</textarea>
+    </div>
+    <div class="fg">
+      <label for="constraints">Constraints</label>
+      <textarea id="constraints" rows="3" placeholder="Time complexity, space limits, etc.">{{ quiz.constraints if quiz else '' }}</textarea>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Settings</h2>
+
+    <div class="fg">
+      <label>Allowed Languages</label>
+      <div class="chip-group" id="langChips">
+        {% set langs = quiz.allowed_languages if quiz and quiz.allowed_languages else ['python', 'javascript', 'c'] %}
+        <label class="chip {% if 'python' in langs %}selected{% endif %}" onclick="toggleChip(this)">
+          <input type="checkbox" value="python" {% if 'python' in langs %}checked{% endif %}> Python
+        </label>
+        <label class="chip {% if 'javascript' in langs %}selected{% endif %}" onclick="toggleChip(this)">
+          <input type="checkbox" value="javascript" {% if 'javascript' in langs %}checked{% endif %}> JavaScript
+        </label>
+        <label class="chip {% if 'c' in langs %}selected{% endif %}" onclick="toggleChip(this)">
+          <input type="checkbox" value="c" {% if 'c' in langs %}checked{% endif %}> C
+        </label>
+      </div>
+    </div>
+
+    <div class="fg">
+      <label for="time_limit">Time Limit (minutes)</label>
+      <input type="number" id="time_limit" min="0" placeholder="0 = unlimited" value="{{ quiz.time_limit_minutes if quiz else 0 }}">
+      <p class="hint">Set to 0 for no time limit.</p>
+    </div>
+
+    <div class="fg" style="display:flex;gap:16px;">
+      <div style="flex:1;">
+        <label for="avail_start">Available From</label>
+        <input type="datetime-local" id="avail_start" value="{{ quiz.availability_start if quiz and quiz.availability_start else '' }}">
+      </div>
+      <div style="flex:1;">
+        <label for="avail_end">Available Until</label>
+        <input type="datetime-local" id="avail_end" value="{{ quiz.availability_end if quiz and quiz.availability_end else '' }}">
+      </div>
+    </div>
+
+    <div class="fg">
+      <label class="chip {% if quiz and quiz.published %}selected{% endif %}" onclick="toggleChip(this)" style="display:inline-flex;">
+        <input type="checkbox" id="published" {% if quiz and quiz.published %}checked{% endif %}> Publish immediately
+      </label>
+      <p class="hint">Published quizzes are accessible to students via share link.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ STEP 2: Condition Selection ═══════════════════ -->
+<div class="step-panel" data-step="1">
+  <div class="card">
+    <h2>Select Condition</h2>
+    <p class="subtitle">Choose exactly one condition. This determines what AI affordances students see in the coding environment.</p>
+
+    {% set current_cond = quiz.condition if quiz and quiz.condition else 1 %}
+    <div class="cond-grid">
+      <div class="cond-card {% if current_cond == 1 %}selected{% endif %}" onclick="selectCondition(1, this)">
+        <div class="cond-num">1</div>
+        <h3>Full View</h3>
+        <p>Students see <strong>AI's problem guess</strong>, <strong>next-line suggestion</strong>, and the <strong>correct problem description</strong>. Allows direct comparison between AI guess and actual problem.</p>
+      </div>
+      <div class="cond-card {% if current_cond == 2 %}selected{% endif %}" onclick="selectCondition(2, this)">
+        <div class="cond-num">2</div>
+        <h3>AI Guess Only</h3>
+        <p>Students see the <strong>AI's problem guess</strong> and <strong>next-line suggestion</strong>. No correct problem description shown for comparison.</p>
+      </div>
+      <div class="cond-card {% if current_cond == 3 %}selected{% endif %}" onclick="selectCondition(3, this)">
+        <div class="cond-num">3</div>
+        <h3>Suggestions Only</h3>
+        <p>Students see only <strong>next-line code suggestions</strong>. No AI problem guess or correct description shown.</p>
+      </div>
+    </div>
+
+    <input type="hidden" id="selectedCondition" value="{{ current_cond }}">
+  </div>
+</div>
+
+<!-- ═══════════════════ STEP 3: Starter Code & Test Cases ═══════════════════ -->
+<div class="step-panel" data-step="2">
+
+  <div class="card">
+    <h2>Starter Code (Boilerplate)</h2>
+    <p class="subtitle">Provide the initial code students see when they start. One editor per language.</p>
+
+    <div class="code-tabs" id="codeTabs"></div>
+    <div class="code-editor-box">
+      <textarea class="code-area" id="starterCodeEditor" rows="12" placeholder="# Write your starter code here..."></textarea>
+    </div>
+    <p class="hint" style="margin-top:8px;">Tab between languages above. Code is saved per-language.</p>
+  </div>
+
+  <div class="card">
+    <h2>Public Test Cases</h2>
+    <p class="subtitle">Visible to students as examples.</p>
+    <div id="publicTC">
+      {% if quiz and quiz.public_test_cases %}
+        {% for tc in quiz.public_test_cases %}
+        <div class="tc-row">
+          <textarea class="tc-input" placeholder="Input">{{ tc.input }}</textarea>
+          <textarea class="tc-output" placeholder="Expected Output">{{ tc.expected_output }}</textarea>
+          <button class="remove-btn" onclick="this.parentElement.remove()">&times;</button>
+        </div>
+        {% endfor %}
+      {% endif %}
+    </div>
+    <button class="add-btn" onclick="addTestCase('publicTC')">+ Add Test Case</button>
+  </div>
+
+  <div class="card">
+    <h2>Hidden Test Cases</h2>
+    <p class="subtitle">Used for grading, not shown to students.</p>
+    <div id="hiddenTC">
+      {% if quiz and quiz.hidden_test_cases %}
+        {% for tc in quiz.hidden_test_cases %}
+        <div class="tc-row">
+          <textarea class="tc-input" placeholder="Input">{{ tc.input }}</textarea>
+          <textarea class="tc-output" placeholder="Expected Output">{{ tc.expected_output }}</textarea>
+          <button class="remove-btn" onclick="this.parentElement.remove()">&times;</button>
+        </div>
+        {% endfor %}
+      {% endif %}
+    </div>
+    <button class="add-btn" onclick="addTestCase('hiddenTC')">+ Add Test Case</button>
+  </div>
+</div>
+
+<!-- ═══════════════════ STEP 4: Survey Questions ═══════════════════ -->
+<div class="step-panel" data-step="3">
+  <div class="card">
+    <h2>Survey Questions</h2>
+    <p class="subtitle">Pre-populated from existing templates. Edit, add, or remove as needed.</p>
+
+    <div class="survey-tabs">
+      <button class="survey-tab active" onclick="switchSurveyTab('pre', this)">Pre-Survey</button>
+      <button class="survey-tab" onclick="switchSurveyTab('post', this)">Post-Survey</button>
+      <button class="survey-tab" onclick="switchSurveyTab('recurrent', this)">Recurrent</button>
+    </div>
+
+    <!-- Pre-survey -->
+    <div class="survey-panel active" id="panel-pre">
+      <div id="preSurveyList"></div>
+      <button class="add-btn" onclick="addSurveyQuestion('preSurveyList')">+ Add Pre-Survey Question</button>
+    </div>
+
+    <!-- Post-survey -->
+    <div class="survey-panel" id="panel-post">
+      <div id="postSurveyList"></div>
+      <button class="add-btn" onclick="addSurveyQuestion('postSurveyList')">+ Add Post-Survey Question</button>
+    </div>
+
+    <!-- Recurrent -->
+    <div class="survey-panel" id="panel-recurrent">
+      <div id="recurrentSurveyList"></div>
+      <button class="add-btn" onclick="addSurveyQuestion('recurrentSurveyList')">+ Add Recurrent Question</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ STEP 5: Review ═══════════════════ -->
+<div class="step-panel" data-step="4">
+  <div class="card">
+    <h2>Review Your Quiz</h2>
+    <p class="subtitle">Double-check before saving.</p>
+    <dl class="review-grid" id="reviewContent"></dl>
+  </div>
+</div>
+
+</div><!-- /container -->
+
+<!-- Footer -->
+<div class="footer-actions">
+  <div class="footer-inner">
+    <button class="btn btn-secondary" id="prevBtn" onclick="prevStep()" style="visibility:hidden;">Back</button>
+    <div class="btn-group">
+      <a href="/instructor/dashboard" class="btn btn-secondary">Cancel</a>
+      <button class="btn btn-primary" id="nextBtn" onclick="nextStep()">Next</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const EDIT_MODE = {{ 'true' if edit_mode else 'false' }};
+const QUIZ_ID = '{{ quiz.id if quiz else "" }}';
+const TOTAL_STEPS = 5;
+let currentStep = 0;
+let selectedCondition = {{ quiz.condition if quiz and quiz.condition else 1 }};
+
+// Starter code storage: { python: "...", javascript: "...", c: "..." }
+let starterCodeStore = {};
+let activeCodeLang = null;
+
+// ─── Default survey templates ───
+const DEFAULT_PRE_SURVEY = [
+  { id: "pre_demo_q1", question: "What is your current education level?", type: "multiple_choice", required: true, options: ["Freshman","Sophomore","Junior","Senior","Graduate Student","Other"], help_text: "" },
+  { id: "pre_demo_q2", question: "How much experience do you have in programming?", type: "multiple_choice", required: true, options: ["No experience","Beginner (< 6 months)","Intermediate (6-24 months)","Advanced (2-4 years)","Expert (4+ years or professional)"], help_text: "" },
+  { id: "pre_demo_q3", question: "How frequently do you use AI coding assistants like GitHub Copilot, Cursor, or other coding agents?", type: "multiple_choice", required: true, options: ["Never","Rarely (once a month or less)","Occasionally (a few times a month)","Frequently (a few times a week)","Very frequently (daily or almost daily)"], help_text: "" },
+  { id: "pre_trust_q1", question: "I can trust this AI assistant to solve programming problems.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
+  { id: "pre_trust_q5", question: "Please describe why you trust or distrust AI for use in coding in your own words.", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Describe the factors that influence your trust or distrust...", min_length: 30, max_length: 1000 },
+  { id: "pre_mental_q1", question: "Please describe in your own words, how you think AI Coding Assistants generate code suggestions?", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Explain your understanding...", min_length: 30, max_length: 1000 },
+  { id: "pre_accuracy_q1", question: "How accurate do you believe AI-generated code suggestions are?", type: "slider", required: true, options: [], scale: {min:0,max:100,step:5,default:50,unit:"%"}, help_text: "0% = completely inaccurate, 100% = perfectly accurate" },
+  { id: "pre_accuracy_q2", question: "Please describe what you believe might cause AI-generated code to be incorrect.", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Describe potential causes...", min_length: 30, max_length: 1000 },
+];
+
+const DEFAULT_POST_SURVEY = [
+  { id: "post_trust_q1", question: "Describe why you trust or distrust this system's AI coding assistant in your own words.", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Describe factors that influenced your trust/distrust...", min_length: 30, max_length: 1000 },
+  { id: "post_mental_q1", question: "Please describe in your own words, how you think this system's AI Coding Assistant generates code suggestions?", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Explain your understanding...", min_length: 30, max_length: 1000 },
+  { id: "post_accuracy_q1", question: "How accurate do you believe this system's AI-generated code suggestions are?", type: "slider", required: true, options: [], scale: {min:0,max:100,step:5,default:50,unit:"%"}, help_text: "0% = completely inaccurate, 100% = perfectly accurate" },
+  { id: "post_accuracy_q2", question: "Why do you believe AI-generated code might be incorrect?", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Explain your reasoning...", min_length: 30, max_length: 1000 },
+  { id: "post_experience_q1", question: "Share your overall experience with how this system helped or hindered you in solving the programming assignment.", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Describe your experience...", min_length: 50, max_length: 1500 },
+  { id: "post_strategy_q1", question: "Seeing the AI's code suggestions was:", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Very unhelpful",maxLabel:"Very helpful"}, help_text: "" },
+  { id: "post_strategy_q2", question: "Explain whether or how you used the AI during this activity.", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Describe how you used the AI...", min_length: 30, max_length: 1000 },
+  { id: "post_strategy_q3", question: "Would you continue to use this tool, why or why not?", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Explain your reasoning...", min_length: 30, max_length: 1000 },
+  { id: "post_difficulty_q1", question: "How difficult did you find this assignment?", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Very easy",maxLabel:"Very difficult"}, help_text: "" },
+  { id: "post_reflection_q1", question: "Has using this system changed your view on how AI assistants work, and if so, why?", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Reflect on your understanding...", min_length: 30, max_length: 1000 },
+  { id: "post_suggestions_q1", question: "What suggestions do you have for improving this tool?", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Share your ideas...", min_length: 30, max_length: 1000 },
+];
+
+const DEFAULT_RECURRENT_SURVEY = [
+  { id: "rec_q1", question: "CodeOracle is very reliable. I can trust on it to be correct all the time.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
+  { id: "rec_q2", question: "I am confident in CodeOracle. I feel that it works well.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
+  { id: "rec_q3", question: "The outputs of CodeOracle are very predictable.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
+  { id: "rec_q4", question: "I feel safe that when I rely on CodeOracle I will get the right answers.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
+  { id: "rec_q5", question: "CodeOracle is efficient and works very quickly.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
+  { id: "rec_q6", question: "I am wary of CodeOracle.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
+  { id: "rec_q7", question: "CodeOracle can perform the task better than a novice human user.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
+  { id: "rec_q8", question: "I like using CodeOracle for decision making.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
+];
+
+// ─── Init ───
+{% if quiz and quiz.starter_code %}
+starterCodeStore = {{ quiz.starter_code | tojson }};
+{% endif %}
+
+{% if quiz and quiz.pre_survey %}
+const INIT_PRE = {{ quiz.pre_survey | tojson }};
+{% else %}
+const INIT_PRE = DEFAULT_PRE_SURVEY;
+{% endif %}
+
+{% if quiz and quiz.post_survey %}
+const INIT_POST = {{ quiz.post_survey | tojson }};
+{% else %}
+const INIT_POST = DEFAULT_POST_SURVEY;
+{% endif %}
+
+{% if quiz and quiz.recurrent_survey %}
+const INIT_RECURRENT = {{ quiz.recurrent_survey | tojson }};
+{% else %}
+const INIT_RECURRENT = DEFAULT_RECURRENT_SURVEY;
+{% endif %}
+
+document.addEventListener('DOMContentLoaded', () => {
+  renderSurveyList('preSurveyList', INIT_PRE);
+  renderSurveyList('postSurveyList', INIT_POST);
+  renderSurveyList('recurrentSurveyList', INIT_RECURRENT);
+  updateCodeTabs();
+});
+
+// ─── Toast ───
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast ' + type + ' show';
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ─── Chip toggle ───
+function toggleChip(el) {
+  const cb = el.querySelector('input');
+  cb.checked = !cb.checked;
+  el.classList.toggle('selected', cb.checked);
+  updateCodeTabs();
+}
+
+// ─── Condition ───
+function selectCondition(n, el) {
+  document.querySelectorAll('.cond-card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  selectedCondition = n;
+  document.getElementById('selectedCondition').value = n;
+}
+
+// ─── Starter Code Tabs ───
+function updateCodeTabs() {
+  const langs = getSelectedLanguages();
+  const tabBar = document.getElementById('codeTabs');
+  tabBar.innerHTML = '';
+  langs.forEach((lang, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'code-tab' + (i === 0 ? ' active' : '');
+    btn.textContent = lang.charAt(0).toUpperCase() + lang.slice(1);
+    btn.onclick = () => switchCodeTab(lang, btn);
+    tabBar.appendChild(btn);
+  });
+  if (langs.length > 0 && (!activeCodeLang || !langs.includes(activeCodeLang))) {
+    switchCodeTab(langs[0], tabBar.firstChild);
+  } else if (activeCodeLang) {
+    const editor = document.getElementById('starterCodeEditor');
+    editor.value = starterCodeStore[activeCodeLang] || '';
+  }
+}
+
+function switchCodeTab(lang, btn) {
+  // Save current
+  if (activeCodeLang) {
+    starterCodeStore[activeCodeLang] = document.getElementById('starterCodeEditor').value;
+  }
+  activeCodeLang = lang;
+  document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  document.getElementById('starterCodeEditor').value = starterCodeStore[lang] || '';
+}
+
+function getSelectedLanguages() {
+  return Array.from(document.querySelectorAll('#langChips input:checked')).map(c => c.value);
+}
+
+// ─── Test Cases ───
+function addTestCase(id) {
+  const c = document.getElementById(id);
+  const r = document.createElement('div'); r.className = 'tc-row';
+  r.innerHTML = '<textarea class="tc-input" placeholder="Input"></textarea><textarea class="tc-output" placeholder="Expected Output"></textarea><button class="remove-btn" onclick="this.parentElement.remove()">&times;</button>';
+  c.appendChild(r);
+}
+
+function collectTestCases(id) {
+  return Array.from(document.querySelectorAll('#' + id + ' .tc-row')).map(r => ({
+    input: r.querySelector('.tc-input').value,
+    expected_output: r.querySelector('.tc-output').value,
+  })).filter(tc => tc.input || tc.expected_output);
+}
+
+// ─── Survey Tabs ───
+function switchSurveyTab(name, btn) {
+  document.querySelectorAll('.survey-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.survey-panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('panel-' + name).classList.add('active');
+}
+
+// ─── Survey Question Rendering ───
+function renderSurveyList(containerId, questions) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = '';
+  questions.forEach((q, i) => {
+    el.appendChild(createSurveyCard(q, i));
+  });
+}
+
+function createSurveyCard(q, idx) {
+  const card = document.createElement('div');
+  card.className = 'sq-card';
+  card.dataset.idx = idx;
+  // Store full metadata so we preserve scale/placeholder/min_length/etc. on save
+  card.dataset.meta = JSON.stringify(q);
+
+  const typeOptions = ['likert','likert_7_with_na','multiple_choice','open_ended','slider','info_block']
+    .map(t => `<option value="${t}" ${q.type===t?'selected':''}>${t.replace(/_/g,' ')}</option>`).join('');
+
+  let html = `
+    <div class="sq-top">
+      <span class="sq-badge">Q${idx+1}</span>
+      <button class="remove-btn" onclick="this.closest('.sq-card').remove()">&times;</button>
+    </div>
+    <div class="sq-fields">
+      <div class="sq-row-inline">
+        <input type="text" class="sq-question" placeholder="Question text" value="${escHtml(q.question || '')}">
+        <select class="sq-type" onchange="onTypeChange(this)">${typeOptions}</select>
+      </div>`;
+
+  // Multiple choice options
+  if (q.type === 'multiple_choice' && q.options && q.options.length) {
+    html += '<div class="sq-options">';
+    q.options.forEach((opt, oi) => {
+      html += `<div class="sq-option-row"><span style="color:var(--muted);font-size:13px;min-width:20px;">${String.fromCharCode(65+oi)}.</span><input type="text" class="sq-opt-input" value="${escHtml(opt)}"><button class="remove-btn" onclick="this.parentElement.remove()" style="font-size:16px;">&times;</button></div>`;
+    });
+    html += `<button class="add-btn" onclick="addOption(this)" style="margin-top:4px;padding:6px;font-size:12px;">+ Add Option</button></div>`;
+  } else if (q.type === 'multiple_choice') {
+    html += `<div class="sq-options"><button class="add-btn" onclick="addOption(this)" style="padding:6px;font-size:12px;">+ Add Option</button></div>`;
+  }
+
+  html += '</div>';
+  card.innerHTML = html;
+  return card;
+}
+
+function onTypeChange(sel) {
+  const card = sel.closest('.sq-card');
+  let optDiv = card.querySelector('.sq-options');
+  if (sel.value === 'multiple_choice') {
+    if (!optDiv) {
+      optDiv = document.createElement('div');
+      optDiv.className = 'sq-options';
+      optDiv.innerHTML = '<button class="add-btn" onclick="addOption(this)" style="padding:6px;font-size:12px;">+ Add Option</button>';
+      card.querySelector('.sq-fields').appendChild(optDiv);
+    }
+  } else {
+    if (optDiv) optDiv.remove();
+  }
+}
+
+function addOption(btn) {
+  const container = btn.closest('.sq-options');
+  const count = container.querySelectorAll('.sq-option-row').length;
+  const row = document.createElement('div');
+  row.className = 'sq-option-row';
+  row.innerHTML = `<span style="color:var(--muted);font-size:13px;min-width:20px;">${String.fromCharCode(65+count)}.</span><input type="text" class="sq-opt-input" placeholder="Option ${String.fromCharCode(65+count)}"><button class="remove-btn" onclick="this.parentElement.remove()" style="font-size:16px;">&times;</button>`;
+  container.insertBefore(row, btn);
+}
+
+function addSurveyQuestion(containerId) {
+  const el = document.getElementById(containerId);
+  const count = el.children.length;
+  el.appendChild(createSurveyCard({ question: '', type: 'likert', required: true, options: [] }, count));
+}
+
+function collectSurvey(containerId) {
+  return Array.from(document.querySelectorAll('#' + containerId + ' .sq-card')).map((card, i) => {
+    // Start from stored metadata (preserves scale, placeholder, min_length, etc.)
+    let base = {};
+    try { base = JSON.parse(card.dataset.meta || '{}'); } catch(e) {}
+    const q = card.querySelector('.sq-question').value.trim();
+    const t = card.querySelector('.sq-type').value;
+    const opts = Array.from(card.querySelectorAll('.sq-opt-input')).map(inp => inp.value.trim()).filter(Boolean);
+    // Override editable fields, keep everything else from the original
+    return Object.assign(base, { id: base.id || `q_${i}`, question: q, type: t, required: true, options: opts });
+  }).filter(sq => sq.question);
+}
+
+function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ─── Steps Navigation ───
+function goToStep(n) {
+  if (n < 0 || n >= TOTAL_STEPS) return;
+  // Save code before leaving step 2
+  if (currentStep === 2 && activeCodeLang) {
+    starterCodeStore[activeCodeLang] = document.getElementById('starterCodeEditor').value;
+  }
+  // Build review on step 4
+  if (n === 4) buildReview();
+
+  document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.step-panel[data-step="${n}"]`).classList.add('active');
+
+  document.querySelectorAll('.step-item').forEach(s => {
+    const si = parseInt(s.dataset.step);
+    s.classList.remove('active','completed');
+    if (si === n) s.classList.add('active');
+    else if (si < n) s.classList.add('completed');
+  });
+
+  currentStep = n;
+  document.getElementById('prevBtn').style.visibility = n === 0 ? 'hidden' : 'visible';
+  const nextBtn = document.getElementById('nextBtn');
+  if (n === TOTAL_STEPS - 1) {
+    nextBtn.textContent = EDIT_MODE ? 'Update Quiz' : 'Create Quiz';
+    nextBtn.onclick = saveQuiz;
+  } else {
+    nextBtn.textContent = 'Next';
+    nextBtn.onclick = nextStep;
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function nextStep() {
+  if (currentStep === 0) {
+    if (!document.getElementById('title').value.trim()) { showToast('Title is required.', 'error'); return; }
+    if (!document.getElementById('problem_statement').value.trim()) { showToast('Problem statement is required.', 'error'); return; }
+    if (getSelectedLanguages().length === 0) { showToast('Select at least one language.', 'error'); return; }
+  }
+  goToStep(currentStep + 1);
+}
+function prevStep() { goToStep(currentStep - 1); }
+
+// ─── Review ───
+function buildReview() {
+  if (activeCodeLang) starterCodeStore[activeCodeLang] = document.getElementById('starterCodeEditor').value;
+  const langs = getSelectedLanguages();
+  const condLabels = { 1: 'Condition 1 — Full View', 2: 'Condition 2 — AI Guess Only', 3: 'Condition 3 — Suggestions Only' };
+  const preSq = collectSurvey('preSurveyList');
+  const postSq = collectSurvey('postSurveyList');
+  const recSq = collectSurvey('recurrentSurveyList');
+
+  document.getElementById('reviewContent').innerHTML = `
+    <dt>Title</dt><dd>${escHtml(document.getElementById('title').value)}</dd>
+    <dt>Description</dt><dd>${escHtml(document.getElementById('description').value) || '<em>None</em>'}</dd>
+    <dt>Problem</dt><dd style="white-space:pre-wrap;">${escHtml(document.getElementById('problem_statement').value).substring(0,300)}${document.getElementById('problem_statement').value.length>300?'...':''}</dd>
+    <dt>Languages</dt><dd>${langs.join(', ')}</dd>
+    <dt>Time Limit</dt><dd>${document.getElementById('time_limit').value || '0'} min</dd>
+    <dt>Condition</dt><dd>${condLabels[selectedCondition]}</dd>
+    <dt>Starter Code</dt><dd>${langs.filter(l=>starterCodeStore[l]).length} language(s) with boilerplate</dd>
+    <dt>Public Tests</dt><dd>${collectTestCases('publicTC').length} test case(s)</dd>
+    <dt>Hidden Tests</dt><dd>${collectTestCases('hiddenTC').length} test case(s)</dd>
+    <dt>Pre-Survey</dt><dd>${preSq.length} question(s)</dd>
+    <dt>Post-Survey</dt><dd>${postSq.length} question(s)</dd>
+    <dt>Recurrent</dt><dd>${recSq.length} question(s)</dd>
+    <dt>Published</dt><dd>${document.getElementById('published').checked ? 'Yes' : 'No (Draft)'}</dd>
+  `;
+}
+
+// ─── Save ───
+async function saveQuiz() {
+  if (activeCodeLang) starterCodeStore[activeCodeLang] = document.getElementById('starterCodeEditor').value;
+
+  const btn = document.getElementById('nextBtn');
+  btn.disabled = true; btn.textContent = 'Saving...';
+
+  const payload = {
+    title: document.getElementById('title').value.trim(),
+    description: document.getElementById('description').value.trim(),
+    problem_statement: document.getElementById('problem_statement').value.trim(),
+    constraints: document.getElementById('constraints').value.trim(),
+    allowed_languages: getSelectedLanguages(),
+    time_limit_minutes: parseInt(document.getElementById('time_limit').value) || 0,
+    condition: selectedCondition,
+    starter_code: starterCodeStore,
+    published: document.getElementById('published').checked,
+    availability_start: document.getElementById('avail_start').value || null,
+    availability_end: document.getElementById('avail_end').value || null,
+    public_test_cases: collectTestCases('publicTC'),
+    hidden_test_cases: collectTestCases('hiddenTC'),
+    pre_survey: collectSurvey('preSurveyList'),
+    post_survey: collectSurvey('postSurveyList'),
+    recurrent_survey: collectSurvey('recurrentSurveyList'),
+  };
+
+  const url = EDIT_MODE ? '/instructor/update-quiz/' + QUIZ_ID : '/instructor/save-quiz';
+  try {
+    const res = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Quiz saved!', 'success');
+      setTimeout(() => window.location.href = '/instructor/dashboard', 1000);
+    } else {
+      showToast(data.error || 'Failed to save.', 'error');
+    }
+  } catch (e) {
+    showToast('Network error.', 'error');
+  }
+  btn.disabled = false;
+  btn.textContent = EDIT_MODE ? 'Update Quiz' : 'Create Quiz';
+}
+</script>
+</body>
+</html>

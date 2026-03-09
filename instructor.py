@@ -1,0 +1,373 @@
+"""Instructor router — OTP auth, dashboard, quiz CRUD, share-link generation.
+
+Mounted as a sub-router in main.py at prefix /instructor.
+"""
+
+from fastapi import APIRouter, Request, BackgroundTasks, HTTPException, Body
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
+from datetime import datetime, timedelta
+from typing import Optional
+import logging
+import os
+import re
+import secrets
+import uuid
+
+from models import QuizCreate, QuizUpdate, QuizJoinRequest
+
+from otp import (
+    generate_otp,
+    verify_otp_value,
+    store_otp,
+    get_otp as get_otp_record,
+    increment_otp_attempts,
+    delete_otp,
+    get_otp_provider,
+    is_email_domain_allowed,
+    sanitize_key,
+    OTP_EXPIRY_MINUTES,
+    OTP_MAX_ATTEMPTS,
+)
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/instructor", tags=["instructor"])
+templates = Jinja2Templates(directory="templates")
+
+# ─── Helpers ────────────────────────────────────────────────────────────────
+
+def _get_firebase():
+    """Lazy import to avoid circular dependency with main.py."""
+    from main import firebase_db
+    return firebase_db
+
+
+def _require_instructor(request: Request):
+    """Return instructor email from session or None."""
+    return request.session.get("instructor_email") if request.session.get("is_instructor") else None
+
+
+def _generate_access_code(length: int = 8) -> str:
+    """Generate a high-entropy alphanumeric access code."""
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+# ─── OTP Auth Routes ────────────────────────────────────────────────────────
+
+@router.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    error = request.query_params.get("error")
+    return templates.TemplateResponse("instructor_login.html", {
+        "request": request,
+        "error": error,
+    })
+
+
+@router.post("/send-otp", response_class=HTMLResponse)
+async def send_otp(request: Request, background_tasks: BackgroundTasks):
+    form = await request.form()
+    email = (form.get("email") or "").lower().strip()
+
+    if "@" not in email:
+        return templates.TemplateResponse("instructor_login.html", {
+            "request": request,
+            "error": "Invalid email format.",
+        })
+
+    if not is_email_domain_allowed(email):
+        return templates.TemplateResponse("instructor_login.html", {
+            "request": request,
+            "error": "Email domain not allowed. Please use an approved domain.",
+        })
+
+    otp_plain, otp_hash, salt = generate_otp()
+    expiry = datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES)
+    store_otp(_get_firebase(), email, otp_hash, salt, expiry)
+
+    provider = get_otp_provider()
+    background_tasks.add_task(provider.send, email, otp_plain)
+    logger.info(f"OTP queued for {email}")
+
+    return templates.TemplateResponse("instructor_login.html", {
+        "request": request,
+        "otp_sent": True,
+        "email": email,
+        "success": f"OTP sent to {email}. Valid for {OTP_EXPIRY_MINUTES} minutes.",
+    })
+
+
+@router.post("/verify-otp", response_class=HTMLResponse)
+async def verify_otp(request: Request):
+    form = await request.form()
+    email = (form.get("email") or "").lower().strip()
+    otp_input = (form.get("otp") or "").strip()
+
+    stored = get_otp_record(_get_firebase(), email)
+
+    if not stored:
+        return templates.TemplateResponse("instructor_login.html", {
+            "request": request,
+            "error": "OTP expired or not found. Please request a new one.",
+        })
+
+    if datetime.utcnow() > stored["expires"]:
+        delete_otp(_get_firebase(), email)
+        return templates.TemplateResponse("instructor_login.html", {
+            "request": request,
+            "error": "OTP expired. Please request a new one.",
+        })
+
+    if stored["attempts"] >= OTP_MAX_ATTEMPTS:
+        delete_otp(_get_firebase(), email)
+        return templates.TemplateResponse("instructor_login.html", {
+            "request": request,
+            "error": "Too many failed attempts. Please request a new OTP.",
+        })
+
+    if verify_otp_value(otp_input, stored["otp_hash"], stored["salt"]):
+        delete_otp(_get_firebase(), email)
+        request.session["instructor_email"] = email
+        request.session["is_instructor"] = True
+
+        # Ensure instructor record exists in Firebase
+        fb = _get_firebase()
+        if fb:
+            from firebase_admin import db
+            sanitized = sanitize_key(email)
+            ref = db.reference(f"instructors/{sanitized}")
+            existing = ref.get()
+            if not existing:
+                ref.set({"email": email, "created_at": datetime.utcnow().isoformat()})
+
+        logger.info(f"Instructor login success: {email}")
+        return RedirectResponse(url="/instructor/dashboard", status_code=303)
+    else:
+        new_attempts = stored["attempts"] + 1
+        increment_otp_attempts(_get_firebase(), email, new_attempts)
+        remaining = OTP_MAX_ATTEMPTS - new_attempts
+        return templates.TemplateResponse("instructor_login.html", {
+            "request": request,
+            "otp_sent": True,
+            "email": email,
+            "error": f"Invalid OTP. {remaining} attempts remaining.",
+        })
+
+
+@router.get("/logout")
+async def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/instructor/login", status_code=303)
+
+
+# ─── Dashboard ──────────────────────────────────────────────────────────────
+
+@router.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    email = _require_instructor(request)
+    if not email:
+        return RedirectResponse(url="/instructor/login", status_code=303)
+
+    quizzes = []
+    fb = _get_firebase()
+    if fb:
+        from firebase_admin import db
+        sanitized = sanitize_key(email)
+        quiz_ids = db.reference(f"instructors/{sanitized}/quizzes").get() or {}
+        if quiz_ids:
+            all_quizzes = db.reference("quizzes").get() or {}
+            for qid in quiz_ids:
+                qdata = all_quizzes.get(qid)
+                if qdata:
+                    qdata["id"] = qid
+                    quizzes.append(qdata)
+        quizzes.sort(key=lambda q: q.get("created_at", ""), reverse=True)
+
+    return templates.TemplateResponse("instructor_dashboard.html", {
+        "request": request,
+        "instructor_email": email,
+        "quizzes": quizzes,
+    })
+
+
+# ─── Quiz CRUD ──────────────────────────────────────────────────────────────
+
+@router.get("/create-quiz", response_class=HTMLResponse)
+async def create_quiz_page(request: Request):
+    email = _require_instructor(request)
+    if not email:
+        return RedirectResponse(url="/instructor/login", status_code=303)
+    return templates.TemplateResponse("instructor_quiz_form.html", {
+        "request": request,
+        "instructor_email": email,
+        "quiz": None,
+        "edit_mode": False,
+    })
+
+
+@router.post("/save-quiz")
+async def save_quiz(request: Request, payload: dict = Body(...)):
+    email = _require_instructor(request)
+    if not email:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    title = (payload.get("title") or "").strip()
+    problem_statement = (payload.get("problem_statement") or "").strip()
+    if not title:
+        return JSONResponse({"success": False, "error": "Title is required."}, status_code=400)
+    if not problem_statement:
+        return JSONResponse({"success": False, "error": "Problem statement is required."}, status_code=400)
+
+    # Validate condition (single: 1, 2, or 3)
+    condition = int(payload.get("condition", 1))
+    if condition not in (1, 2, 3):
+        return JSONResponse({"success": False, "error": "Condition must be 1, 2, or 3."}, status_code=400)
+
+    quiz_id = str(uuid.uuid4())
+    access_code = _generate_access_code()
+
+    quiz_data = {
+        "id": quiz_id,
+        "title": title,
+        "description": (payload.get("description") or "").strip(),
+        "problem_statement": problem_statement,
+        "constraints": (payload.get("constraints") or "").strip(),
+        "allowed_languages": payload.get("allowed_languages", ["python", "javascript", "c"]),
+        "time_limit_minutes": int(payload.get("time_limit_minutes", 0)),
+        "condition": condition,
+        "starter_code": payload.get("starter_code", {}),
+        "public_test_cases": payload.get("public_test_cases", []),
+        "hidden_test_cases": payload.get("hidden_test_cases", []),
+        "recurrent_survey": payload.get("recurrent_survey", []),
+        "pre_survey": payload.get("pre_survey", []),
+        "post_survey": payload.get("post_survey", []),
+        "published": payload.get("published", False),
+        "availability_start": payload.get("availability_start") or None,
+        "availability_end": payload.get("availability_end") or None,
+        "access_code": access_code,
+        "created_by": email,
+        "created_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+
+    fb = _get_firebase()
+    if fb:
+        from firebase_admin import db
+        db.reference(f"quizzes/{quiz_id}").set(quiz_data)
+        db.reference(f"quiz_access/{access_code}").set({
+            "quiz_id": quiz_id,
+            "created_at": datetime.utcnow().isoformat(),
+        })
+        db.reference(f"instructors/{sanitize_key(email)}/quizzes/{quiz_id}").set(True)
+
+    return JSONResponse({"success": True, "quiz_id": quiz_id, "access_code": access_code})
+
+
+@router.get("/edit-quiz/{quiz_id}", response_class=HTMLResponse)
+async def edit_quiz_page(request: Request, quiz_id: str):
+    email = _require_instructor(request)
+    if not email:
+        return RedirectResponse(url="/instructor/login", status_code=303)
+
+    fb = _get_firebase()
+    quiz = None
+    if fb:
+        from firebase_admin import db
+        quiz = db.reference(f"quizzes/{quiz_id}").get()
+    if not quiz:
+        raise HTTPException(status_code=404, detail="Quiz not found")
+    if quiz.get("created_by") != email:
+        raise HTTPException(status_code=403, detail="Not authorised to edit this quiz")
+
+    quiz["id"] = quiz_id
+    return templates.TemplateResponse("instructor_quiz_form.html", {
+        "request": request,
+        "instructor_email": email,
+        "quiz": quiz,
+        "edit_mode": True,
+    })
+
+
+@router.post("/update-quiz/{quiz_id}")
+async def update_quiz(request: Request, quiz_id: str, payload: dict = Body(...)):
+    email = _require_instructor(request)
+    if not email:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    fb = _get_firebase()
+    if not fb:
+        return JSONResponse({"success": False, "error": "Database unavailable"}, status_code=503)
+
+    from firebase_admin import db
+    existing = db.reference(f"quizzes/{quiz_id}").get()
+    if not existing:
+        return JSONResponse({"success": False, "error": "Quiz not found"}, status_code=404)
+    if existing.get("created_by") != email:
+        return JSONResponse({"success": False, "error": "Not authorised"}, status_code=403)
+
+    # Validate condition if provided
+    condition = payload.get("condition")
+    if condition is not None and int(condition) not in (1, 2, 3):
+        return JSONResponse({"success": False, "error": "Condition must be 1, 2, or 3."}, status_code=400)
+
+    updatable_fields = [
+        "title", "description", "problem_statement", "constraints",
+        "allowed_languages", "time_limit_minutes", "condition", "starter_code",
+        "public_test_cases", "hidden_test_cases",
+        "recurrent_survey", "pre_survey", "post_survey",
+        "published", "availability_start", "availability_end",
+    ]
+    updates = {k: payload[k] for k in updatable_fields if k in payload}
+    updates["updated_at"] = datetime.utcnow().isoformat()
+
+    db.reference(f"quizzes/{quiz_id}").update(updates)
+    return JSONResponse({"success": True, "quiz_id": quiz_id})
+
+
+@router.delete("/delete-quiz/{quiz_id}")
+async def delete_quiz(request: Request, quiz_id: str):
+    email = _require_instructor(request)
+    if not email:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    fb = _get_firebase()
+    if not fb:
+        return JSONResponse({"success": False, "error": "Database unavailable"}, status_code=503)
+
+    from firebase_admin import db
+    existing = db.reference(f"quizzes/{quiz_id}").get()
+    if not existing:
+        return JSONResponse({"success": False, "error": "Quiz not found"}, status_code=404)
+    if existing.get("created_by") != email:
+        return JSONResponse({"success": False, "error": "Not authorised"}, status_code=403)
+
+    access_code = existing.get("access_code", "")
+    db.reference(f"quizzes/{quiz_id}").delete()
+    if access_code:
+        db.reference(f"quiz_access/{access_code}").delete()
+    db.reference(f"instructors/{sanitize_key(email)}/quizzes/{quiz_id}").delete()
+
+    return JSONResponse({"success": True})
+
+
+@router.post("/toggle-publish/{quiz_id}")
+async def toggle_publish(request: Request, quiz_id: str):
+    email = _require_instructor(request)
+    if not email:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    fb = _get_firebase()
+    if not fb:
+        return JSONResponse({"success": False, "error": "Database unavailable"}, status_code=503)
+
+    from firebase_admin import db
+    existing = db.reference(f"quizzes/{quiz_id}").get()
+    if not existing:
+        return JSONResponse({"success": False, "error": "Quiz not found"}, status_code=404)
+    if existing.get("created_by") != email:
+        return JSONResponse({"success": False, "error": "Not authorised"}, status_code=403)
+
+    new_status = not existing.get("published", False)
+    db.reference(f"quizzes/{quiz_id}/published").set(new_status)
+    return JSONResponse({"success": True, "published": new_status})

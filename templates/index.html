@@ -97,6 +97,24 @@
             white-space: pre-wrap;
             word-wrap: break-word;
         }
+        .problem-panel__body .section-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            color: #58a6ff;
+            margin: 20px 0 6px 0;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #30363d;
+        }
+        .problem-panel__body .section-label:first-child { margin-top: 0; }
+        .problem-panel__body .quiz-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: #e6edf3;
+            margin-bottom: 12px;
+        }
         .problem-panel__placeholder {
             color: #666;
             font-style: italic;
@@ -2828,7 +2846,9 @@ async function initializeFromURL() {
                     return res.json();
                 })
                 .then(function(data) {
-                    if (data.text) {
+                    if (data.html) {
+                        problemBody.innerHTML = data.html;
+                    } else if (data.text) {
                         problemBody.textContent = data.text;
                     } else {
                         problemBody.innerHTML = '<span class="problem-panel__placeholder">No problem description available for this assignment.</span>';

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Instructor Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0d1117; --panel: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e;
+      --primary: #58a6ff; --success: #238636; --danger: #da3633;
+    }
+    * { box-sizing: border-box; font-family: 'Inter', system-ui, sans-serif; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    .navbar {
+      background: rgba(22,27,34,0.95); backdrop-filter: blur(8px);
+      padding: 14px 32px; border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .navbar h1 { font-size: 1.25rem; font-weight: 600; }
+    .nav-buttons { display: flex; gap: 10px; }
+    .nav-btn {
+      padding: 10px 16px; border-radius: 8px; border: none;
+      cursor: pointer; font-size: 0.9rem; font-weight: 600;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .nav-btn.create { background: var(--success); color: white; }
+    .nav-btn.create:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(35,134,54,0.3); }
+    .nav-btn.logout { background: var(--danger); color: white; }
+    .nav-btn.logout:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(218,54,51,0.3); }
+
+    .container { padding: 24px 28px; max-width: 1200px; margin: 0 auto; }
+
+    .welcome {
+      margin-bottom: 24px; padding: 20px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .welcome p { color: var(--muted); font-size: 14px; }
+
+    .quiz-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 16px;
+    }
+
+    .quiz-card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px; padding: 20px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .quiz-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+
+    .quiz-card h3 { font-size: 1.1rem; margin-bottom: 8px; }
+    .quiz-card .desc { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+    .quiz-card .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    .badge {
+      padding: 4px 10px; border-radius: 20px;
+      font-size: 12px; font-weight: 500;
+    }
+    .badge.published { background: rgba(35,134,54,0.2); color: #3fb950; }
+    .badge.draft { background: rgba(139,148,158,0.15); color: var(--muted); }
+    .badge.lang { background: rgba(88,166,255,0.15); color: var(--primary); }
+
+    .access-code-box {
+      background: #0d1117; border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 14px;
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 14px; font-family: 'Courier New', monospace;
+    }
+    .access-code-box code { font-size: 15px; letter-spacing: 2px; color: var(--primary); }
+    .copy-btn {
+      background: none; border: 1px solid var(--border);
+      color: var(--muted); border-radius: 6px; padding: 4px 10px;
+      cursor: pointer; font-size: 12px; transition: all 0.2s;
+    }
+    .copy-btn:hover { border-color: var(--primary); color: var(--primary); }
+
+    .card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .card-actions button, .card-actions a {
+      padding: 8px 14px; border-radius: 6px; border: none;
+      cursor: pointer; font-size: 13px; font-weight: 500;
+      text-decoration: none; display: inline-block;
+      transition: all 0.2s;
+    }
+    .btn-edit { background: rgba(88,166,255,0.15); color: var(--primary); }
+    .btn-edit:hover { background: rgba(88,166,255,0.25); }
+    .btn-publish { background: rgba(35,134,54,0.15); color: #3fb950; }
+    .btn-publish:hover { background: rgba(35,134,54,0.25); }
+    .btn-unpublish { background: rgba(218,54,51,0.15); color: #f85149; }
+    .btn-unpublish:hover { background: rgba(218,54,51,0.25); }
+    .btn-delete { background: rgba(218,54,51,0.1); color: #f85149; }
+    .btn-delete:hover { background: rgba(218,54,51,0.2); }
+
+    .empty-state {
+      text-align: center; padding: 60px 20px;
+      color: var(--muted); font-size: 16px;
+    }
+
+    .toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: #238636; color: white; padding: 12px 20px;
+      border-radius: 8px; font-size: 14px; font-weight: 500;
+      transform: translateY(80px); opacity: 0;
+      transition: all 0.3s ease;
+    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <div class="navbar">
+    <h1>Instructor Dashboard</h1>
+    <div class="nav-buttons">
+      <a href="/instructor/create-quiz" class="nav-btn create">+ Create Quiz</a>
+      <a href="/instructor/logout" class="nav-btn logout">Logout</a>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="welcome">
+      <p>Logged in as <strong>{{ instructor_email }}</strong> &middot; {{ quizzes|length }} quiz(zes)</p>
+    </div>
+
+    {% if quizzes %}
+    <div class="quiz-grid">
+      {% for q in quizzes %}
+      <div class="quiz-card" data-id="{{ q.id }}">
+        <h3>{{ q.title }}</h3>
+        <div class="desc">{{ q.description[:120] }}{% if q.description|length > 120 %}...{% endif %}</div>
+
+        <div class="meta">
+          {% if q.published %}
+            <span class="badge published">Published</span>
+          {% else %}
+            <span class="badge draft">Draft</span>
+          {% endif %}
+          {% for lang in (q.allowed_languages or []) %}
+            <span class="badge lang">{{ lang }}</span>
+          {% endfor %}
+          {% if q.time_limit_minutes %}
+            <span class="badge lang">{{ q.time_limit_minutes }} min</span>
+          {% endif %}
+          <span class="badge lang">Cond. {{ q.condition if q.condition else 1 }}</span>
+        </div>
+
+        {% if q.access_code %}
+        <div class="access-code-box">
+          <code>{{ q.access_code }}</code>
+          <button class="copy-btn" onclick="copyCode('{{ q.access_code }}')">Copy</button>
+        </div>
+        {% endif %}
+
+        <div class="card-actions">
+          <a href="/instructor/edit-quiz/{{ q.id }}" class="btn-edit">Edit</a>
+          {% if q.published %}
+            <button class="btn-unpublish" onclick="togglePublish('{{ q.id }}')">Unpublish</button>
+          {% else %}
+            <button class="btn-publish" onclick="togglePublish('{{ q.id }}')">Publish</button>
+          {% endif %}
+          <button class="btn-delete" onclick="deleteQuiz('{{ q.id }}', '{{ q.title }}')">Delete</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <p>No quizzes yet. Click <strong>+ Create Quiz</strong> to get started.</p>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2500);
+    }
+
+    function copyCode(code) {
+      const url = window.location.origin + '/quiz/' + code;
+      navigator.clipboard.writeText(url).then(() => showToast('Link copied!'));
+    }
+
+    async function togglePublish(quizId) {
+      const res = await fetch('/instructor/toggle-publish/' + quizId, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) location.reload();
+    }
+
+    async function deleteQuiz(quizId, title) {
+      if (!confirm('Delete "' + title + '"? This cannot be undone.')) return;
+      const res = await fetch('/instructor/delete-quiz/' + quizId, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) location.reload();
+    }
+  </script>
+</body>
+</html>

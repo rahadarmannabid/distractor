@@ -33,6 +33,7 @@ import json
 from pathlib import Path
 from fastapi.responses import FileResponse
 from admin import router as admin_router
+from instructor import router as instructor_router
 
 
 # Load environment variables
@@ -829,7 +830,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(admin_router)  # ADD THIS LINE
+# Session middleware for instructor auth (cookie-based, non-breaking for existing student flow)
+from starlette.middleware.sessions import SessionMiddleware
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.getenv("SESSION_SECRET_KEY", "change-me-in-production"),
+)
+
+app.include_router(admin_router)
+app.include_router(instructor_router)
 
 
 def save_session_to_local(session_log: SessionLog):
@@ -895,7 +904,7 @@ def get_response(prompt):
     try:
         chat_completion = client.chat.completions.create(
             messages=[{"role": "system", "content": prompt}],
-            model="gpt-4o-mini",
+            model="gpt-4.1-nano",
         )
         response = chat_completion.choices[0].message.content
         return response.strip() if response else "No response generated"
@@ -1967,8 +1976,49 @@ async def get_survey_config(assignment_key: str):
     """
     Get pre, post, and periodic survey configuration for an assignment key
     FULLY CASE-INSENSITIVE - works with any case variation
+    Also supports instructor-created quizzes (assignment_key starts with 'quiz_')
     """
     try:
+        # ── Instructor-created quiz: load surveys from Firebase ──
+        if assignment_key.startswith("quiz_") and firebase_db:
+            access_code = assignment_key[5:]  # strip "quiz_"
+            # Look up access code to get actual quiz UUID
+            access_ref = db.reference(f"quiz_access/{access_code}").get()
+            quiz_data = None
+            if access_ref and access_ref.get("quiz_id"):
+                quiz_data = db.reference(f"quizzes/{access_ref['quiz_id']}").get()
+            if quiz_data:
+                return {
+                    "assignment_key": assignment_key,
+                    "pre_survey": {
+                        "title": "Pre-Study Survey",
+                        "description": "Please answer the following questions before starting.",
+                        "estimated_time_minutes": 5,
+                        "questions": quiz_data.get("pre_survey", []),
+                    },
+                    "post_survey": {
+                        "title": "Post-Study Survey",
+                        "description": "Thank you for completing the task! Please share your experience.",
+                        "estimated_time_minutes": 10,
+                        "questions": quiz_data.get("post_survey", []),
+                    },
+                    "periodic_survey": {
+                        "enabled": bool(quiz_data.get("recurrent_survey")),
+                        "interval": 4,
+                        "title": "Quick Check-in",
+                        "description": "Please rate your current experience",
+                        "questions": quiz_data.get("recurrent_survey", []),
+                    },
+                }
+            # Fall through to empty config if quiz not found
+            return {
+                "assignment_key": assignment_key,
+                "pre_survey": {"title": "", "description": "", "questions": []},
+                "post_survey": {"title": "", "description": "", "questions": []},
+                "periodic_survey": {"enabled": False, "interval": 4, "questions": []},
+            }
+
+        # ── Standard file-based survey config ──
         # Get base key for file reading (this returns capitalized version)
         base_key = get_assignment_base_key(assignment_key)
         if not base_key:
@@ -2675,6 +2725,36 @@ async def download_assignment(assignment_key: str):
 async def get_assignment_text(assignment_key: str):
     """Return the assignment .txt file content for the left problem panel."""
     try:
+        # Instructor-created quiz: load problem statement from Firebase
+        if assignment_key.startswith("quiz_") and firebase_db:
+            access_code = assignment_key[5:]  # strip "quiz_"
+            # Look up access code to get actual quiz UUID
+            access_ref = db.reference(f"quiz_access/{access_code}").get()
+            if access_ref and access_ref.get("quiz_id"):
+                qval = db.reference(f"quizzes/{access_ref['quiz_id']}").get()
+                if qval:
+                    import html as html_mod
+                    parts = []
+                    if qval.get("title"):
+                        parts.append(f'<div class="quiz-title">{html_mod.escape(qval["title"])}</div>')
+                    if qval.get("description"):
+                        parts.append(f'{html_mod.escape(qval["description"])}')
+                    if qval.get("problem_statement"):
+                        parts.append(f'<span class="section-label">Problem</span>{html_mod.escape(qval["problem_statement"])}')
+                    if qval.get("constraints"):
+                        parts.append(f'<span class="section-label">Constraints</span>{html_mod.escape(qval["constraints"])}')
+                    if qval.get("public_test_cases"):
+                        tc_lines = []
+                        for tc in qval["public_test_cases"]:
+                            if isinstance(tc, dict):
+                                tc_lines.append(f"Input: {html_mod.escape(str(tc.get('input', '')))}")
+                                tc_lines.append(f"Expected: {html_mod.escape(str(tc.get('expected_output', '')))}")
+                                tc_lines.append("")
+                        parts.append(f'<span class="section-label">Test Cases</span>{chr(10).join(tc_lines)}')
+                    html_out = "\n\n".join(parts)
+                    return {"html": html_out if html_out else None, "text": "No problem description provided." if not html_out else None}
+            raise HTTPException(status_code=404, detail="Quiz not found")
+
         assignment_file = get_assignment_file_path(assignment_key)
         if not assignment_file or not assignment_file.exists():
             raise HTTPException(status_code=404, detail="Assignment text not found")
@@ -2827,6 +2907,162 @@ async def debug_sidebar_config():
         "environment_loaded": bool(os.getenv("OPENAI_API_KEY"))  # Check if .env loaded at all
     }
     
+# ─── Student custom-quiz entry (via instructor share link/code) ─────────────
+
+@app.get("/quiz/{access_code}", response_class=HTMLResponse)
+async def student_quiz_entry(request: Request, access_code: str):
+    """Landing page for students accessing an instructor-created quiz via share link."""
+    quiz_data = None
+    if firebase_db:
+        mapping = db.reference(f"quiz_access/{access_code}").get()
+        if mapping:
+            quiz_id = mapping.get("quiz_id")
+            quiz_data = db.reference(f"quizzes/{quiz_id}").get()
+
+    if not quiz_data:
+        return HTMLResponse("<h2>Quiz not found or link is invalid.</h2>", status_code=404)
+
+    if not quiz_data.get("published", False):
+        return HTMLResponse("<h2>This quiz is not currently available.</h2>", status_code=403)
+
+    # Check availability window
+    now = datetime.utcnow()
+    avail_start = quiz_data.get("availability_start")
+    avail_end = quiz_data.get("availability_end")
+    if avail_start:
+        try:
+            if now < datetime.fromisoformat(avail_start):
+                return HTMLResponse("<h2>This quiz has not started yet.</h2>", status_code=403)
+        except ValueError:
+            pass
+    if avail_end:
+        try:
+            if now > datetime.fromisoformat(avail_end):
+                return HTMLResponse("<h2>This quiz is no longer available.</h2>", status_code=403)
+        except ValueError:
+            pass
+
+    allowed_langs = quiz_data.get("allowed_languages", ["python", "javascript", "c"])
+    return templates.TemplateResponse("home.html", {
+        "request": request,
+        "quiz_mode": True,
+        "quiz_title": quiz_data.get("title", "Custom Quiz"),
+        "quiz_description": quiz_data.get("description", ""),
+        "access_code": access_code,
+        "allowed_languages": allowed_langs,
+    })
+
+
+@app.post("/quiz/join")
+async def student_quiz_join(request: Request):
+    """Authenticate a student into an instructor-created quiz."""
+    body = await request.json()
+    access_code = (body.get("access_code") or "").strip()
+    user_id = (body.get("user_id") or "").strip()
+    programming_language = (body.get("programming_language") or "python").strip()
+
+    if len(user_id) < 3:
+        raise HTTPException(status_code=400, detail="User ID must be at least 3 characters")
+
+    if not firebase_db:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    mapping = db.reference(f"quiz_access/{access_code}").get()
+    if not mapping:
+        raise HTTPException(status_code=404, detail="Invalid quiz code")
+
+    quiz_id = mapping["quiz_id"]
+    quiz_data = db.reference(f"quizzes/{quiz_id}").get()
+    if not quiz_data:
+        raise HTTPException(status_code=404, detail="Quiz not found")
+    if not quiz_data.get("published", False):
+        raise HTTPException(status_code=403, detail="Quiz not available")
+
+    # Check availability window
+    now = datetime.utcnow()
+    avail_start = quiz_data.get("availability_start")
+    avail_end = quiz_data.get("availability_end")
+    if avail_start:
+        try:
+            if now < datetime.fromisoformat(avail_start):
+                raise HTTPException(status_code=403, detail="Quiz has not started yet")
+        except ValueError:
+            pass
+    if avail_end:
+        try:
+            if now > datetime.fromisoformat(avail_end):
+                raise HTTPException(status_code=403, detail="Quiz is no longer available")
+        except ValueError:
+            pass
+
+    # Validate language
+    allowed_langs = quiz_data.get("allowed_languages", ["python", "javascript", "c"])
+    if programming_language not in allowed_langs:
+        raise HTTPException(status_code=400, detail=f"Language not allowed. Choose from: {allowed_langs}")
+
+    # Use the single condition set by the instructor (1, 2, or 3)
+    condition = int(quiz_data.get("condition", 1))
+
+    # Create session (reuses existing SessionLog structure)
+    session_id = f"{user_id}_quiz_{quiz_id[:8]}_{uuid.uuid4().hex[:8]}"
+
+    # Build problem description from quiz data
+    problem_description = quiz_data.get("problem_statement", "")
+
+    # Get starter code: use quiz's own boilerplate, fall back to file-based
+    quiz_starter = quiz_data.get("starter_code", {})
+    starter_code = quiz_starter.get(programming_language) if quiz_starter else None
+    if not starter_code:
+        starter_code = get_starter_code(quiz_data.get("title", ""), programming_language)
+
+    # Check for surveys
+    has_pre = bool(quiz_data.get("pre_survey"))
+    has_post = bool(quiz_data.get("post_survey"))
+    periodic_enabled = bool(quiz_data.get("recurrent_survey"))
+
+    # Create in-memory session (same as existing flow)
+    session_log = SessionLog(
+        user_id=user_id,
+        assignment_id=f"quiz_{quiz_id[:8]}",
+        session_id=session_id,
+        condition=condition,
+        code_start_timestamp=datetime.now().isoformat(),
+        ai_guess_history=[],
+        activity_log=[],
+        activity_summary=ActivitySummary(
+            total_keystrokes=0, total_code_executions=0,
+            total_suggestion_clicks=0, total_history_views=0,
+            focus_time_seconds=0, away_time_seconds=0,
+            font_changes=0, terminal_clears=0,
+            surveys_completed=0, peak_code_lines=0,
+            total_ai_analyses=0,
+        ),
+    )
+    if condition == 1:
+        session_log.problem_description = problem_description
+
+    active_sessions[session_id] = session_log
+    save_session_to_local(session_log)
+
+    return {
+        "status": "success",
+        "message": "Joined quiz successfully",
+        "condition": condition,
+        "session_id": session_id,
+        "problem_description": problem_description if condition == 1 else None,
+        "programming_language": programming_language,
+        "starter_code": starter_code,
+        "paste_allowed": 1,
+        "has_pre_survey": has_pre,
+        "has_post_survey": has_post,
+        "periodic_survey_enabled": periodic_enabled,
+        "final_survey_disabled": False,
+        "quiz_id": quiz_id,
+        "quiz_title": quiz_data.get("title", ""),
+        "time_limit_minutes": quiz_data.get("time_limit_minutes", 0),
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     
