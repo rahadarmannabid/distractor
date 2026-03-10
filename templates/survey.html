@@ -1371,10 +1371,13 @@
                 const progress = (answeredQuestions / totalQuestions) * 100;
 
                 document.getElementById('progressFill').style.width = `${progress}%`;
-                
+
                 const submitBtn = document.getElementById('submitBtn');
                 if (submitBtn) {
-                    submitBtn.disabled = answeredQuestions < totalQuestions;
+                    // Only required questions block submission
+                    const requiredQuestions = this.surveyConfig.questions.filter(q => q.type !== 'info_block' && q.required !== false);
+                    const answeredRequired = requiredQuestions.filter(q => this.responses[q.id] !== undefined).length;
+                    submitBtn.disabled = answeredRequired < requiredQuestions.length;
                 }
             }
 

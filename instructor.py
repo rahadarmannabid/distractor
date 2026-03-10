@@ -240,6 +240,8 @@ async def save_quiz(request: Request, payload: dict = Body(...)):
         "public_test_cases": payload.get("public_test_cases", []),
         "hidden_test_cases": payload.get("hidden_test_cases", []),
         "recurrent_survey": payload.get("recurrent_survey", []),
+        "recurrent_survey_interval": int(payload.get("recurrent_survey_interval", 4)),
+        "recurrent_survey_start": int(payload.get("recurrent_survey_start", 5)),
         "pre_survey": payload.get("pre_survey", []),
         "post_survey": payload.get("post_survey", []),
         "published": payload.get("published", False),
@@ -315,7 +317,8 @@ async def update_quiz(request: Request, quiz_id: str, payload: dict = Body(...))
         "title", "description", "problem_statement", "constraints",
         "allowed_languages", "time_limit_minutes", "condition", "starter_code",
         "public_test_cases", "hidden_test_cases",
-        "recurrent_survey", "pre_survey", "post_survey",
+        "recurrent_survey", "recurrent_survey_interval", "recurrent_survey_start",
+        "pre_survey", "post_survey",
         "published", "availability_start", "availability_end",
     ]
     updates = {k: payload[k] for k in updatable_fields if k in payload}

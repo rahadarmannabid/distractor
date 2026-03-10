@@ -2798,6 +2798,7 @@ async function initializeFromURL() {
             problemDescription: authData.problemDescription,
             programmingLanguage: authData.programmingLanguage || 'javascript',
             starterCode: authData.starterCode || null,
+            starterFiles: authData.starterFiles || null,
             startTime: authData.timestamp,
             pasteAllowed: authData.pasteAllowed !== undefined ? authData.pasteAllowed : 1,
             periodicSurveyEnabled: authData.periodicSurveyEnabled || false,
@@ -2859,19 +2860,47 @@ async function initializeFromURL() {
                 });
         })();
 
-        // Populate file tree sidebar
+        // Populate file tree sidebar (supports multiple files from starter_files)
         (function loadFileTree() {
             var fileTreeList = document.getElementById('fileTreeList');
             if (!fileTreeList || !authData.assignmentKey) return;
             var extMap = { javascript: 'js', python: 'py', c: 'c' };
             var lang = authData.programmingLanguage || 'javascript';
             var ext = extMap[lang] || 'txt';
-            var fileName = authData.assignmentKey + '.' + ext;
+            var fileIcon = '<svg class="file-tree__icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>';
 
-            var li = document.createElement('li');
-            li.className = 'file-tree__item active';
-            li.innerHTML = '<svg class="file-tree__icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>' + fileName;
-            fileTreeList.appendChild(li);
+            var starterFiles = currentSession.starterFiles;
+            if (starterFiles && Array.isArray(starterFiles) && starterFiles.length > 0) {
+                // Multi-file mode: store file contents for switching
+                window._quizFiles = starterFiles;
+                starterFiles.forEach(function(f, idx) {
+                    var li = document.createElement('li');
+                    li.className = 'file-tree__item' + (idx === 0 ? ' active' : '');
+                    li.innerHTML = fileIcon + f.filename;
+                    li.dataset.fileIdx = idx;
+                    li.onclick = function() {
+                        fileTreeList.querySelectorAll('.file-tree__item').forEach(function(el) { el.classList.remove('active'); });
+                        li.classList.add('active');
+                        if (window.editor && window._quizFiles) {
+                            // Save current file content
+                            var prevActive = window._activeFileIdx || 0;
+                            window._quizFiles[prevActive].content = window.editor.getValue();
+                            // Load selected file
+                            window._activeFileIdx = idx;
+                            window.editor.setValue(window._quizFiles[idx].content || '');
+                        }
+                    };
+                    fileTreeList.appendChild(li);
+                });
+                window._activeFileIdx = 0;
+            } else {
+                // Single file mode (default)
+                var fileName = authData.assignmentKey + '.' + ext;
+                var li = document.createElement('li');
+                li.className = 'file-tree__item active';
+                li.innerHTML = fileIcon + fileName;
+                fileTreeList.appendChild(li);
+            }
         })();
 
         // ✅ CHECK FOR PRE-SURVEY REQUIREMENT (FLEXIBLE)
@@ -3549,6 +3578,12 @@ function showCopilotPopup(explanation, suggestionCode, suggestionType) {
         elExplanation.textContent = explanation    || 'No explanation available';
         elCode.textContent        = suggestionCode || '// No suggestion';
 
+        // Hide explanation section for condition 3 (suggestion only)
+        var explanationSection = elExplanation.closest('.copilot-popup__explanation');
+        if (explanationSection) {
+            explanationSection.style.display = (currentSession.condition === 3) ? 'none' : '';
+        }
+
         popup.classList.remove('closing');
         popup.style.display = 'block';
         _copilotPositionAtCursor();
@@ -3654,6 +3689,8 @@ function _copilotHandleAccept() {
             insertion_line: position.lineNumber
         });
         addTerminalOutput('Accepted suggestion from popup', 'success');
+        currentSession.suggestionClickCount++;
+        checkSuggestionBasedPeriodicSurvey();
     } catch (e) {
         console.warn('Copilot popup accept error:', e);
     }
@@ -3667,6 +3704,8 @@ function _copilotHandleReject() {
             suggestion_text: _copilotPopupText.substring(0, 80)
         });
         addTerminalOutput('Dismissed suggestion popup', 'info');
+        currentSession.suggestionClickCount++;
+        checkSuggestionBasedPeriodicSurvey();
     } catch (e) {
         console.warn('Copilot popup reject error:', e);
     }
@@ -3740,26 +3779,12 @@ function loadSurveyConfig() {
 
 function incrementAnalysisCount() {
     surveyData.analysisCount++;
-    // OLD TRIGGER: Check if survey should be shown based on analysisCount
-    // This is now disabled in favor of suggestion-based triggers
-    // if (surveyData.analysisCount % surveyData.surveyInterval === 0 && 
-    //     !surveyData.pendingSurvey && 
-    //     !isSubmissionInProgress) {
-    //     showPeriodicSurvey();
-    // }
-
-    // NEW: Trigger periodic survey based on analysis (AI guess) count
-    try {
-        // call the unified check which will now use analysis count
-        checkSuggestionBasedPeriodicSurvey();
-    } catch (e) {
-        console.error('Error checking periodic survey after analysis increment:', e);
-    }
+    // Periodic survey is now triggered by suggestion clicks (accept/reject),
+    // not by analysis count. See _copilotHandleAccept / _copilotHandleReject.
 }
 
-// NEW: Check if periodic survey should be shown based on suggestion clicks
+// Check if periodic survey should be shown based on suggestion clicks (accept/reject)
 function checkSuggestionBasedPeriodicSurvey() {
-    // New behavior: periodic surveys are triggered by AI analyses (analysisCount)
     if (!currentSession.periodicSurveyEnabled) {
         return;
     }
@@ -3772,13 +3797,11 @@ function checkSuggestionBasedPeriodicSurvey() {
         return;
     }
 
-    // Prefer the explicit analysis counter if available, otherwise fall back to guess history length
-    const totalAnalyses = (typeof surveyData.analysisCount === 'number' ? surveyData.analysisCount : (currentSession.guessHistory ? currentSession.guessHistory.length : 0)) || 0;
-    if (totalAnalyses >= currentSession.nextPeriodicSurveyAt) {
-        // Update next survey trigger (use analyses count)
-        currentSession.nextPeriodicSurveyAt = totalAnalyses + currentSession.periodicSurveyInterval;
+    // Trigger based on suggestion interaction count (accept + reject clicks)
+    const totalClicks = currentSession.suggestionClickCount || 0;
+    if (totalClicks >= currentSession.nextPeriodicSurveyAt) {
+        currentSession.nextPeriodicSurveyAt = totalClicks + currentSession.periodicSurveyInterval;
         currentSession.periodicSurveysCompleted++;
-        // Show the survey
         showPeriodicSurvey();
     }
 }
@@ -3883,52 +3906,65 @@ function showFinalSurvey() {
     // Show survey modal
     document.getElementById('surveyModal').classList.remove('hidden');
     
-    // Update submit button to call submitFinalSurvey instead
-    const submitButton = document.getElementById('submitSurvey');
-    submitButton.onclick = submitFinalSurvey;
-    
-    // Add change listeners
-    document.getElementById('surveyQuestions').querySelectorAll('input[type="radio"]').forEach(radio => {
-        radio.addEventListener('change', () => {
-            const totalQuestions = surveyData.questions.length;
-            const answeredQuestions = document.getElementById('surveyQuestions').querySelectorAll('input[type="radio"]:checked').length;
-            submitButton.disabled = answeredQuestions < totalQuestions;
-        });
-    });
-    
-    // Initial check
-    submitButton.disabled = true;
+    // Reuse setup for event listeners and validation
+    setupSurveyEventListeners('surveyModal', 'submitSurvey', submitFinalSurvey);
     
     addTerminalOutput('Please complete the final survey before submitting your code', 'info');
 }
 function generateSurveyHTML(questions) {
-    return questions.map((question, index) => `
-        <div class="survey-question">
-            <div class="survey-question-text">Q${index + 1}: ${question}</div>
-            <div class="likert-scale">
-                <div class="likert-option">
-                    <input type="radio" id="q${index}_1" name="question_${index}" value="1">
-                    <label for="q${index}_1">Disagree<br>Strongly</label>
-                </div>
-                <div class="likert-option">
-                    <input type="radio" id="q${index}_2" name="question_${index}" value="2">
-                    <label for="q${index}_2">Disagree<br>Somewhat</label>
-                </div>
-                <div class="likert-option">
-                    <input type="radio" id="q${index}_3" name="question_${index}" value="3">
-                    <label for="q${index}_3">Neutral</label>
-                </div>
-                <div class="likert-option">
-                    <input type="radio" id="q${index}_4" name="question_${index}" value="4">
-                    <label for="q${index}_4">Agree<br>Somewhat</label>
-                </div>
-                <div class="likert-option">
-                    <input type="radio" id="q${index}_5" name="question_${index}" value="5">
-                    <label for="q${index}_5">Agree<br>Strongly</label>
-                </div>
-            </div>
-        </div>
-    `).join('');
+    return questions.map((question, index) => {
+        // Support both simple string questions and rich question objects
+        if (typeof question === 'string') {
+            return `
+                <div class="survey-question" data-required="true">
+                    <div class="survey-question-text">Q${index + 1}: ${question} <span style="color:#f85149;">*</span></div>
+                    <div class="likert-scale">
+                        ${[1,2,3,4,5].map(v => `
+                            <div class="likert-option">
+                                <input type="radio" id="q${index}_${v}" name="question_${index}" value="${v}">
+                                <label for="q${index}_${v}">${['Disagree<br>Strongly','Disagree<br>Somewhat','Neutral','Agree<br>Somewhat','Agree<br>Strongly'][v-1]}</label>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>`;
+        }
+        // Rich question object
+        const q = question;
+        const isRequired = q.required !== false;
+        const reqMark = isRequired ? ' <span style="color:#f85149;">*</span>' : '';
+        let inputHTML = '';
+
+        if (q.type === 'open_ended') {
+            const minLen = q.min_length || 0;
+            const maxLen = q.max_length || 1000;
+            inputHTML = `<textarea class="survey-textarea" name="question_${index}" placeholder="${q.placeholder || 'Enter your response...'}" maxlength="${maxLen}" style="width:100%;min-height:80px;padding:10px;background:#1e1e1e;color:#d4d4d4;border:1px solid #444;border-radius:6px;font-size:14px;resize:vertical;margin-top:8px;" data-min-length="${minLen}"></textarea>
+                <div class="char-counter" style="font-size:11px;color:#888;margin-top:4px;">0 / ${maxLen}${minLen > 0 ? ` (min ${minLen})` : ''}</div>`;
+        } else if (q.type === 'multiple_choice' && q.options) {
+            inputHTML = '<div style="margin-top:8px;">' + q.options.map((opt, oi) => `
+                <label style="display:block;padding:6px 0;cursor:pointer;color:#ccc;">
+                    <input type="radio" name="question_${index}" value="${oi}"> ${opt}
+                </label>`).join('') + '</div>';
+        } else if (q.type === 'slider') {
+            const scale = q.scale || {min:0,max:100,step:5,default:50};
+            inputHTML = `<div style="margin-top:8px;"><input type="range" name="question_${index}" min="${scale.min}" max="${scale.max}" step="${scale.step||1}" value="${scale.default||50}" style="width:100%;" oninput="this.nextElementSibling.textContent=this.value+'${scale.unit||''}'"><span style="color:#ccc;font-size:13px;">${scale.default||50}${scale.unit||''}</span></div>`;
+        } else {
+            // Default: likert
+            const scale = q.scale || {min:1,max:5,minLabel:'Strongly Disagree',maxLabel:'Strongly Agree'};
+            inputHTML = '<div class="likert-scale">';
+            for (let v = scale.min; v <= scale.max; v++) {
+                let lbl = `<strong>${v}</strong>`;
+                if (v === scale.min) lbl += `<br><small>${scale.minLabel}</small>`;
+                if (v === scale.max) lbl += `<br><small>${scale.maxLabel}</small>`;
+                inputHTML += `<div class="likert-option"><input type="radio" id="q${index}_${v}" name="question_${index}" value="${v}"><label for="q${index}_${v}">${lbl}</label></div>`;
+            }
+            inputHTML += '</div>';
+        }
+
+        return `<div class="survey-question" data-required="${isRequired}" data-question-id="${q.id || 'q_'+index}">
+            <div class="survey-question-text">Q${index + 1}: ${q.question}${reqMark}</div>
+            ${inputHTML}
+        </div>`;
+    }).join('');
 }
 
 function generateAIHistoryDisplayHTML(aiHistoryContext) {
@@ -4098,36 +4134,59 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
 function setupSurveyEventListeners(modalId, submitButtonId, submitFunction) {
     const modal = document.getElementById(modalId);
     const submitButton = document.getElementById(submitButtonId);
-    
-    // Handle both periodic and final survey modals
+
     const questionsPanelId = modalId === 'surveyModal' ? 'surveyQuestions' : 'finalSurveyQuestions';
     const questionsPanel = document.getElementById(questionsPanelId);
-    
-    // Check if all questions are answered
+
     function checkSurveyCompletion() {
-        const totalQuestions = surveyData.questions.length;
-        const answeredQuestions = questionsPanel.querySelectorAll('input[type="radio"]:checked').length;
-        
-        submitButton.disabled = answeredQuestions < totalQuestions;
+        const questionDivs = questionsPanel.querySelectorAll('.survey-question');
+        let allRequiredAnswered = true;
+        questionDivs.forEach(div => {
+            const isRequired = div.dataset.required !== 'false';
+            if (!isRequired) return;
+            const radio = div.querySelector('input[type="radio"]:checked');
+            const textarea = div.querySelector('textarea');
+            const range = div.querySelector('input[type="range"]');
+            if (radio || range) return; // radio checked or range always has value
+            if (textarea) {
+                const minLen = parseInt(textarea.dataset.minLength) || 0;
+                if (textarea.value.trim().length < Math.max(minLen, 1)) allRequiredAnswered = false;
+                return;
+            }
+            // No input answered
+            allRequiredAnswered = false;
+        });
+        submitButton.disabled = !allRequiredAnswered;
     }
-    
-    // Add change listeners to all radio buttons in the questions panel
+
+    // Listen for changes on all inputs
     questionsPanel.querySelectorAll('input[type="radio"]').forEach(radio => {
         radio.addEventListener('change', checkSurveyCompletion);
     });
-    
-    // Submit button listener
+    questionsPanel.querySelectorAll('textarea').forEach(ta => {
+        ta.addEventListener('input', function() {
+            // Update char counter
+            const counter = ta.parentElement.querySelector('.char-counter');
+            if (counter) {
+                const minLen = parseInt(ta.dataset.minLength) || 0;
+                counter.textContent = `${ta.value.length} / ${ta.maxLength}${minLen > 0 ? ` (min ${minLen})` : ''}`;
+                counter.style.color = (minLen > 0 && ta.value.trim().length < minLen) ? '#f85149' : '#888';
+            }
+            checkSurveyCompletion();
+        });
+    });
+
     submitButton.onclick = submitFunction;
-    
-    // Initial check
     checkSurveyCompletion();
 }
 
 async function submitPeriodicSurvey() {
     const responses = collectSurveyResponses('surveyModal');
-    if (responses.length !== surveyData.questions.length) {
-        alert('Please answer all questions before submitting.');
-        console.error('Incomplete survey - missing answers');
+    // Check all required questions are answered
+    const requiredCount = surveyData.questions.filter(q => typeof q === 'string' || q.required !== false).length;
+    const answeredRequired = responses.filter(r => r.required !== false && r.response !== null).length;
+    if (answeredRequired < requiredCount) {
+        alert('Please answer all required questions before submitting.');
         return;
     }
     
@@ -4177,21 +4236,11 @@ async function submitPeriodicSurvey() {
 }
 
 async function submitFinalSurvey() {
-    const modal = document.getElementById('surveyModal');
-    const responses = [];
-    
-    for (let i = 0; i < surveyData.questions.length; i++) {
-        const checkedRadio = modal.querySelector(`input[name="question_${i}"]:checked`);
-        if (checkedRadio) {
-            responses.push({
-                question: surveyData.questions[i],
-                response: parseInt(checkedRadio.value)
-            });
-        }
-    }
-    
-    if (responses.length !== surveyData.questions.length) {
-        alert('Please answer all questions before submitting.');
+    const responses = collectSurveyResponses('surveyModal');
+    const requiredCount = surveyData.questions.filter(q => typeof q === 'string' || q.required !== false).length;
+    const answeredRequired = responses.filter(r => r.required !== false && r.response !== null).length;
+    if (answeredRequired < requiredCount) {
+        alert('Please answer all required questions before submitting.');
         return;
     }
     
@@ -4323,17 +4372,35 @@ function downloadCodeFile() {
 function collectSurveyResponses(modalId) {
     const modal = document.getElementById(modalId);
     const responses = [];
-    
+
     for (let i = 0; i < surveyData.questions.length; i++) {
+        const q = surveyData.questions[i];
+        const questionText = typeof q === 'string' ? q : q.question;
+        const isRequired = typeof q === 'string' ? true : q.required !== false;
+
         const checkedRadio = modal.querySelector(`input[name="question_${i}"]:checked`);
+        const textarea = modal.querySelector(`textarea[name="question_${i}"]`);
+        const range = modal.querySelector(`input[type="range"][name="question_${i}"]`);
+
+        let value = null;
         if (checkedRadio) {
+            value = isNaN(checkedRadio.value) ? checkedRadio.value : parseInt(checkedRadio.value);
+        } else if (textarea && textarea.value.trim()) {
+            value = textarea.value.trim();
+        } else if (range) {
+            value = parseInt(range.value);
+        }
+
+        if (value !== null || !isRequired) {
             responses.push({
-                question: surveyData.questions[i],
-                response: parseInt(checkedRadio.value)
+                question: questionText,
+                question_id: typeof q === 'object' ? (q.id || `q_${i}`) : `q_${i}`,
+                response: value,
+                required: isRequired
             });
         }
     }
-    
+
     return responses;
 }
 
@@ -4450,81 +4517,81 @@ let originalSubmitToDatabase = null;
 async function loadSurveyQuestions() {
     const defaultQuestions = [
         "I trust the AI's responses.",
-        "I am confident in the AI's responses.", 
+        "I am confident in the AI's responses.",
         "I am suspicious of the AI's intentions.",
         "The AI's responses are consistent."
     ];
-    try {
-        const response = await fetch('/survey-config', {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-            }
-        });
+    const fallbackInterval = 4;
 
-        if (response.ok) {
-            const config = await response.json();
-            surveyData.questions = Array.isArray(config.questions) && config.questions.length ? config.questions : defaultQuestions;
-            const interval = Number(config.feedback_interval);
-            if (!Number.isNaN(interval) && interval > 0) {
-                surveyData.surveyInterval = interval;
-                if (currentSession) {
-                    currentSession.periodicSurveyInterval = interval;
-                    if (!currentSession.periodicSurveyStart || currentSession.periodicSurveyStart < 1) {
-                        currentSession.periodicSurveyStart = interval;
-                    }
-                    if (!currentSession.nextPeriodicSurveyAt || currentSession.periodicSurveysCompleted === 0) {
-                        currentSession.nextPeriodicSurveyAt = currentSession.periodicSurveyStart;
-                    }
-                }
-            } else {
-                const fallbackInterval = 4;
-                surveyData.surveyInterval = fallbackInterval;
-                if (currentSession) {
-                    if (!currentSession.periodicSurveyInterval || currentSession.periodicSurveyInterval < 1) {
-                        currentSession.periodicSurveyInterval = fallbackInterval;
-                    }
-                    if (!currentSession.periodicSurveyStart || currentSession.periodicSurveyStart < 1) {
-                        currentSession.periodicSurveyStart = fallbackInterval;
-                    }
-                    if (!currentSession.nextPeriodicSurveyAt || currentSession.periodicSurveysCompleted === 0) {
-                        currentSession.nextPeriodicSurveyAt = currentSession.periodicSurveyStart;
-                    }
-                }
-            }
-        } else {
-            console.warn('Failed to load survey config, using defaults');
-            const fallbackInterval = 4;
-            surveyData.questions = defaultQuestions;
-            surveyData.surveyInterval = fallbackInterval;
-            if (currentSession) {
-                if (!currentSession.periodicSurveyInterval || currentSession.periodicSurveyInterval < 1) {
-                    currentSession.periodicSurveyInterval = fallbackInterval;
-                }
-                if (!currentSession.periodicSurveyStart || currentSession.periodicSurveyStart < 1) {
-                    currentSession.periodicSurveyStart = fallbackInterval;
-                }
-                if (!currentSession.nextPeriodicSurveyAt || currentSession.periodicSurveysCompleted === 0) {
-                    currentSession.nextPeriodicSurveyAt = currentSession.periodicSurveyStart;
-                }
-            }
-        }
-    } catch (error) {
-        console.error('Error loading survey config:', error);
-        const fallbackInterval = 4;
-        surveyData.questions = defaultQuestions;
-        surveyData.surveyInterval = fallbackInterval;
+    function applyInterval(interval) {
+        surveyData.surveyInterval = interval;
         if (currentSession) {
-            if (!currentSession.periodicSurveyInterval || currentSession.periodicSurveyInterval < 1) {
-                currentSession.periodicSurveyInterval = fallbackInterval;
-            }
+            currentSession.periodicSurveyInterval = interval;
             if (!currentSession.periodicSurveyStart || currentSession.periodicSurveyStart < 1) {
-                currentSession.periodicSurveyStart = fallbackInterval;
+                currentSession.periodicSurveyStart = interval;
             }
             if (!currentSession.nextPeriodicSurveyAt || currentSession.periodicSurveysCompleted === 0) {
                 currentSession.nextPeriodicSurveyAt = currentSession.periodicSurveyStart;
             }
         }
+    }
+
+    function applyDefaults() {
+        surveyData.questions = defaultQuestions;
+        applyInterval(fallbackInterval);
+    }
+
+    try {
+        // For quiz-based assignments, load recurrent survey from per-assignment config
+        const assignmentKey = currentSession && currentSession.assignmentKey;
+        const isQuiz = assignmentKey && assignmentKey.startsWith('quiz_');
+        let url = '/survey-config';
+        if (isQuiz) {
+            url = '/survey-config/' + encodeURIComponent(assignmentKey);
+        }
+
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (response.ok) {
+            const config = await response.json();
+
+            if (isQuiz && config.periodic_survey) {
+                // Quiz-based: use rich question objects from periodic_survey
+                const ps = config.periodic_survey;
+                const questions = ps.questions || [];
+                if (questions.length > 0) {
+                    // Store as rich objects; generateSurveyHTML handles both strings and objects
+                    surveyData.questions = questions;
+                    surveyData.questionsAreRich = true;
+                } else {
+                    surveyData.questions = defaultQuestions;
+                }
+                const interval = Number(ps.interval);
+                applyInterval(!Number.isNaN(interval) && interval > 0 ? interval : fallbackInterval);
+                // Apply per-quiz start point
+                const startVal = Number(ps.start);
+                if (!Number.isNaN(startVal) && startVal > 0 && currentSession) {
+                    currentSession.periodicSurveyStart = startVal;
+                    if (!currentSession.nextPeriodicSurveyAt || currentSession.periodicSurveysCompleted === 0) {
+                        currentSession.nextPeriodicSurveyAt = startVal;
+                    }
+                }
+            } else {
+                // Global config: simple string questions
+                surveyData.questions = Array.isArray(config.questions) && config.questions.length ? config.questions : defaultQuestions;
+                const interval = Number(config.feedback_interval);
+                applyInterval(!Number.isNaN(interval) && interval > 0 ? interval : fallbackInterval);
+            }
+        } else {
+            console.warn('Failed to load survey config, using defaults');
+            applyDefaults();
+        }
+    } catch (error) {
+        console.error('Error loading survey config:', error);
+        applyDefaults();
     }
 }
 

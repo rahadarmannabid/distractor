@@ -2004,7 +2004,8 @@ async def get_survey_config(assignment_key: str):
                     },
                     "periodic_survey": {
                         "enabled": bool(quiz_data.get("recurrent_survey")),
-                        "interval": 4,
+                        "interval": int(quiz_data.get("recurrent_survey_interval", 4)),
+                        "start": int(quiz_data.get("recurrent_survey_start", 5)),
                         "title": "Quick Check-in",
                         "description": "Please rate your current experience",
                         "questions": quiz_data.get("recurrent_survey", []),
@@ -3011,8 +3012,18 @@ async def student_quiz_join(request: Request):
 
     # Get starter code: use quiz's own boilerplate, fall back to file-based
     quiz_starter = quiz_data.get("starter_code", {})
-    starter_code = quiz_starter.get(programming_language) if quiz_starter else None
-    if not starter_code:
+    lang_starter = quiz_starter.get(programming_language) if quiz_starter else None
+
+    # Normalize: could be a string (old format) or list of {filename, content}
+    starter_files = None
+    starter_code = None
+    if isinstance(lang_starter, list) and lang_starter:
+        # Multi-file format: [{filename, content}, ...]
+        starter_files = lang_starter
+        starter_code = lang_starter[0].get("content", "") if lang_starter else ""
+    elif isinstance(lang_starter, str) and lang_starter:
+        starter_code = lang_starter
+    else:
         starter_code = get_starter_code(quiz_data.get("title", ""), programming_language)
 
     # Check for surveys
@@ -3052,10 +3063,12 @@ async def student_quiz_join(request: Request):
         "problem_description": problem_description if condition == 1 else None,
         "programming_language": programming_language,
         "starter_code": starter_code,
+        "starter_files": starter_files,
         "paste_allowed": 1,
         "has_pre_survey": has_pre,
         "has_post_survey": has_post,
         "periodic_survey_enabled": periodic_enabled,
+        "periodic_survey_start": int(quiz_data.get("recurrent_survey_start", 5)),
         "final_survey_disabled": False,
         "quiz_id": quiz_id,
         "quiz_title": quiz_data.get("title", ""),

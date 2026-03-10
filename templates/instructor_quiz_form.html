@@ -144,6 +144,10 @@
       overflow: hidden;
     }
     .code-editor-box textarea { border: none; border-radius: 0; }
+    .starter-file-card {
+      background: var(--input-bg); border: 1px solid var(--border);
+      border-radius: 8px; padding: 12px; margin-bottom: 10px;
+    }
 
     /* ── Test cases ── */
     .tc-row { display: flex; gap: 10px; margin-bottom: 10px; align-items: flex-start; }
@@ -344,18 +348,18 @@
     <div class="cond-grid">
       <div class="cond-card {% if current_cond == 1 %}selected{% endif %}" onclick="selectCondition(1, this)">
         <div class="cond-num">1</div>
-        <h3>Full View</h3>
-        <p>Students see <strong>AI's problem guess</strong>, <strong>next-line suggestion</strong>, and the <strong>correct problem description</strong>. Allows direct comparison between AI guess and actual problem.</p>
+        <h3>No AI</h3>
+        <p>Students receive <strong>no AI assistance</strong>. No suggestions, no explanation, no AI guess. Pure coding environment.</p>
       </div>
       <div class="cond-card {% if current_cond == 2 %}selected{% endif %}" onclick="selectCondition(2, this)">
         <div class="cond-num">2</div>
-        <h3>AI Guess Only</h3>
-        <p>Students see the <strong>AI's problem guess</strong> and <strong>next-line suggestion</strong>. No correct problem description shown for comparison.</p>
+        <h3>Explanation + Suggestion</h3>
+        <p>Students see an <strong>AI explanation</strong> of their code and a <strong>next-line code suggestion</strong> in the copilot popup.</p>
       </div>
       <div class="cond-card {% if current_cond == 3 %}selected{% endif %}" onclick="selectCondition(3, this)">
         <div class="cond-num">3</div>
-        <h3>Suggestions Only</h3>
-        <p>Students see only <strong>next-line code suggestions</strong>. No AI problem guess or correct description shown.</p>
+        <h3>Suggestion Only</h3>
+        <p>Students see only a <strong>next-line code suggestion</strong>. No AI explanation is shown.</p>
       </div>
     </div>
 
@@ -368,13 +372,14 @@
 
   <div class="card">
     <h2>Starter Code (Boilerplate)</h2>
-    <p class="subtitle">Provide the initial code students see when they start. One editor per language.</p>
+    <p class="subtitle">Add one or more files per language. Students will see these in the file tree.</p>
 
     <div class="code-tabs" id="codeTabs"></div>
-    <div class="code-editor-box">
-      <textarea class="code-area" id="starterCodeEditor" rows="12" placeholder="# Write your starter code here..."></textarea>
+    <div id="starterFilesContainer">
+      <!-- File cards rendered by JS -->
     </div>
-    <p class="hint" style="margin-top:8px;">Tab between languages above. Code is saved per-language.</p>
+    <button class="add-btn" id="addFileBtn" onclick="addStarterFile()" style="margin-top:8px;">+ Add File</button>
+    <p class="hint" style="margin-top:8px;">Tab between languages above. Each language can have multiple files.</p>
   </div>
 
   <div class="card">
@@ -438,6 +443,24 @@
 
     <!-- Recurrent -->
     <div class="survey-panel" id="panel-recurrent">
+      <div style="background:rgba(88,166,255,0.08);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+        <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:6px;">
+          Show survey every N suggestion interactions
+        </label>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <input type="number" id="recurrentSurveyInterval" min="1" max="100" value="{{ quiz.recurrent_survey_interval if quiz and quiz.recurrent_survey_interval else 4 }}" style="width:80px;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;">
+          <span style="color:var(--muted);font-size:13px;">e.g. 4 = every 4th accept/reject of an AI suggestion</span>
+        </div>
+      </div>
+      <div style="background:rgba(88,166,255,0.08);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+        <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:6px;">
+          First survey appears after N suggestion interactions
+        </label>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <input type="number" id="recurrentSurveyStart" min="1" max="100" value="{{ quiz.recurrent_survey_start if quiz and quiz.recurrent_survey_start else 5 }}" style="width:80px;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;">
+          <span style="color:var(--muted);font-size:13px;">e.g. 5 = first survey after 5 suggestion interactions</span>
+        </div>
+      </div>
       <div id="recurrentSurveyList"></div>
       <button class="add-btn" onclick="addSurveyQuestion('recurrentSurveyList')">+ Add Recurrent Question</button>
     </div>
@@ -475,7 +498,7 @@ const TOTAL_STEPS = 5;
 let currentStep = 0;
 let selectedCondition = {{ quiz.condition if quiz and quiz.condition else 1 }};
 
-// Starter code storage: { python: "...", javascript: "...", c: "..." }
+// Starter code storage: { python: [{filename, content}, ...], javascript: [...], c: [...] }
 let starterCodeStore = {};
 let activeCodeLang = null;
 
@@ -518,7 +541,18 @@ const DEFAULT_RECURRENT_SURVEY = [
 
 // ─── Init ───
 {% if quiz and quiz.starter_code %}
-starterCodeStore = {{ quiz.starter_code | tojson }};
+(function() {
+  const raw = {{ quiz.starter_code | tojson }};
+  // Migrate old format { lang: "code" } → { lang: [{filename, content}] }
+  for (const [lang, val] of Object.entries(raw)) {
+    if (typeof val === 'string') {
+      const extMap = { python: 'py', javascript: 'js', c: 'c' };
+      starterCodeStore[lang] = [{ filename: 'main.' + (extMap[lang] || 'txt'), content: val }];
+    } else if (Array.isArray(val)) {
+      starterCodeStore[lang] = val;
+    }
+  }
+})();
 {% endif %}
 
 {% if quiz and quiz.pre_survey %}
@@ -569,7 +603,7 @@ function selectCondition(n, el) {
   document.getElementById('selectedCondition').value = n;
 }
 
-// ─── Starter Code Tabs ───
+// ─── Starter Code Tabs & Multi-File ───
 function updateCodeTabs() {
   const langs = getSelectedLanguages();
   const tabBar = document.getElementById('codeTabs');
@@ -577,7 +611,7 @@ function updateCodeTabs() {
   langs.forEach((lang, i) => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'code-tab' + (i === 0 ? ' active' : '');
+    btn.className = 'code-tab' + ((activeCodeLang === lang || (!activeCodeLang && i === 0)) ? ' active' : '');
     btn.textContent = lang.charAt(0).toUpperCase() + lang.slice(1);
     btn.onclick = () => switchCodeTab(lang, btn);
     tabBar.appendChild(btn);
@@ -585,20 +619,67 @@ function updateCodeTabs() {
   if (langs.length > 0 && (!activeCodeLang || !langs.includes(activeCodeLang))) {
     switchCodeTab(langs[0], tabBar.firstChild);
   } else if (activeCodeLang) {
-    const editor = document.getElementById('starterCodeEditor');
-    editor.value = starterCodeStore[activeCodeLang] || '';
+    renderStarterFiles();
   }
 }
 
 function switchCodeTab(lang, btn) {
-  // Save current
-  if (activeCodeLang) {
-    starterCodeStore[activeCodeLang] = document.getElementById('starterCodeEditor').value;
-  }
+  saveCurrentFiles();
   activeCodeLang = lang;
   document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
   if (btn) btn.classList.add('active');
-  document.getElementById('starterCodeEditor').value = starterCodeStore[lang] || '';
+  renderStarterFiles();
+}
+
+function saveCurrentFiles() {
+  if (!activeCodeLang) return;
+  const container = document.getElementById('starterFilesContainer');
+  const cards = container.querySelectorAll('.starter-file-card');
+  const files = [];
+  cards.forEach(card => {
+    const fn = card.querySelector('.starter-filename').value.trim();
+    const content = card.querySelector('.starter-file-content').value;
+    if (fn) files.push({ filename: fn, content: content });
+  });
+  starterCodeStore[activeCodeLang] = files;
+}
+
+function renderStarterFiles() {
+  const container = document.getElementById('starterFilesContainer');
+  container.innerHTML = '';
+  const files = starterCodeStore[activeCodeLang] || [];
+  if (files.length === 0) {
+    // Add one default file
+    const extMap = { python: 'py', javascript: 'js', c: 'c' };
+    const ext = extMap[activeCodeLang] || 'txt';
+    files.push({ filename: 'main.' + ext, content: '' });
+    starterCodeStore[activeCodeLang] = files;
+  }
+  files.forEach((f, i) => {
+    container.appendChild(createFileCard(f, i));
+  });
+}
+
+function createFileCard(file, idx) {
+  const card = document.createElement('div');
+  card.className = 'starter-file-card';
+  card.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+      <input type="text" class="starter-filename" value="${escHtml(file.filename || '')}" placeholder="filename.ext" style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-family:'Courier New',monospace;font-size:13px;">
+      <button class="remove-btn" onclick="this.closest('.starter-file-card').remove()" title="Remove file">&times;</button>
+    </div>
+    <textarea class="starter-file-content code-area" rows="10" placeholder="// Write your starter code here...">${escHtml(file.content || '')}</textarea>
+  `;
+  return card;
+}
+
+function addStarterFile() {
+  if (!activeCodeLang) return;
+  const extMap = { python: 'py', javascript: 'js', c: 'c' };
+  const ext = extMap[activeCodeLang] || 'txt';
+  const container = document.getElementById('starterFilesContainer');
+  const idx = container.children.length;
+  container.appendChild(createFileCard({ filename: 'file' + (idx + 1) + '.' + ext, content: '' }, idx));
 }
 
 function getSelectedLanguages() {
@@ -647,16 +728,32 @@ function createSurveyCard(q, idx) {
   const typeOptions = ['likert','likert_7_with_na','multiple_choice','open_ended','slider','info_block']
     .map(t => `<option value="${t}" ${q.type===t?'selected':''}>${t.replace(/_/g,' ')}</option>`).join('');
 
+  const isRequired = q.required !== false;
+  const minLen = q.min_length || 0;
+
   let html = `
     <div class="sq-top">
       <span class="sq-badge">Q${idx+1}</span>
-      <button class="remove-btn" onclick="this.closest('.sq-card').remove()">&times;</button>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);cursor:pointer;">
+          <input type="checkbox" class="sq-required" ${isRequired ? 'checked' : ''}> Required
+        </label>
+        <button class="remove-btn" onclick="this.closest('.sq-card').remove()">&times;</button>
+      </div>
     </div>
     <div class="sq-fields">
       <div class="sq-row-inline">
         <input type="text" class="sq-question" placeholder="Question text" value="${escHtml(q.question || '')}">
         <select class="sq-type" onchange="onTypeChange(this)">${typeOptions}</select>
       </div>`;
+
+  // Min length field for open_ended
+  if (q.type === 'open_ended') {
+    html += `<div class="sq-minlen-row" style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+      <label style="font-size:12px;color:var(--muted);">Min characters:</label>
+      <input type="number" class="sq-min-length" min="0" max="5000" value="${minLen}" style="width:70px;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;">
+    </div>`;
+  }
 
   // Multiple choice options
   if (q.type === 'multiple_choice' && q.options && q.options.length) {
@@ -676,6 +773,7 @@ function createSurveyCard(q, idx) {
 
 function onTypeChange(sel) {
   const card = sel.closest('.sq-card');
+  // Multiple choice options
   let optDiv = card.querySelector('.sq-options');
   if (sel.value === 'multiple_choice') {
     if (!optDiv) {
@@ -686,6 +784,21 @@ function onTypeChange(sel) {
     }
   } else {
     if (optDiv) optDiv.remove();
+  }
+  // Min length for open_ended
+  let minRow = card.querySelector('.sq-minlen-row');
+  if (sel.value === 'open_ended') {
+    if (!minRow) {
+      minRow = document.createElement('div');
+      minRow.className = 'sq-minlen-row';
+      minRow.style.cssText = 'margin-top:6px;display:flex;align-items:center;gap:8px;';
+      minRow.innerHTML = '<label style="font-size:12px;color:var(--muted);">Min characters:</label><input type="number" class="sq-min-length" min="0" max="5000" value="0" style="width:70px;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;">';
+      // Insert after the row-inline div
+      const rowInline = card.querySelector('.sq-row-inline');
+      rowInline.parentNode.insertBefore(minRow, rowInline.nextSibling);
+    }
+  } else {
+    if (minRow) minRow.remove();
   }
 }
 
@@ -706,14 +819,22 @@ function addSurveyQuestion(containerId) {
 
 function collectSurvey(containerId) {
   return Array.from(document.querySelectorAll('#' + containerId + ' .sq-card')).map((card, i) => {
-    // Start from stored metadata (preserves scale, placeholder, min_length, etc.)
+    // Start from stored metadata (preserves scale, placeholder, etc.)
     let base = {};
     try { base = JSON.parse(card.dataset.meta || '{}'); } catch(e) {}
     const q = card.querySelector('.sq-question').value.trim();
     const t = card.querySelector('.sq-type').value;
     const opts = Array.from(card.querySelectorAll('.sq-opt-input')).map(inp => inp.value.trim()).filter(Boolean);
+    const reqCb = card.querySelector('.sq-required');
+    const isRequired = reqCb ? reqCb.checked : true;
+    const minLenInput = card.querySelector('.sq-min-length');
+    const minLen = minLenInput ? parseInt(minLenInput.value) || 0 : (base.min_length || 0);
     // Override editable fields, keep everything else from the original
-    return Object.assign(base, { id: base.id || `q_${i}`, question: q, type: t, required: true, options: opts });
+    const result = Object.assign(base, { id: base.id || `q_${i}`, question: q, type: t, required: isRequired, options: opts });
+    if (t === 'open_ended') {
+      result.min_length = minLen;
+    }
+    return result;
   }).filter(sq => sq.question);
 }
 
@@ -722,9 +843,9 @@ function escHtml(s) { const d = document.createElement('div'); d.textContent = s
 // ─── Steps Navigation ───
 function goToStep(n) {
   if (n < 0 || n >= TOTAL_STEPS) return;
-  // Save code before leaving step 2
-  if (currentStep === 2 && activeCodeLang) {
-    starterCodeStore[activeCodeLang] = document.getElementById('starterCodeEditor').value;
+  // Save files before leaving step 2
+  if (currentStep === 2) {
+    saveCurrentFiles();
   }
   // Build review on step 4
   if (n === 4) buildReview();
@@ -764,9 +885,9 @@ function prevStep() { goToStep(currentStep - 1); }
 
 // ─── Review ───
 function buildReview() {
-  if (activeCodeLang) starterCodeStore[activeCodeLang] = document.getElementById('starterCodeEditor').value;
+  saveCurrentFiles();
   const langs = getSelectedLanguages();
-  const condLabels = { 1: 'Condition 1 — Full View', 2: 'Condition 2 — AI Guess Only', 3: 'Condition 3 — Suggestions Only' };
+  const condLabels = { 1: 'Condition 1 — No AI', 2: 'Condition 2 — Explanation + Suggestion', 3: 'Condition 3 — Suggestion Only' };
   const preSq = collectSurvey('preSurveyList');
   const postSq = collectSurvey('postSurveyList');
   const recSq = collectSurvey('recurrentSurveyList');
@@ -778,7 +899,7 @@ function buildReview() {
     <dt>Languages</dt><dd>${langs.join(', ')}</dd>
     <dt>Time Limit</dt><dd>${document.getElementById('time_limit').value || '0'} min</dd>
     <dt>Condition</dt><dd>${condLabels[selectedCondition]}</dd>
-    <dt>Starter Code</dt><dd>${langs.filter(l=>starterCodeStore[l]).length} language(s) with boilerplate</dd>
+    <dt>Starter Code</dt><dd>${langs.filter(l=>starterCodeStore[l]&&starterCodeStore[l].length).length} language(s), ${langs.reduce((sum,l)=>(starterCodeStore[l]||[]).length+sum,0)} file(s) total</dd>
     <dt>Public Tests</dt><dd>${collectTestCases('publicTC').length} test case(s)</dd>
     <dt>Hidden Tests</dt><dd>${collectTestCases('hiddenTC').length} test case(s)</dd>
     <dt>Pre-Survey</dt><dd>${preSq.length} question(s)</dd>
@@ -790,7 +911,7 @@ function buildReview() {
 
 // ─── Save ───
 async function saveQuiz() {
-  if (activeCodeLang) starterCodeStore[activeCodeLang] = document.getElementById('starterCodeEditor').value;
+  saveCurrentFiles();
 
   const btn = document.getElementById('nextBtn');
   btn.disabled = true; btn.textContent = 'Saving...';
@@ -812,6 +933,8 @@ async function saveQuiz() {
     pre_survey: collectSurvey('preSurveyList'),
     post_survey: collectSurvey('postSurveyList'),
     recurrent_survey: collectSurvey('recurrentSurveyList'),
+    recurrent_survey_interval: parseInt(document.getElementById('recurrentSurveyInterval').value) || 4,
+    recurrent_survey_start: parseInt(document.getElementById('recurrentSurveyStart').value) || 5,
   };
 
   const url = EDIT_MODE ? '/instructor/update-quiz/' + QUIZ_ID : '/instructor/save-quiz';
