@@ -702,23 +702,12 @@
                 </div>
             </div>
 
-            <!-- Entry mode tabs -->
-            {% if quiz_mode is not defined or not quiz_mode %}
-            <div class="entry-tabs" id="entryTabs" style="display:flex;gap:0;margin-bottom:20px;border-radius:8px;overflow:hidden;border:1px solid #3e3e42;">
-                <button type="button" class="entry-tab active" id="tabAssignment" onclick="switchTab('assignment')"
-                    style="flex:1;padding:12px;border:none;cursor:pointer;font-size:14px;font-weight:600;font-family:inherit;
-                    background:#3e3e42;color:#fff;transition:all 0.2s;">
-                    Assignment Key
-                </button>
-                <button type="button" class="entry-tab" id="tabQuizCode" onclick="switchTab('quizcode')"
-                    style="flex:1;padding:12px;border:none;cursor:pointer;font-size:14px;font-weight:600;font-family:inherit;
-                    background:#1e1e1e;color:#8b949e;transition:all 0.2s;">
-                    Quiz Code
-                </button>
-            </div>
-            {% endif %}
-
-            <form class="login-form" id="loginForm" {% if quiz_mode is defined and quiz_mode %}style="display:none"{% endif %}>
+            <form class="login-form" id="loginForm">
+                {% if quiz_mode is defined and quiz_mode %}
+                <div style="background:rgba(88,166,255,0.1);padding:14px;border-left:4px solid #58a6ff;border-radius:8px;margin-bottom:18px;font-size:14px;color:#c9d1d9;">
+                    <strong>{{ quiz_title }}</strong>{% if quiz_description %}<br>{{ quiz_description }}{% endif %}
+                </div>
+                {% endif %}
                 <div class="form-group">
                     <label class="form-label" for="userId">
                         👤 User ID
@@ -739,15 +728,16 @@
     <label class="form-label" for="assignmentKey">
         🔑 Assignment Key
     </label>
-    <input 
-        type="text" 
-        id="assignmentKey" 
-        name="assignmentKey" 
-        class="form-input" 
+    <input
+        type="text"
+        id="assignmentKey"
+        name="assignmentKey"
+        class="form-input"
         placeholder="Enter your assignment access key"
         required
         minlength="4"
         autocomplete="off"
+        {% if quiz_mode is defined and quiz_mode %}value="{{ access_code }}" readonly{% endif %}
     >
     <small class="info-text">
         Only valid assignment keys are accepted. Invalid keys will be rejected for security.
@@ -766,9 +756,15 @@
         style="cursor: pointer;"
     >
         <option value="">Select your preferred language</option>
-        <option value="javascript">JavaScript</option>
-        <option value="python">Python</option>
-        <option value="c">C</option>
+        {% if quiz_mode is defined and quiz_mode and allowed_languages %}
+            {% for lang in allowed_languages %}
+            <option value="{{ lang }}">{{ lang|capitalize }}</option>
+            {% endfor %}
+        {% else %}
+            <option value="javascript">JavaScript</option>
+            <option value="python">Python</option>
+            <option value="c">C</option>
+        {% endif %}
     </select>
     <small class="info-text">
         Choose the programming language you'll be working with in the IDE.
@@ -785,53 +781,6 @@
                 </div>
             </form>
             
-            <!-- Quiz Code Form (alternative entry) -->
-            <form class="login-form" id="quizCodeForm" style="display:{% if quiz_mode is defined and quiz_mode %}block{% else %}none{% endif %};">
-                {% if quiz_mode is defined and quiz_mode %}
-                <div style="background:rgba(88,166,255,0.1);padding:14px;border-left:4px solid #58a6ff;border-radius:8px;margin-bottom:18px;font-size:14px;color:#c9d1d9;">
-                    <strong>{{ quiz_title }}</strong>{% if quiz_description %}<br>{{ quiz_description }}{% endif %}
-                </div>
-                <input type="hidden" id="quizAccessCode" value="{{ access_code }}">
-                {% else %}
-                <div class="form-group">
-                    <label class="form-label" for="quizAccessCode">Quiz Code</label>
-                    <input type="text" id="quizAccessCode" name="quizAccessCode" class="form-input"
-                           placeholder="Enter quiz access code" required minlength="6" autocomplete="off">
-                    <small class="info-text">Enter the code shared by your instructor.</small>
-                </div>
-                {% endif %}
-
-                <div class="form-group">
-                    <label class="form-label" for="quizUserId">User ID</label>
-                    <input type="text" id="quizUserId" name="quizUserId" class="form-input"
-                           placeholder="Enter your unique user ID" required minlength="3" autocomplete="off">
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label" for="quizLanguage">Programming Language</label>
-                    <select id="quizLanguage" name="quizLanguage" class="form-input" required style="cursor:pointer;">
-                        <option value="">Select language</option>
-                        {% if quiz_mode is defined and quiz_mode %}
-                            {% for lang in allowed_languages %}
-                            <option value="{{ lang }}">{{ lang|capitalize }}</option>
-                            {% endfor %}
-                        {% else %}
-                            <option value="python">Python</option>
-                            <option value="javascript">JavaScript</option>
-                            <option value="c">C</option>
-                        {% endif %}
-                    </select>
-                </div>
-
-                <button type="submit" class="login-button" id="quizJoinButton">
-                    Join Quiz
-                </button>
-
-                <div class="error-message hidden" id="quizErrorMessage">
-                    <span>&#9888;&#65039;</span>
-                    <span id="quizErrorText">Failed to join quiz.</span>
-                </div>
-            </form>
 
             <div class="info-section">
                 <div class="info-text">
@@ -934,9 +883,9 @@
             consentScreen.style.display = 'block';
             hideError();
             
-            // Clear login form
+            // Clear login form (preserve pre-filled assignment key)
             userIdInput.value = '';
-            assignmentKeyInput.value = '';
+            if (!assignmentKeyInput.readOnly) assignmentKeyInput.value = '';
         });
 
         // Show/hide error messages
@@ -1006,13 +955,11 @@
             hideError();
             
             try {
-                // Test authentication with backend
+                // Try standard assignment key auth first
                 const response = await fetch('/authenticate', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ 
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
                         user_id: userId,
                         assignment_key: assignmentKey,
                         programming_language: selectedLanguage
@@ -1020,16 +967,66 @@
                 });
 
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.detail || 'Authentication failed');
+                    // Standard auth failed — try as instructor-created assignment
+                    const quizRes = await fetch('/quiz/join', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            access_code: assignmentKey,
+                            user_id: userId,
+                            programming_language: selectedLanguage
+                        })
+                    });
+
+                    if (!quizRes.ok) {
+                        const quizErr = await quizRes.json();
+                        throw new Error(quizErr.detail || 'Invalid assignment key. Please verify your credentials.');
+                    }
+
+                    // Quiz join succeeded
+                    const data = await quizRes.json();
+                    const sessionToken = Date.now().toString(36) + Math.random().toString(36).substring(2);
+                    sessionStorage.setItem('authData', JSON.stringify({
+                        userId: userId,
+                        assignmentKey: 'quiz_' + assignmentKey,
+                        sessionToken: sessionToken,
+                        condition: data.condition,
+                        problemDescription: data.problem_description,
+                        sessionId: data.session_id,
+                        programmingLanguage: selectedLanguage,
+                        timestamp: new Date().toISOString(),
+                        consentGiven: true,
+                        consentTimestamp: new Date().toISOString(),
+                        pasteAllowed: data.paste_allowed !== undefined ? data.paste_allowed : 1,
+                        hasPreSurvey: data.has_pre_survey || false,
+                        hasPostSurvey: data.has_post_survey || false,
+                        starterCode: data.starter_code || null,
+                        starterFiles: data.starter_files || null,
+                        periodicSurveyEnabled: data.periodic_survey_enabled || false,
+                        periodicSurveyStart: data.periodic_survey_start || 5,
+                        finalSurveyDisabled: data.final_survey_disabled || false,
+                        quizId: data.quiz_id || null,
+                        quizTitle: data.quiz_title || null,
+                        timeLimitMinutes: data.time_limit_minutes || 0,
+                    }));
+
+                    loginButton.innerHTML = 'Authenticated! Redirecting...';
+                    loginButton.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
+
+                    let redirectUrl;
+                    if (data.has_pre_survey) {
+                        redirectUrl = '/survey.html?type=pre';
+                    } else {
+                        redirectUrl = '/index.html?session=' + sessionToken + '&user=' + encodeURIComponent(userId);
+                    }
+                    setTimeout(() => { window.location.href = redirectUrl; }, 1000);
+                    return;
                 }
 
+                // Standard assignment key auth succeeded
                 const data = await response.json();
-                
-                // Generate unique session URL
                 const sessionToken = generateSessionToken(userId, assignmentKey);
-                
-// Store credentials and consent status in sessionStorage for the IDE page
+
                 sessionStorage.setItem('authData', JSON.stringify({
                     userId: userId,
                     assignmentKey: assignmentKey,
@@ -1050,14 +1047,10 @@
                     finalSurveyDisabled: data.final_survey_disabled || false
                 }));
 
-                // Download assignment
+                // Download assignment PDF
                 try {
-                    // Show download in progress
                     loginButton.innerHTML = '<div class="loading"><span class="spinner"></span>Downloading assignment...</div>';
-                    
-                    // Trigger PDF download using fetch for better error handling
                     const downloadResponse = await fetch(`/download-assignment/${assignmentKey}`);
-                    
                     if (downloadResponse.ok) {
                         const blob = await downloadResponse.blob();
                         const url = URL.createObjectURL(blob);
@@ -1067,78 +1060,44 @@
                         document.body.appendChild(link);
                         link.click();
                         document.body.removeChild(link);
-                        
-                        // Clean up
                         setTimeout(() => URL.revokeObjectURL(url), 100);
-                        
-                        // Show success toast notification
-                        showToast(
-                            'Assignment Downloaded!',
-                            `File saved: ${assignmentKey}.pdf`,
-                            'download',
-                            2500
-                        );
-                        
-                        // Update button briefly
-                        loginButton.innerHTML = '✅ Download complete';
+                        showToast('Assignment Downloaded!', `File saved: ${assignmentKey}.pdf`, 'download', 2500);
+                        loginButton.innerHTML = 'Download complete';
                         loginButton.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
                         await new Promise(resolve => setTimeout(resolve, 1000));
-                        
                     } else {
-                        throw new Error('Assignment PDF not found on server');
+                        throw new Error('not found');
                     }
-                    
                 } catch (downloadError) {
                     console.error('PDF download error:', downloadError);
-                    
-                    // Show warning toast notification
-                    showToast(
-                        'Assignment File Not Available',
-                        'Contact your instructor for assignment details',
-                        'warning',
-                        3500
-                    );
-                    
-                    // Update button
-                    loginButton.innerHTML = '⚠️ File not available';
+                    showToast('Assignment File Not Available', 'Contact your instructor for assignment details', 'warning', 3500);
+                    loginButton.innerHTML = 'File not available';
                     loginButton.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
-                    
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 }
-                
-                // Check if pre-survey is required and redirect accordingly
+
                 let redirectUrl;
                 let successMessage;
-                
                 if (data.has_pre_survey) {
                     redirectUrl = `survey.html?type=pre`;
-                    successMessage = '✅ Authentication successful! Redirecting to pre-study survey...';
+                    successMessage = 'Authentication successful! Redirecting to pre-study survey...';
                 } else {
                     redirectUrl = `index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
-                    successMessage = '✅ Authentication successful! Redirecting to coding environment...';
+                    successMessage = 'Authentication successful! Redirecting to coding environment...';
                 }
-                
-                // Show success message briefly before redirect
                 loginButton.innerHTML = successMessage;
                 loginButton.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
-                
-                setTimeout(() => {
-                    window.location.href = redirectUrl;
-                }, 1500);
+                setTimeout(() => { window.location.href = redirectUrl; }, 1500);
 
             } catch (error) {
                 console.error('Authentication error:', error);
-                
                 let errorMsg = error.message;
-                if (errorMsg.includes('Invalid assignment key')) {
-                    errorMsg = 'Invalid assignment key. Access denied. Please verify your credentials with the research administrator.';
-                } else if (errorMsg.includes('network') || errorMsg.includes('fetch')) {
+                if (errorMsg.includes('network') || errorMsg.includes('fetch')) {
                     errorMsg = 'Network error. Please check your connection and try again.';
                 }
-                
                 showError(errorMsg);
                 loginButton.disabled = false;
-                loginButton.innerHTML = 'Enter Research Environment';
+                loginButton.innerHTML = 'Enter Coding Environment';
                 loginButton.style.background = 'linear-gradient(135deg, #f97316, #ea580c)';
             }
         });
@@ -1150,9 +1109,10 @@
             checkbox.classList.remove('checked');
             consentCheckbox.classList.remove('checked');
             continueButton.disabled = true;
-            
+
             userIdInput.value = '';
-            assignmentKeyInput.value = '';
+            // Don't clear pre-filled assignment key (readonly field from direct link)
+            if (!assignmentKeyInput.readOnly) assignmentKeyInput.value = '';
             programmingLanguageSelect.value = '';
             hideError();
             
@@ -1222,108 +1182,7 @@
         sessionStorage.removeItem('authData');
         localStorage.removeItem('authData');
 
-        // ─── Tab switching (Assignment Key vs Quiz Code) ───
-        function switchTab(mode) {
-            const tabA = document.getElementById('tabAssignment');
-            const tabQ = document.getElementById('tabQuizCode');
-            const formA = document.getElementById('loginForm');
-            const formQ = document.getElementById('quizCodeForm');
-            if (!tabA || !tabQ) return;
-            if (mode === 'quizcode') {
-                tabQ.style.background = '#3e3e42'; tabQ.style.color = '#fff';
-                tabA.style.background = '#1e1e1e'; tabA.style.color = '#8b949e';
-                formA.style.display = 'none'; formQ.style.display = 'block';
-            } else {
-                tabA.style.background = '#3e3e42'; tabA.style.color = '#fff';
-                tabQ.style.background = '#1e1e1e'; tabQ.style.color = '#8b949e';
-                formQ.style.display = 'none'; formA.style.display = 'block';
-            }
-        }
 
-        // ─── Quiz Code join handler ───
-        const quizCodeForm = document.getElementById('quizCodeForm');
-        if (quizCodeForm) {
-            quizCodeForm.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                if (!consentGiven) { showError('Please complete the consent form first'); return; }
-
-                const accessCode = document.getElementById('quizAccessCode').value.trim();
-                const userId = document.getElementById('quizUserId').value.trim();
-                const lang = document.getElementById('quizLanguage').value;
-                const btn = document.getElementById('quizJoinButton');
-                const errBox = document.getElementById('quizErrorMessage');
-                const errText = document.getElementById('quizErrorText');
-
-                if (!accessCode || !userId || !lang) {
-                    errText.textContent = 'Please fill in all fields.';
-                    errBox.classList.remove('hidden'); return;
-                }
-
-                btn.disabled = true;
-                btn.innerHTML = '<div class="loading"><span class="spinner"></span>Joining...</div>';
-                errBox.classList.add('hidden');
-
-                try {
-                    const res = await fetch('/quiz/join', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            access_code: accessCode,
-                            user_id: userId,
-                            programming_language: lang,
-                        }),
-                    });
-                    if (!res.ok) {
-                        const err = await res.json();
-                        throw new Error(err.detail || 'Failed to join quiz');
-                    }
-                    const data = await res.json();
-
-                    const sessionToken = Date.now().toString(36) + Math.random().toString(36).substring(2);
-                    sessionStorage.setItem('authData', JSON.stringify({
-                        userId: userId,
-                        assignmentKey: 'quiz_' + accessCode,
-                        sessionToken: sessionToken,
-                        condition: data.condition,
-                        problemDescription: data.problem_description,
-                        sessionId: data.session_id,
-                        programmingLanguage: lang,
-                        timestamp: new Date().toISOString(),
-                        consentGiven: true,
-                        consentTimestamp: new Date().toISOString(),
-                        pasteAllowed: data.paste_allowed !== undefined ? data.paste_allowed : 1,
-                        hasPreSurvey: data.has_pre_survey || false,
-                        hasPostSurvey: data.has_post_survey || false,
-                        starterCode: data.starter_code || null,
-                        starterFiles: data.starter_files || null,
-                        periodicSurveyEnabled: data.periodic_survey_enabled || false,
-                        periodicSurveyStart: data.periodic_survey_start || 5,
-                        finalSurveyDisabled: data.final_survey_disabled || false,
-                        quizId: data.quiz_id || null,
-                        quizTitle: data.quiz_title || null,
-                        timeLimitMinutes: data.time_limit_minutes || 0,
-                    }));
-
-                    btn.innerHTML = 'Joined! Redirecting...';
-                    btn.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
-
-                    let redirectUrl;
-                    if (data.has_pre_survey) {
-                        redirectUrl = '/survey.html?type=pre';
-                    } else {
-                        redirectUrl = '/index.html?session=' + sessionToken + '&user=' + encodeURIComponent(userId);
-                    }
-                    setTimeout(() => { window.location.href = redirectUrl; }, 1000);
-
-                } catch (err) {
-                    errText.textContent = err.message;
-                    errBox.classList.remove('hidden');
-                    btn.disabled = false;
-                    btn.innerHTML = 'Join Quiz';
-                    btn.style.background = '';
-                }
-            });
-        }
     </script>
 </body>
 </html>
