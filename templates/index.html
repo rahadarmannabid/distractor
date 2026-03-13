@@ -3540,9 +3540,11 @@ function _copilotPositionAtCursor() {
         if (!wrapper) return;
         var wrapperRect = wrapper.getBoundingClientRect();
 
-        var charWidthApprox = 7.2;
+        // Use Monaco's computed font info so width scales with font size
+        var fontInfo = window.editor.getOption(monaco.editor.EditorOption.fontInfo);
+        var charWidth = (fontInfo && fontInfo.typicalHalfwidthCharacterWidth) || 7.2;
         var cursorX = layoutInfo.contentLeft
-                    + indentCols * charWidthApprox
+                    + indentCols * charWidth
                     - scrollLeft
                     + (editorRect.left - wrapperRect.left);
         var cursorY = topForInsertLine
@@ -4617,6 +4619,12 @@ async function loadSurveyQuestions() {
 
        decreaseFontBtn.disabled = currentFontSize <= minFontSize;
        increaseFontBtn.disabled = currentFontSize >= maxFontSize;
+
+       // Reposition the suggestion popup if it is currently visible
+       var popup = document.getElementById('copilotPopup');
+       if (popup && popup.style.display === 'block') {
+           _copilotPositionAtCursor();
+       }
    }
 
 function increaseFontSize() {
