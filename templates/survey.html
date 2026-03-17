@@ -1517,29 +1517,97 @@
                         
                     } else if (this.surveyType === 'post') {
                         const isSubmissionPending = sessionStorage.getItem('postSurveySubmissionPending') === 'true';
-                        
-                        if (isSubmissionPending) {
+
+                        // Check if there are more problems in this multi-problem quiz
+                        const totalProblems = authData.totalProblems || 1;
+                        const currentProbIdx = authData.currentProblemIndex || 0;
+                        const hasMoreProblems = isSubmissionPending && (currentProbIdx < totalProblems - 1);
+
+                        if (hasMoreProblems) {
+                            // Multi-problem quiz: advance to next problem
                             sessionStorage.removeItem('postSurveySubmissionPending');
-                            
-                            submitBtn.textContent = 'Downloading Your Code...';
-                            
+                            submitBtn.textContent = 'Loading Next Problem...';
+
                             try {
                                 const cachedData = this.retrieveCachedSubmissionData();
-                                
+                                const code = (cachedData && cachedData.code) ? cachedData.code : '';
+
+                                const nextRes = await fetch('/quiz/next-problem', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        session_id: authData.sessionId,
+                                        code: code,
+                                        programming_language: authData.programmingLanguage || 'python',
+                                    })
+                                });
+
+                                if (!nextRes.ok) throw new Error('Failed to load next problem');
+                                const nextData = await nextRes.json();
+
+                                if (nextData.status === 'complete') {
+                                    // All problems done — fall through to final submission
+                                    throw new Error('__ALL_DONE__');
+                                }
+
+                                // Update authData with next problem info
+                                authData.currentProblemIndex = nextData.problem_index;
+                                authData.problemDescription = nextData.problem_description;
+                                authData.starterCode = nextData.starter_code;
+                                authData.starterFiles = nextData.starter_files;
+                                sessionStorage.setItem('authData', JSON.stringify(authData));
+
+                                this.clearCachedSubmissionData();
+
+                                // Clear autosave so previous problem's code doesn't persist
+                                const autosaveKey = `ide_autosave_${userId}_${authData.sessionId}`;
+                                localStorage.removeItem(autosaveKey);
+
+                                // Clear periodic survey storage so recurrent survey resets fresh
+                                sessionStorage.removeItem(`periodicSurveys_${authData.sessionId}`);
+
+                                submitBtn.textContent = 'Next Problem Ready!';
+                                await new Promise(resolve => setTimeout(resolve, 800));
+
+                                allowNavigation = true;
+                                window.location.href = `/index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
+
+                            } catch (error) {
+                                if (error.message === '__ALL_DONE__') {
+                                    // Fall through to final submission below
+                                } else {
+                                    console.error('Next problem error:', error);
+                                    this.showError('Failed to load next problem: ' + error.message);
+                                    submitBtn.disabled = false;
+                                    submitBtn.textContent = 'Retry';
+                                    return;
+                                }
+                            }
+                        }
+
+                        if (isSubmissionPending && !hasMoreProblems) {
+                            // Final problem or single-problem quiz: submit code
+                            sessionStorage.removeItem('postSurveySubmissionPending');
+
+                            submitBtn.textContent = 'Downloading Your Code...';
+
+                            try {
+                                const cachedData = this.retrieveCachedSubmissionData();
+
                                 // Download code file after post-survey completion
                                 if (cachedData && cachedData.code) {
                                     this.downloadCodeFromCache(cachedData);
                                     await new Promise(resolve => setTimeout(resolve, 1500));
                                 }
-                                
+
                                 submitBtn.textContent = 'Submitting Your Code...';
-                                
+
                                 if (!cachedData) {
                                     throw new Error('Could not find submission data. Please return to IDE and submit again.');
                                 }
-                                
+
                                 const periodicSurveysData = this.restorePeriodicSurveysFromStorage();
-                                
+
                                 const codeResponse = await fetch('/submit', {
                                     method: 'POST',
                                     headers: {
@@ -1560,33 +1628,33 @@
                                         survey_data: periodicSurveysData || cachedData.surveys
                                     })
                                 });
-                                
+
                                 if (!codeResponse.ok) {
                                     throw new Error('Code submission failed');
                                 }
-                                
+
                                 const result = await codeResponse.json();
-                                
+
                                 this.clearCachedSubmissionData();
                                 this.clearPeriodicSurveysFromStorage();
                                 sessionStorage.removeItem('authData');
-                                
+
                                 submitBtn.textContent = '✅ All Data Submitted!';
                                 this.showError(`Survey and code submitted successfully!\n\nSubmission ID: ${result.submission_id}\nDatabase Status: ${result.firebase_status}`, 'success');
-                                
+
                                 await new Promise(resolve => setTimeout(resolve, 3000));
-                                
+
                                 allowNavigation = true;
                                 window.location.href = '/home.html';
-                                
+
                             } catch (error) {
                                 console.error('Code submission error:', error);
                                 this.showError('Code submission failed: ' + error.message);
                                 submitBtn.disabled = false;
                                 submitBtn.textContent = 'Retry Submission';
                             }
-                            
-                        } else {
+
+                        } else if (!isSubmissionPending) {
                             allowNavigation = true;
                             window.location.href = `/index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
                         }

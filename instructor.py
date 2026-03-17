@@ -54,6 +54,23 @@ def _generate_access_code(length: int = 8) -> str:
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
+def _normalize_quiz_data(quiz_data: dict) -> dict:
+    """Backward-compat: wrap legacy single-problem/single-condition into list format."""
+    if "problems" not in quiz_data and "problem_statement" in quiz_data:
+        quiz_data["problems"] = [{
+            "problem_statement": quiz_data.pop("problem_statement", ""),
+            "constraints": quiz_data.pop("constraints", ""),
+            "starter_code": quiz_data.pop("starter_code", {}),
+            "public_test_cases": quiz_data.pop("public_test_cases", []),
+            "hidden_test_cases": quiz_data.pop("hidden_test_cases", []),
+        }]
+    if "conditions" not in quiz_data and "condition" in quiz_data:
+        quiz_data["conditions"] = [int(quiz_data.pop("condition", 1))]
+    elif "conditions" not in quiz_data:
+        quiz_data["conditions"] = [1]
+    return quiz_data
+
+
 # ─── OTP Auth Routes ────────────────────────────────────────────────────────
 
 @router.get("/login", response_class=HTMLResponse)
@@ -213,16 +230,25 @@ async def save_quiz(request: Request, payload: dict = Body(...)):
         return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
 
     title = (payload.get("title") or "").strip()
-    problem_statement = (payload.get("problem_statement") or "").strip()
     if not title:
         return JSONResponse({"success": False, "error": "Title is required."}, status_code=400)
-    if not problem_statement:
-        return JSONResponse({"success": False, "error": "Problem statement is required."}, status_code=400)
 
-    # Validate condition (single: 1, 2, or 3)
-    condition = int(payload.get("condition", 1))
-    if condition not in (1, 2, 3):
-        return JSONResponse({"success": False, "error": "Condition must be 1, 2, or 3."}, status_code=400)
+    # Validate problems list (at least one required)
+    problems = payload.get("problems", [])
+    if not problems or not isinstance(problems, list):
+        return JSONResponse({"success": False, "error": "At least one problem is required."}, status_code=400)
+    for i, prob in enumerate(problems):
+        if not (prob.get("problem_statement") or "").strip():
+            return JSONResponse({"success": False, "error": f"Problem {i+1} requires a problem statement."}, status_code=400)
+
+    # Validate conditions (list, each must be 1, 2, or 3)
+    conditions = payload.get("conditions", [1])
+    if not conditions or not isinstance(conditions, list):
+        return JSONResponse({"success": False, "error": "At least one condition is required."}, status_code=400)
+    for c in conditions:
+        if int(c) not in (1, 2, 3):
+            return JSONResponse({"success": False, "error": "Each condition must be 1, 2, or 3."}, status_code=400)
+    conditions = [int(c) for c in conditions]
 
     quiz_id = str(uuid.uuid4())
     access_code = _generate_access_code()
@@ -231,14 +257,10 @@ async def save_quiz(request: Request, payload: dict = Body(...)):
         "id": quiz_id,
         "title": title,
         "description": (payload.get("description") or "").strip(),
-        "problem_statement": problem_statement,
-        "constraints": (payload.get("constraints") or "").strip(),
+        "problems": problems,
         "allowed_languages": payload.get("allowed_languages", ["python", "javascript", "c"]),
         "time_limit_minutes": int(payload.get("time_limit_minutes", 0)),
-        "condition": condition,
-        "starter_code": payload.get("starter_code", {}),
-        "public_test_cases": payload.get("public_test_cases", []),
-        "hidden_test_cases": payload.get("hidden_test_cases", []),
+        "conditions": conditions,
         "recurrent_survey": payload.get("recurrent_survey", []),
         "recurrent_survey_interval": int(payload.get("recurrent_survey_interval", 4)),
         "recurrent_survey_start": int(payload.get("recurrent_survey_start", 5)),
@@ -283,6 +305,8 @@ async def edit_quiz_page(request: Request, quiz_id: str):
         raise HTTPException(status_code=403, detail="Not authorised to edit this quiz")
 
     quiz["id"] = quiz_id
+    # Normalize legacy quizzes (single problem/condition) into new list format
+    quiz = _normalize_quiz_data(quiz)
     return templates.TemplateResponse("instructor_quiz_form.html", {
         "request": request,
         "instructor_email": email,
@@ -308,15 +332,28 @@ async def update_quiz(request: Request, quiz_id: str, payload: dict = Body(...))
     if existing.get("created_by") != email:
         return JSONResponse({"success": False, "error": "Not authorised"}, status_code=403)
 
-    # Validate condition if provided
-    condition = payload.get("condition")
-    if condition is not None and int(condition) not in (1, 2, 3):
-        return JSONResponse({"success": False, "error": "Condition must be 1, 2, or 3."}, status_code=400)
+    # Validate conditions if provided
+    conditions = payload.get("conditions")
+    if conditions is not None:
+        if not isinstance(conditions, list) or not conditions:
+            return JSONResponse({"success": False, "error": "At least one condition is required."}, status_code=400)
+        for c in conditions:
+            if int(c) not in (1, 2, 3):
+                return JSONResponse({"success": False, "error": "Each condition must be 1, 2, or 3."}, status_code=400)
+        payload["conditions"] = [int(c) for c in conditions]
+
+    # Validate problems if provided
+    problems = payload.get("problems")
+    if problems is not None:
+        if not isinstance(problems, list) or not problems:
+            return JSONResponse({"success": False, "error": "At least one problem is required."}, status_code=400)
+        for i, prob in enumerate(problems):
+            if not (prob.get("problem_statement") or "").strip():
+                return JSONResponse({"success": False, "error": f"Problem {i+1} requires a problem statement."}, status_code=400)
 
     updatable_fields = [
-        "title", "description", "problem_statement", "constraints",
-        "allowed_languages", "time_limit_minutes", "condition", "starter_code",
-        "public_test_cases", "hidden_test_cases",
+        "title", "description", "problems",
+        "allowed_languages", "time_limit_minutes", "conditions",
         "recurrent_survey", "recurrent_survey_interval", "recurrent_survey_start",
         "pre_survey", "post_survey",
         "published", "availability_start", "availability_end",

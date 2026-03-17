@@ -1008,6 +1008,8 @@
                         quizId: data.quiz_id || null,
                         quizTitle: data.quiz_title || null,
                         timeLimitMinutes: data.time_limit_minutes || 0,
+                        totalProblems: data.total_problems || 1,
+                        currentProblemIndex: data.current_problem_index || 0,
                     }));
 
                     loginButton.innerHTML = 'Authenticated! Redirecting...';

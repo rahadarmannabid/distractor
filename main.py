@@ -449,18 +449,20 @@ def detect_programming_language(code):
     # Default to generic programming language
     return "code"
 
-async def execute_code_safely(code: str, language: str, timeout: int = 10):
+async def execute_code_safely(code: str, language: str, timeout: int = 10, files: list = None):
     """
-    Execute code safely in a subprocess with timeout and security restrictions
+    Execute code safely in a subprocess with timeout and security restrictions.
+    When files is provided, all files are written to a shared temp directory
+    so they can import/include each other.
     """
     if not code.strip():
         return {"success": False, "output": "", "error": "No code provided"}
     
     try:
         if language == "python":
-            return await execute_python_code(code, timeout)
+            return await execute_python_code(code, timeout, files=files)
         elif language == "c":
-            return await execute_c_code(code, timeout)
+            return await execute_c_code(code, timeout, files=files)
         elif language == "javascript":
             return {"success": False, "output": "", "error": "JavaScript should be executed in frontend"}
         else:
@@ -469,11 +471,12 @@ async def execute_code_safely(code: str, language: str, timeout: int = 10):
         logger.error(f"Code execution error: {e}")
         return {"success": False, "output": "", "error": f"Execution failed: {str(e)}"}
 
-async def execute_python_code(code: str, timeout: int = 10):
+async def execute_python_code(code: str, timeout: int = 10, files: list = None):
     """
-    Execute Python code safely with restrictions
+    Execute Python code safely with restrictions.
+    When `files` is provided, all files are written to a shared temp directory
+    so they can import each other. The active file (code) is executed.
     """
-    # Security restrictions - block dangerous imports and operations
     dangerous_patterns = [
         'import os', 'import sys', 'import subprocess', 'import shutil',
         'import socket', 'import urllib', 'import requests', 'import http',
@@ -482,42 +485,56 @@ async def execute_python_code(code: str, timeout: int = 10):
         'getattr(', 'setattr(', 'delattr(', 'hasattr(',
         'input(', 'raw_input('
     ]
-    
-    code_lower = code.lower()
-    for pattern in dangerous_patterns:
-        if pattern in code_lower:
-            return {
-                "success": False, 
-                "output": "", 
-                "error": f"Security restriction: '{pattern}' is not allowed for safety reasons"
-            }
-    
-    # Create a temporary file
+
+    all_code_to_check = [code] + ([f.get("content", "") for f in files] if files else [])
+    for src in all_code_to_check:
+        src_lower = src.lower()
+        for pattern in dangerous_patterns:
+            if pattern in src_lower:
+                return {
+                    "success": False,
+                    "output": "",
+                    "error": f"Security restriction: '{pattern}' is not allowed for safety reasons"
+                }
+
+    tmpdir = tempfile.mkdtemp()
     try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as temp_file:
-            temp_file.write(code)
-            temp_file_path = temp_file.name
-        
-        # Execute with timeout and restricted environment
+        if files and len(files) > 1:
+            main_file_path = None
+            for f in files:
+                fname = f.get("filename", "main.py")
+                if not fname.endswith(".py"):
+                    fname += ".py"
+                fpath = os.path.join(tmpdir, fname)
+                with open(fpath, 'w', encoding='utf-8') as fh:
+                    fh.write(f.get("content", ""))
+                if f.get("content", "") == code:
+                    main_file_path = fpath
+
+            if not main_file_path:
+                main_file_path = os.path.join(tmpdir, files[0].get("filename", "main.py"))
+                if not main_file_path.endswith(".py"):
+                    main_file_path += ".py"
+                with open(main_file_path, 'w', encoding='utf-8') as fh:
+                    fh.write(code)
+        else:
+            main_file_path = os.path.join(tmpdir, 'main.py')
+            with open(main_file_path, 'w', encoding='utf-8') as fh:
+                fh.write(code)
+
         process = await asyncio.create_subprocess_exec(
-            sys.executable, temp_file_path,
+            sys.executable, main_file_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env={'PYTHONPATH': '', 'PATH': '/usr/bin:/bin'}  # Restricted environment
+            cwd=tmpdir,
+            env={'PYTHONPATH': tmpdir, 'PATH': '/usr/bin:/bin'}
         )
-        
+
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-            
             stdout_str = stdout.decode('utf-8', errors='replace')
             stderr_str = stderr.decode('utf-8', errors='replace')
-            
-            # Clean up temp file
-            try:
-                os.unlink(temp_file_path)
-            except:
-                pass
-            
+
             if process.returncode == 0:
                 return {
                     "success": True,
@@ -530,37 +547,35 @@ async def execute_python_code(code: str, timeout: int = 10):
                     "output": stdout_str,
                     "error": stderr_str or f"Process exited with code {process.returncode}"
                 }
-                
+
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()
-            try:
-                os.unlink(temp_file_path)
-            except:
-                pass
             return {
                 "success": False,
                 "output": "",
                 "error": f"Code execution timed out after {timeout} seconds"
             }
-            
+
     except Exception as e:
-        try:
-            os.unlink(temp_file_path)
-        except:
-            pass
         return {
             "success": False,
             "output": "",
             "error": f"Execution error: {str(e)}"
         }
-async def execute_c_code(code: str, timeout: int = 10):
+    finally:
+        try:
+            import shutil as _shutil
+            _shutil.rmtree(tmpdir)
+        except Exception:
+            pass
+async def execute_c_code(code: str, timeout: int = 10, files: list = None):
     """
-    Execute C code safely with security restrictions and async compilation
+    Execute C code safely with security restrictions and async compilation.
+    When `files` is provided, all files are written to a shared temp directory
+    so they can #include each other. All .c files are compiled together.
     """
-    # Security restrictions - block dangerous includes and functions
     dangerous_patterns = [
-        # Dangerous system includes
         '#include <unistd.h>',
         '#include <sys/',
         '#include <stdlib.h>',
@@ -572,8 +587,6 @@ async def execute_c_code(code: str, timeout: int = 10):
         '#include <sys/socket.h>',
         '#include <netinet/',
         '#include <arpa/',
-        
-        # Dangerous function calls
         'system(',
         'exec(',
         'fork(',
@@ -596,37 +609,41 @@ async def execute_c_code(code: str, timeout: int = 10):
         'bind(',
         'connect(',
     ]
-    
-    code_lower = code.lower()
-    for pattern in dangerous_patterns:
-        if pattern.lower() in code_lower:
-            return {
-                "success": False,
-                "output": "",
-                "error": f"Security restriction: '{pattern}' is not allowed for safety reasons"
-            }
-    
-    # Create temporary directory
-    tmpdir = tempfile.mkdtemp()
-    
-    try:
-        c_file_path = os.path.join(tmpdir, 'temp.c')
-        exe_file_path = os.path.join(tmpdir, 'temp.out')
 
-        # Write the C code to a file
-        try:
+    all_code_to_check = [code] + ([f.get("content", "") for f in files] if files else [])
+    for src in all_code_to_check:
+        src_lower = src.lower()
+        for pattern in dangerous_patterns:
+            if pattern.lower() in src_lower:
+                return {
+                    "success": False,
+                    "output": "",
+                    "error": f"Security restriction: '{pattern}' is not allowed for safety reasons"
+                }
+
+    tmpdir = tempfile.mkdtemp()
+
+    try:
+        c_file_paths = []
+        if files and len(files) > 1:
+            for f in files:
+                fname = f.get("filename", "main.c")
+                fpath = os.path.join(tmpdir, fname)
+                with open(fpath, 'w', encoding='utf-8') as fh:
+                    fh.write(f.get("content", ""))
+                if fname.endswith('.c'):
+                    c_file_paths.append(fpath)
+        else:
+            c_file_path = os.path.join(tmpdir, 'main.c')
             with open(c_file_path, 'w', encoding='utf-8') as c_file:
                 c_file.write(code)
-        except Exception as e:
-            return {
-                "success": False,
-                "output": "",
-                "error": f"Failed to write C file: {str(e)}"
-            }
+            c_file_paths = [c_file_path]
 
-        # Compile the C code using ASYNC subprocess - OPTIMIZED FOR SPEED
+        exe_file_path = os.path.join(tmpdir, 'temp.out')
+
+        compile_args = ['gcc'] + c_file_paths + ['-o', exe_file_path, '-std=c11', '-I', tmpdir]
         compile_process = await asyncio.create_subprocess_exec(
-            'gcc', c_file_path, '-o', exe_file_path, '-std=c11',
+            *compile_args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -771,19 +788,25 @@ class SessionLog(BaseModel):
     code_start_timestamp: str
     code_submit_timestamp: Optional[str] = None
     submitted_full_code: Optional[str] = None
-    
-    # ADD THESE NEW FIELDS FOR SURVEY TRACKING
+    submitted_files: Optional[List[Dict[str, Any]]] = None
+
+    # Multi-problem tracking
+    current_problem_index: int = 0
+    total_problems: int = 1
+    quiz_id: Optional[str] = None
+    per_problem_submissions: List[Dict[str, Any]] = []
+
+    # Survey tracking
     pre_survey_status: str = "not_started"
     pre_survey_timestamp: Optional[str] = None
     pre_survey_responses: Optional[Dict[str, Any]] = None
-    
+
     post_survey_status: str = "not_started"
     post_survey_timestamp: Optional[str] = None
-    post_survey_responses: Optional[Dict[str, Any]] = None
-    
+    post_survey_responses: Optional[List[Dict[str, Any]]] = None
+
     periodic_survey_count: int = 0
-    
-    # Your existing fields continue below...
+
     ai_guess_history: List[AIGuessEntry] = []
     correct_description_history: Optional[List[AIGuessEntry]] = None
     suggestions_only_history: Optional[List[AIGuessEntry]] = None
@@ -1076,11 +1099,16 @@ class CodeResponse(BaseModel):
     correct_next_line: Optional[str] = None
 
 
+class FileItem(BaseModel):
+    filename: str
+    content: str
+
 class ExecuteRequest(BaseModel):
     code: str
     language: str
     user_id: str = None
     session_id: str = None
+    files: Optional[List[FileItem]] = None
 
 class ExecuteResponse(BaseModel):
     success: bool
@@ -1309,8 +1337,20 @@ async def execute_code(request: ExecuteRequest):
                 execution_time=0.0
             )
         
+        files_dicts = None
+        if request.files:
+            total_len = sum(len(f.content) for f in request.files)
+            if total_len > max_code_length * 5:
+                return ExecuteResponse(
+                    success=False,
+                    output="",
+                    error=f"Total code across all files is too long",
+                    execution_time=0.0
+                )
+            files_dicts = [{"filename": f.filename, "content": f.content} for f in request.files]
+
         start_time = time.time()
-        result = await execute_code_safely(code, language, timeout=10)
+        result = await execute_code_safely(code, language, timeout=10, files=files_dicts)
         execution_time = time.time() - start_time
         
         return ExecuteResponse(
@@ -1338,7 +1378,8 @@ class SubmitRequest(BaseModel):
     timestamp: str = None
     suggestion_clicked: int = 0
     compiler_clicked: int = 0
-    survey_data: Optional[Dict[str, Any]] = None  # ADD THIS LINE
+    survey_data: Optional[Dict[str, Any]] = None
+    files: Optional[List[FileItem]] = None
 
 class SubmitResponse(BaseModel):
     status: str
@@ -1371,13 +1412,18 @@ async def submit_code(request: SubmitRequest):
         if len(code) > max_submission_length:
             raise HTTPException(status_code=400, detail=f"Code too long - please keep under {max_submission_length} characters")
         
+        submitted_files = None
+        if request.files:
+            submitted_files = [{"filename": f.filename, "content": f.content} for f in request.files]
+
         # Get session log
         session_log = None
         if session_id and session_id in active_sessions:
             session_log = active_sessions[session_id]
-            # Update session with submission data
             session_log.code_submit_timestamp = timestamp
             session_log.submitted_full_code = code
+            if submitted_files:
+                session_log.submitted_files = submitted_files
         
         detected_language = detect_programming_language(code)
         submission_id = f"{user_id}_{assignment_key}_{uuid.uuid4().hex[:8]}"
@@ -1419,18 +1465,36 @@ async def submit_code(request: SubmitRequest):
             }
             extension = extensions.get(detected_language, ".txt")
             
-            submission_file = submissions_dir / f"{submission_id}{extension}"
-            with open(submission_file, 'w', encoding='utf-8') as f:
-                f.write(f"# Submission Details\n")
-                f.write(f"# User ID: {user_id}\n")
-                f.write(f"# Assignment Key: {assignment_key}\n")
-                f.write(f"# Session ID: {session_id}\n")
-                f.write(f"# Submission ID: {submission_id}\n")
-                f.write(f"# Detected Language: {detected_language}\n")
-                f.write(f"# Timestamp: {timestamp}\n")
-                f.write(f"# Firebase Status: {firebase_status}\n")
-                f.write(f"#{'='*50}\n\n")
-                f.write(code)
+            if submitted_files and len(submitted_files) > 1:
+                sub_dir = submissions_dir / submission_id
+                sub_dir.mkdir(exist_ok=True)
+                meta_file = sub_dir / "_submission_info.txt"
+                with open(meta_file, 'w', encoding='utf-8') as f:
+                    f.write(f"User ID: {user_id}\n")
+                    f.write(f"Assignment Key: {assignment_key}\n")
+                    f.write(f"Session ID: {session_id}\n")
+                    f.write(f"Submission ID: {submission_id}\n")
+                    f.write(f"Detected Language: {detected_language}\n")
+                    f.write(f"Timestamp: {timestamp}\n")
+                    f.write(f"Firebase Status: {firebase_status}\n")
+                    f.write(f"Files: {', '.join(sf['filename'] for sf in submitted_files)}\n")
+                for sf in submitted_files:
+                    sf_path = sub_dir / sf["filename"]
+                    with open(sf_path, 'w', encoding='utf-8') as f:
+                        f.write(sf["content"])
+            else:
+                submission_file = submissions_dir / f"{submission_id}{extension}"
+                with open(submission_file, 'w', encoding='utf-8') as f:
+                    f.write(f"# Submission Details\n")
+                    f.write(f"# User ID: {user_id}\n")
+                    f.write(f"# Assignment Key: {assignment_key}\n")
+                    f.write(f"# Session ID: {session_id}\n")
+                    f.write(f"# Submission ID: {submission_id}\n")
+                    f.write(f"# Detected Language: {detected_language}\n")
+                    f.write(f"# Timestamp: {timestamp}\n")
+                    f.write(f"# Firebase Status: {firebase_status}\n")
+                    f.write(f"#{'='*50}\n\n")
+                    f.write(code)
             
         except Exception as save_error:
             logger.error(f"Failed to save submission file: {save_error}")
@@ -2469,8 +2533,11 @@ async def save_session_to_firebase(
             'starting_time': session_log.code_start_timestamp,
             'end_time': session_log.code_submit_timestamp,
             'submitted_code': session_log.submitted_full_code,
+            'submitted_files': session_log.submitted_files,
             'suggestion_clicked': suggestion_clicked,
             'compiler_clicked': compiler_clicked,
+            'total_problems': session_log.total_problems,
+            'per_problem_submissions': session_log.per_problem_submissions,
         }
         pre_survey = None
         if session_log.pre_survey_responses:
@@ -2723,7 +2790,7 @@ async def download_assignment(assignment_key: str):
 
 
 @app.get("/assignment-text/{assignment_key}")
-async def get_assignment_text(assignment_key: str):
+async def get_assignment_text(assignment_key: str, problem_index: int = 0):
     """Return the assignment .txt file content for the left problem panel."""
     try:
         # Instructor-created quiz: load problem statement from Firebase
@@ -2734,19 +2801,23 @@ async def get_assignment_text(assignment_key: str):
             if access_ref and access_ref.get("quiz_id"):
                 qval = db.reference(f"quizzes/{access_ref['quiz_id']}").get()
                 if qval:
+                    qval = normalize_quiz_data(qval)
                     import html as html_mod
                     parts = []
                     if qval.get("title"):
                         parts.append(f'<div class="quiz-title">{html_mod.escape(qval["title"])}</div>')
                     if qval.get("description"):
                         parts.append(f'{html_mod.escape(qval["description"])}')
-                    if qval.get("problem_statement"):
-                        parts.append(f'<span class="section-label">Problem</span>{html_mod.escape(qval["problem_statement"])}')
-                    if qval.get("constraints"):
-                        parts.append(f'<span class="section-label">Constraints</span>{html_mod.escape(qval["constraints"])}')
-                    if qval.get("public_test_cases"):
+                    # Load problem data from the problems array
+                    problems = qval.get("problems", [])
+                    problem = problems[problem_index] if problem_index < len(problems) else (problems[0] if problems else {})
+                    if problem.get("problem_statement"):
+                        parts.append(f'<span class="section-label">Problem</span>{html_mod.escape(problem["problem_statement"])}')
+                    if problem.get("constraints"):
+                        parts.append(f'<span class="section-label">Constraints</span>{html_mod.escape(problem["constraints"])}')
+                    if problem.get("public_test_cases"):
                         tc_lines = []
-                        for tc in qval["public_test_cases"]:
+                        for tc in problem["public_test_cases"]:
                             if isinstance(tc, dict):
                                 tc_lines.append(f"Input: {html_mod.escape(str(tc.get('input', '')))}")
                                 tc_lines.append(f"Expected: {html_mod.escape(str(tc.get('expected_output', '')))}")
@@ -2908,6 +2979,24 @@ async def debug_sidebar_config():
         "environment_loaded": bool(os.getenv("OPENAI_API_KEY"))  # Check if .env loaded at all
     }
     
+# ─── Quiz data helpers ──────────────────────────────────────────────────────
+
+def normalize_quiz_data(quiz_data: dict) -> dict:
+    """Backward-compat: wrap legacy single-problem/single-condition into list format."""
+    if "problems" not in quiz_data and "problem_statement" in quiz_data:
+        quiz_data["problems"] = [{
+            "problem_statement": quiz_data.pop("problem_statement", ""),
+            "constraints": quiz_data.pop("constraints", ""),
+            "starter_code": quiz_data.pop("starter_code", {}),
+            "public_test_cases": quiz_data.pop("public_test_cases", []),
+            "hidden_test_cases": quiz_data.pop("hidden_test_cases", []),
+        }]
+    if "conditions" not in quiz_data and "condition" in quiz_data:
+        quiz_data["conditions"] = [int(quiz_data.pop("condition", 1))]
+    elif "conditions" not in quiz_data:
+        quiz_data["conditions"] = [1]
+    return quiz_data
+
 # ─── Student custom-quiz entry (via instructor share link/code) ─────────────
 
 @app.get("/quiz/{access_code}", response_class=HTMLResponse)
@@ -3001,24 +3090,29 @@ async def student_quiz_join(request: Request):
     if programming_language not in allowed_langs:
         raise HTTPException(status_code=400, detail=f"Language not allowed. Choose from: {allowed_langs}")
 
-    # Use the single condition set by the instructor (1, 2, or 3)
-    condition = int(quiz_data.get("condition", 1))
+    # Normalize legacy quiz data to new format
+    quiz_data = normalize_quiz_data(quiz_data)
 
-    # Create session (reuses existing SessionLog structure)
+    # Randomly pick one condition from the list
+    import random
+    conditions = quiz_data.get("conditions", [1])
+    condition = random.choice(conditions)
+
+    # Create session
     session_id = f"{user_id}_quiz_{quiz_id[:8]}_{uuid.uuid4().hex[:8]}"
 
-    # Build problem description from quiz data
-    problem_description = quiz_data.get("problem_statement", "")
+    # Load first problem
+    problems = quiz_data.get("problems", [])
+    first_problem = problems[0] if problems else {}
+    problem_description = first_problem.get("problem_statement", "")
 
-    # Get starter code: use quiz's own boilerplate, fall back to file-based
-    quiz_starter = quiz_data.get("starter_code", {})
+    # Get starter code from first problem
+    quiz_starter = first_problem.get("starter_code", {})
     lang_starter = quiz_starter.get(programming_language) if quiz_starter else None
 
-    # Normalize: could be a string (old format) or list of {filename, content}
     starter_files = None
     starter_code = None
     if isinstance(lang_starter, list) and lang_starter:
-        # Multi-file format: [{filename, content}, ...]
         starter_files = lang_starter
         starter_code = lang_starter[0].get("content", "") if lang_starter else ""
     elif isinstance(lang_starter, str) and lang_starter:
@@ -3031,13 +3125,17 @@ async def student_quiz_join(request: Request):
     has_post = bool(quiz_data.get("post_survey"))
     periodic_enabled = bool(quiz_data.get("recurrent_survey"))
 
-    # Create in-memory session (same as existing flow)
+    # Create in-memory session
     session_log = SessionLog(
         user_id=user_id,
         assignment_id=f"quiz_{quiz_id[:8]}",
         session_id=session_id,
         condition=condition,
         code_start_timestamp=datetime.now().isoformat(),
+        current_problem_index=0,
+        total_problems=len(problems),
+        quiz_id=quiz_id,
+        per_problem_submissions=[],
         ai_guess_history=[],
         activity_log=[],
         activity_summary=ActivitySummary(
@@ -3073,6 +3171,90 @@ async def student_quiz_join(request: Request):
         "quiz_id": quiz_id,
         "quiz_title": quiz_data.get("title", ""),
         "time_limit_minutes": quiz_data.get("time_limit_minutes", 0),
+        "total_problems": len(problems),
+        "current_problem_index": 0,
+    }
+
+
+@app.post("/quiz/next-problem")
+async def quiz_next_problem(request: Request):
+    """Advance to the next problem in a multi-problem quiz."""
+    body = await request.json()
+    session_id = body.get("session_id", "").strip()
+    code = body.get("code", "")
+    programming_language = body.get("programming_language", "python").strip()
+
+    if not session_id or session_id not in active_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session_log = active_sessions[session_id]
+
+    # Save current problem's code
+    session_log.per_problem_submissions.append({
+        "problem_index": session_log.current_problem_index,
+        "code": code,
+        "timestamp": datetime.now().isoformat(),
+    })
+
+    # Advance to next problem
+    session_log.current_problem_index += 1
+    idx = session_log.current_problem_index
+
+    if idx >= session_log.total_problems:
+        return {"status": "complete", "message": "All problems completed"}
+
+    # Reset recurrent survey counter for the new problem
+    session_log.periodic_survey_count = 0
+
+    # Reset post-survey status for the new problem
+    session_log.post_survey_status = "not_started"
+    session_log.post_survey_timestamp = None
+
+    # Load next problem from Firebase
+    if not session_log.quiz_id:
+        raise HTTPException(status_code=400, detail="No quiz ID in session")
+
+    quiz_data = db.reference(f"quizzes/{session_log.quiz_id}").get()
+    if not quiz_data:
+        raise HTTPException(status_code=404, detail="Quiz not found")
+    quiz_data = normalize_quiz_data(quiz_data)
+
+    problems = quiz_data.get("problems", [])
+    if idx >= len(problems):
+        return {"status": "complete", "message": "All problems completed"}
+
+    problem = problems[idx]
+    problem_description = problem.get("problem_statement", "")
+
+    # Get starter code for the next problem
+    quiz_starter = problem.get("starter_code", {})
+    lang_starter = quiz_starter.get(programming_language) if quiz_starter else None
+
+    starter_files = None
+    starter_code = None
+    if isinstance(lang_starter, list) and lang_starter:
+        starter_files = lang_starter
+        starter_code = lang_starter[0].get("content", "") if lang_starter else ""
+    elif isinstance(lang_starter, str) and lang_starter:
+        starter_code = lang_starter
+    else:
+        starter_code = ""
+
+    # Update problem description in session if condition 1
+    if session_log.condition == 1:
+        session_log.problem_description = problem_description
+
+    save_session_to_local(session_log)
+
+    return {
+        "status": "next",
+        "problem_index": idx,
+        "total_problems": session_log.total_problems,
+        "problem_description": problem_description if session_log.condition == 1 else None,
+        "constraints": problem.get("constraints", ""),
+        "starter_code": starter_code,
+        "starter_files": starter_files,
+        "public_test_cases": problem.get("public_test_cases", []),
     }
 
 

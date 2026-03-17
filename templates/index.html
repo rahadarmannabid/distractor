@@ -1683,6 +1683,7 @@
                 <div class="user-info">
                     <span class="session-indicator" id="sessionIndicator">Session: --</span>
                     <span class="condition-indicator" id="conditionIndicator">Condition ?</span>
+                    <span class="condition-indicator" id="problemProgress" style="display:none;background:linear-gradient(135deg,#7c3aed,#a78bfa);">Problem 1/1</span>
                     <span id="userDisplay">User: --</span>
                     <button class="logout-btn" id="logoutBtn">End Session</button>
                 </div>
@@ -2147,7 +2148,9 @@ let currentSession = {
     guessHistory: [],
     descHistory: [],
     suggestionsHistory: [],
-
+    // Multi-problem tracking
+    totalProblems: 1,
+    currentProblemIndex: 0,
 };
 
 
@@ -2490,10 +2493,11 @@ function captureAllSubmissionData() {
     try {
         const code = window.editor ? window.editor.getValue() : '';
         const model = window.editor ? window.editor.getModel() : null;
+        const allFiles = getAllFileContents();
         
         const submissionData = {
-            // Core code data
             code: code,
+            files: allFiles,
             lineCount: model ? model.getLineCount() : 0,
             characterCount: code.length,
             
@@ -2814,17 +2818,41 @@ async function initializeFromURL() {
             compilerClickCount: 0,
             guessHistory: [],
             descHistory: [],
-            suggestionsHistory: []
+            suggestionsHistory: [],
+            // Multi-problem tracking
+            totalProblems: authData.totalProblems || 1,
+            currentProblemIndex: authData.currentProblemIndex || 0,
         };
-        
-        // ✅ NEW: Restore periodic surveys from sessionStorage if returning from post-survey
+
+        // If returning for a new problem (not the first), reset all survey state fresh
+        if (currentSession.currentProblemIndex > 0) {
+            currentSession.suggestionClickCount = 0;
+            currentSession.periodicSurveysCompleted = 0;
+            currentSession.nextPeriodicSurveyAt = currentSession.periodicSurveyStart;
+            // Reset surveyData so stale values from previous problem don't interfere
+            surveyData.surveyResponses = [];
+            surveyData.periodicSurveyOccurrenceCount = 0;
+            surveyData.analysisCount = 0;
+            // Clear periodic survey storage to prevent restorePeriodicSurveysFromStorage from overwriting
+            sessionStorage.removeItem(`periodicSurveys_${currentSession.sessionId}`);
+        }
+
+        // Restore periodic surveys from sessionStorage if returning from post-survey (same problem)
         restorePeriodicSurveysFromStorage();
-        
-        // ✅ DEBUG: Log final survey configuration
+
         // Update UI
         userDisplay.textContent = `User: ${authData.userId}`;
         sessionIndicator.textContent = `Session: ${authData.sessionId.substring(0, 16)}...`;
         conditionIndicator.textContent = `Condition ${authData.condition}`;
+
+        // Show problem progress indicator for multi-problem quizzes
+        if (currentSession.totalProblems > 1) {
+            const progEl = document.getElementById('problemProgress');
+            if (progEl) {
+                progEl.textContent = `Problem ${currentSession.currentProblemIndex + 1}/${currentSession.totalProblems}`;
+                progEl.style.display = '';
+            }
+        }
         
         // Update URL display
         const urlDisplay = document.getElementById('urlDisplay');
@@ -2841,7 +2869,7 @@ async function initializeFromURL() {
         (function loadProblemPanel() {
             var problemBody = document.getElementById('problemPanelBody');
             if (!problemBody || !authData.assignmentKey) return;
-            fetch('/assignment-text/' + encodeURIComponent(authData.assignmentKey))
+            fetch('/assignment-text/' + encodeURIComponent(authData.assignmentKey) + '?problem_index=' + (currentSession.currentProblemIndex || 0))
                 .then(function(res) {
                     if (!res.ok) throw new Error(res.status);
                     return res.json();
@@ -2980,15 +3008,17 @@ async function initializeFromURL() {
         
         initializeSidebar();
         
-        // Check for saved progress
+        // Check for saved progress (skip on non-first problems — starter code is already set)
         setTimeout(() => {
-            const savedProgress = restoreProgress();
-            if (savedProgress) {
-                const ageMinutes = (Date.now() - savedProgress.timestamp) / (1000 * 60);
-                if (ageMinutes < 30) {
-                    applyRestoredProgress(savedProgress);
-                } else {
-                    showRestoreBanner(savedProgress);
+            if (currentSession.currentProblemIndex === 0) {
+                const savedProgress = restoreProgress();
+                if (savedProgress) {
+                    const ageMinutes = (Date.now() - savedProgress.timestamp) / (1000 * 60);
+                    if (ageMinutes < 30) {
+                        applyRestoredProgress(savedProgress);
+                    } else {
+                        showRestoreBanner(savedProgress);
+                    }
                 }
             }
             startAutoSave();
@@ -4665,6 +4695,17 @@ function decreaseFontSize() {
    
    let isRunning = false;
 
+function getAllFileContents() {
+    if (window._quizFiles && Array.isArray(window._quizFiles) && window._quizFiles.length > 1) {
+        var activeIdx = window._activeFileIdx || 0;
+        window._quizFiles[activeIdx].content = window.editor.getValue();
+        return window._quizFiles.map(function(f) {
+            return { filename: f.filename, content: f.content || '' };
+        });
+    }
+    return null;
+}
+
 async function executeCode() {
     if (isRunning) return;
     
@@ -4692,6 +4733,7 @@ async function executeCode() {
 
     try {
         let executionResult, outputSummary, errorMessage = '';
+        const allFiles = getAllFileContents();
         
         if (currentSession.programmingLanguage === 'javascript') {
             const result = await executeJavaScriptInBrowser(code);
@@ -4699,12 +4741,12 @@ async function executeCode() {
             outputSummary = result.output || 'No output';
             errorMessage = result.error || '';
         } else if (currentSession.programmingLanguage === 'python') {
-            const result = await executeOnBackend(code, 'python');
+            const result = await executeOnBackend(code, 'python', allFiles);
             executionResult = result.success ? 'success' : 'error';
             outputSummary = result.output || 'No output';
             errorMessage = result.error || '';
         } else if (currentSession.programmingLanguage === 'c') {
-            const result = await executeOnBackend(code, 'c');
+            const result = await executeOnBackend(code, 'c', allFiles);
             executionResult = result.success ? 'success' : 'error';
             outputSummary = result.output || 'No output';
             errorMessage = result.error || '';
@@ -4819,22 +4861,27 @@ async function executeJavaScriptInBrowser(code) {
         console.warn = originalWarn;
     }
 }
-async function executeOnBackend(code, language) {
+async function executeOnBackend(code, language, allFiles) {
     try {
         addTerminalOutput(`Running ${language} on server...`, 'prompt');
         const startTime = Date.now();
-        
+
+        const payload = {
+            code: code,
+            language: language,
+            user_id: currentSession.userId,
+            session_id: currentSession.sessionId
+        };
+        if (allFiles && allFiles.length > 1) {
+            payload.files = allFiles;
+        }
+
         const response = await fetch('/execute', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-                code: code,
-                language: language,
-                user_id: currentSession.userId,
-                session_id: currentSession.sessionId
-            })
+            body: JSON.stringify(payload)
         });
 
         if (!response.ok) {
@@ -5050,6 +5097,7 @@ async function proceedWithActualSubmission() {
             // NEW CODE - Use cached data:
             body: JSON.stringify({
                 code: cachedData.code,
+                files: cachedData.files || null,
                 user_id: cachedData.session.userId,
                 assignment_key: cachedData.session.assignmentKey,
                 session_id: cachedData.session.sessionId,
@@ -5057,7 +5105,6 @@ async function proceedWithActualSubmission() {
                 timestamp: new Date().toISOString(),
                 suggestion_clicked: cachedData.metrics.suggestionClicks,
                 compiler_clicked: cachedData.metrics.compilerClicks,
-                // Include ALL captured data
                 session_metadata: cachedData.session,
                 activity_logs: cachedData.activity.allActivityLogs,
                 activity_summary: cachedData.metrics,

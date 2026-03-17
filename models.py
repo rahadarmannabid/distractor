@@ -43,20 +43,29 @@ class TestCase(BaseModel):
     expected_output: str
 
 
+# ─── Problem (per-problem data within a quiz) ──────────────────────────────
+
+class ProblemCreate(BaseModel):
+    """A single problem within a quiz."""
+    problem_statement: str
+    constraints: str = ""
+    starter_code: Dict[str, Any] = Field(default_factory=dict)
+    public_test_cases: List[TestCase] = Field(default_factory=list)
+    hidden_test_cases: List[TestCase] = Field(default_factory=list)
+
+
 # ─── Quiz Creation / Update ─────────────────────────────────────────────────
 
 class QuizCreate(BaseModel):
     title: str
     description: str = ""
-    problem_statement: str
-    constraints: str = ""
+    problems: List[ProblemCreate] = Field(min_length=1)
     allowed_languages: List[str] = Field(default_factory=lambda: ["python", "javascript", "c"])
     time_limit_minutes: int = 0  # 0 = unlimited
-    condition: int = 1  # exactly one condition: 1, 2, or 3
-    starter_code: Dict[str, str] = Field(default_factory=dict)  # {"python": "...", "javascript": "...", "c": "..."}
-    public_test_cases: List[TestCase] = Field(default_factory=list)
-    hidden_test_cases: List[TestCase] = Field(default_factory=list)
+    conditions: List[int] = Field(default_factory=lambda: [1])  # each must be 1, 2, or 3
     recurrent_survey: List[SurveyQuestionCreate] = Field(default_factory=list)
+    recurrent_survey_interval: int = 4
+    recurrent_survey_start: int = 5
     pre_survey: List[SurveyQuestionCreate] = Field(default_factory=list)
     post_survey: List[SurveyQuestionCreate] = Field(default_factory=list)
     published: bool = False
@@ -68,15 +77,13 @@ class QuizUpdate(BaseModel):
     """Partial update — all fields optional."""
     title: Optional[str] = None
     description: Optional[str] = None
-    problem_statement: Optional[str] = None
-    constraints: Optional[str] = None
+    problems: Optional[List[ProblemCreate]] = None
     allowed_languages: Optional[List[str]] = None
     time_limit_minutes: Optional[int] = None
-    condition: Optional[int] = None
-    starter_code: Optional[Dict[str, str]] = None
-    public_test_cases: Optional[List[TestCase]] = None
-    hidden_test_cases: Optional[List[TestCase]] = None
+    conditions: Optional[List[int]] = None
     recurrent_survey: Optional[List[SurveyQuestionCreate]] = None
+    recurrent_survey_interval: Optional[int] = None
+    recurrent_survey_start: Optional[int] = None
     pre_survey: Optional[List[SurveyQuestionCreate]] = None
     post_survey: Optional[List[SurveyQuestionCreate]] = None
     published: Optional[bool] = None
@@ -96,7 +103,8 @@ class QuizSummary(BaseModel):
     created_at: str = ""
     allowed_languages: List[str] = Field(default_factory=list)
     time_limit_minutes: int = 0
-    condition: int = 1
+    conditions: List[int] = Field(default_factory=lambda: [1])
+    problem_count: int = 1
 
 
 # ─── Student quiz join ──────────────────────────────────────────────────────
