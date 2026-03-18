@@ -61,13 +61,31 @@ def _normalize_quiz_data(quiz_data: dict) -> dict:
             "problem_statement": quiz_data.pop("problem_statement", ""),
             "constraints": quiz_data.pop("constraints", ""),
             "starter_code": quiz_data.pop("starter_code", {}),
-            "public_test_cases": quiz_data.pop("public_test_cases", []),
-            "hidden_test_cases": quiz_data.pop("hidden_test_cases", []),
         }]
     if "conditions" not in quiz_data and "condition" in quiz_data:
         quiz_data["conditions"] = [int(quiz_data.pop("condition", 1))]
     elif "conditions" not in quiz_data:
         quiz_data["conditions"] = [1]
+
+    # Migrate quiz-level surveys into per-problem surveys if missing
+    if "problems" in quiz_data:
+        quiz_pre = quiz_data.get("pre_survey", [])
+        quiz_post = quiz_data.get("post_survey", [])
+        quiz_rec = quiz_data.get("recurrent_survey", [])
+        quiz_rec_interval = quiz_data.get("recurrent_survey_interval", 4)
+        quiz_rec_start = quiz_data.get("recurrent_survey_start", 5)
+        for prob in quiz_data["problems"]:
+            if not prob.get("_has_surveys"):
+                prob["_has_surveys"] = True
+                prob["pre_survey_enabled"] = bool(quiz_pre)
+                prob["pre_survey"] = quiz_pre
+                prob["post_survey_enabled"] = bool(quiz_post)
+                prob["post_survey"] = quiz_post
+                prob["recurrent_survey_enabled"] = bool(quiz_rec)
+                prob["recurrent_survey"] = quiz_rec
+                prob["recurrent_survey_interval"] = quiz_rec_interval
+                prob["recurrent_survey_start"] = quiz_rec_start
+
     return quiz_data
 
 

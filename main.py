@@ -935,12 +935,13 @@ def get_response(prompt):
         logger.error(f"OpenAI API error: {e}")
         return f"Error getting AI response: {str(e)}"
 
-def analyze_problem_statement(existing_code):
+def analyze_problem_statement(existing_code, language=None):
     """Analyze what problem the programmer is trying to solve - language agnostic"""
     if not existing_code or not existing_code.strip():
         return "No code provided for analysis"
-    
-    language = detect_programming_language(existing_code)
+
+    if not language:
+        language = detect_programming_language(existing_code)
     
     what_problem_is_this = f"""
     You are an expert code analyst. Analyze the following {language} code and provide a brief problem description:
@@ -965,13 +966,14 @@ def analyze_problem_statement(existing_code):
     problem_description = get_response(what_problem_is_this)
     return problem_description
 
-def predict_next_line(problem_description, existing_code):
+def predict_next_line(problem_description, existing_code, language=None):
     """Predict the next line of code based on problem and existing code - language agnostic"""
-    
+
     if not existing_code or not existing_code.strip():
         return "// Start coding here"
-    
-    language = detect_programming_language(existing_code)
+
+    if not language:
+        language = detect_programming_language(existing_code)
     
     # Language-specific syntax examples
     syntax_examples = {
@@ -1032,12 +1034,13 @@ def predict_next_line(problem_description, existing_code):
     next_line = get_response(what_is_the_next_line)
     return next_line
 
-def generate_full_code_suggestion(problem_description, existing_code, is_correct_description=False):
+def generate_full_code_suggestion(problem_description, existing_code, is_correct_description=False, language=None):
     """Generate full code completion suggestion"""
     if not existing_code or not existing_code.strip():
         return "// No code provided for completion"
-    
-    language = detect_programming_language(existing_code)
+
+    if not language:
+        language = detect_programming_language(existing_code)
     
     description_type = "correct problem description" if is_correct_description else "AI analysis"
     
@@ -1072,26 +1075,27 @@ def generate_full_code_suggestion(problem_description, existing_code, is_correct
     return full_suggestion
 
 
-async def get_ai_next_line_async(problem_description, code):
+async def get_ai_next_line_async(problem_description, code, language=None):
     """Async wrapper for AI next line prediction"""
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, predict_next_line, problem_description, code)
+    return await loop.run_in_executor(None, predict_next_line, problem_description, code, language)
 
-async def get_correct_next_line_async(correct_description, code):
+async def get_correct_next_line_async(correct_description, code, language=None):
     """Async wrapper for correct description next line prediction"""
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, predict_next_line, correct_description, code)
+    return await loop.run_in_executor(None, predict_next_line, correct_description, code, language)
 
-async def get_full_code_suggestion_async(problem_description, code, is_correct_description=False):
+async def get_full_code_suggestion_async(problem_description, code, is_correct_description=False, language=None):
     """Async wrapper for full code suggestion"""
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, generate_full_code_suggestion, problem_description, code, is_correct_description)
+    return await loop.run_in_executor(None, generate_full_code_suggestion, problem_description, code, is_correct_description, language)
 
 class CodeRequest(BaseModel):
     code: str
     user_id: str = None
     assignment_key: str = None
     session_id: str = None
+    programming_language: str = None
 
 class CodeResponse(BaseModel):
     analysis: str
@@ -1137,16 +1141,17 @@ async def analyze_code(request: CodeRequest):
                 next_line="// Start coding here"
             )
         
+        language = request.programming_language or detect_programming_language(code)
+
         # Enhanced analysis for very short code snippets
         if len(code.strip()) < 10:
-            language = detect_programming_language(code)
             return CodeResponse(
                 analysis=f"Code snippet in progress: {code.strip()} (detected: {language})",
                 next_line="// Continue your statement"
             )
-        
+
         # Step 1: Analyze what problem the code is trying to solve
-        problem_description = analyze_problem_statement(code)
+        problem_description = analyze_problem_statement(code, language=language)
         
         # Clean problem description
         problem_description = re.sub(r'^\*\*.*?\*\*:\s*', '', problem_description)
@@ -1162,16 +1167,16 @@ async def analyze_code(request: CodeRequest):
         tasks = []
         
         # Always get AI next line and full suggestion
-        ai_next_line_task = get_ai_next_line_async(problem_description, code)
-        ai_full_code_task = get_full_code_suggestion_async(problem_description, code, is_correct_description=False)
+        ai_next_line_task = get_ai_next_line_async(problem_description, code, language=language)
+        ai_full_code_task = get_full_code_suggestion_async(problem_description, code, is_correct_description=False, language=language)
         tasks.extend([ai_next_line_task, ai_full_code_task])
-        
+
         # For condition 1, also get correct description suggestions concurrently
         correct_next_line_task = None
         correct_full_code_task = None
         if session_log and session_log.condition == 1 and session_log.problem_description:
-            correct_next_line_task = get_correct_next_line_async(session_log.problem_description, code)
-            correct_full_code_task = get_full_code_suggestion_async(session_log.problem_description, code, is_correct_description=True)
+            correct_next_line_task = get_correct_next_line_async(session_log.problem_description, code, language=language)
+            correct_full_code_task = get_full_code_suggestion_async(session_log.problem_description, code, is_correct_description=True, language=language)
             tasks.extend([correct_next_line_task, correct_full_code_task])
         
         # Execute all tasks concurrently
@@ -2036,7 +2041,7 @@ class SurveyStatusResponse(BaseModel):
 
 
 @app.get("/survey-config/{assignment_key}")
-async def get_survey_config(assignment_key: str):
+async def get_survey_config(assignment_key: str, problem_index: int = 0):
     """
     Get pre, post, and periodic survey configuration for an assignment key
     FULLY CASE-INSENSITIVE - works with any case variation
@@ -2052,27 +2057,39 @@ async def get_survey_config(assignment_key: str):
             if access_ref and access_ref.get("quiz_id"):
                 quiz_data = db.reference(f"quizzes/{access_ref['quiz_id']}").get()
             if quiz_data:
+                quiz_data = normalize_quiz_data(quiz_data)
+                problems = quiz_data.get("problems", [])
+                idx = min(problem_index, len(problems) - 1) if problems else 0
+                problem = problems[idx] if problems else {}
+
+                pre_enabled = problem.get("pre_survey_enabled", False)
+                post_enabled = problem.get("post_survey_enabled", False)
+                rec_enabled = problem.get("recurrent_survey_enabled", False)
+
                 return {
                     "assignment_key": assignment_key,
+                    "problem_index": idx,
                     "pre_survey": {
                         "title": "Pre-Study Survey",
                         "description": "Please answer the following questions before starting.",
                         "estimated_time_minutes": 5,
-                        "questions": quiz_data.get("pre_survey", []),
+                        "enabled": pre_enabled,
+                        "questions": problem.get("pre_survey", []) if pre_enabled else [],
                     },
                     "post_survey": {
                         "title": "Post-Study Survey",
                         "description": "Thank you for completing the task! Please share your experience.",
                         "estimated_time_minutes": 10,
-                        "questions": quiz_data.get("post_survey", []),
+                        "enabled": post_enabled,
+                        "questions": problem.get("post_survey", []) if post_enabled else [],
                     },
                     "periodic_survey": {
-                        "enabled": bool(quiz_data.get("recurrent_survey")),
-                        "interval": int(quiz_data.get("recurrent_survey_interval", 4)),
-                        "start": int(quiz_data.get("recurrent_survey_start", 5)),
+                        "enabled": rec_enabled and bool(problem.get("recurrent_survey")),
+                        "interval": int(problem.get("recurrent_survey_interval", 4)),
+                        "start": int(problem.get("recurrent_survey_start", 5)),
                         "title": "Quick Check-in",
                         "description": "Please rate your current experience",
-                        "questions": quiz_data.get("recurrent_survey", []),
+                        "questions": problem.get("recurrent_survey", []) if rec_enabled else [],
                     },
                 }
             # Fall through to empty config if quiz not found
@@ -2815,14 +2832,6 @@ async def get_assignment_text(assignment_key: str, problem_index: int = 0):
                         parts.append(f'<span class="section-label">Problem</span>{html_mod.escape(problem["problem_statement"])}')
                     if problem.get("constraints"):
                         parts.append(f'<span class="section-label">Constraints</span>{html_mod.escape(problem["constraints"])}')
-                    if problem.get("public_test_cases"):
-                        tc_lines = []
-                        for tc in problem["public_test_cases"]:
-                            if isinstance(tc, dict):
-                                tc_lines.append(f"Input: {html_mod.escape(str(tc.get('input', '')))}")
-                                tc_lines.append(f"Expected: {html_mod.escape(str(tc.get('expected_output', '')))}")
-                                tc_lines.append("")
-                        parts.append(f'<span class="section-label">Test Cases</span>{chr(10).join(tc_lines)}')
                     html_out = "\n\n".join(parts)
                     return {"html": html_out if html_out else None, "text": "No problem description provided." if not html_out else None}
             raise HTTPException(status_code=404, detail="Quiz not found")
@@ -2988,13 +2997,31 @@ def normalize_quiz_data(quiz_data: dict) -> dict:
             "problem_statement": quiz_data.pop("problem_statement", ""),
             "constraints": quiz_data.pop("constraints", ""),
             "starter_code": quiz_data.pop("starter_code", {}),
-            "public_test_cases": quiz_data.pop("public_test_cases", []),
-            "hidden_test_cases": quiz_data.pop("hidden_test_cases", []),
         }]
     if "conditions" not in quiz_data and "condition" in quiz_data:
         quiz_data["conditions"] = [int(quiz_data.pop("condition", 1))]
     elif "conditions" not in quiz_data:
         quiz_data["conditions"] = [1]
+
+    # Migrate quiz-level surveys into per-problem surveys if missing
+    if "problems" in quiz_data:
+        quiz_pre = quiz_data.get("pre_survey", [])
+        quiz_post = quiz_data.get("post_survey", [])
+        quiz_rec = quiz_data.get("recurrent_survey", [])
+        quiz_rec_interval = quiz_data.get("recurrent_survey_interval", 4)
+        quiz_rec_start = quiz_data.get("recurrent_survey_start", 5)
+        for prob in quiz_data["problems"]:
+            if not prob.get("_has_surveys"):
+                prob["_has_surveys"] = True
+                prob["pre_survey_enabled"] = bool(quiz_pre)
+                prob["pre_survey"] = quiz_pre
+                prob["post_survey_enabled"] = bool(quiz_post)
+                prob["post_survey"] = quiz_post
+                prob["recurrent_survey_enabled"] = bool(quiz_rec)
+                prob["recurrent_survey"] = quiz_rec
+                prob["recurrent_survey_interval"] = quiz_rec_interval
+                prob["recurrent_survey_start"] = quiz_rec_start
+
     return quiz_data
 
 # ─── Student custom-quiz entry (via instructor share link/code) ─────────────
@@ -3120,10 +3147,10 @@ async def student_quiz_join(request: Request):
     else:
         starter_code = get_starter_code(quiz_data.get("title", ""), programming_language)
 
-    # Check for surveys
-    has_pre = bool(quiz_data.get("pre_survey"))
-    has_post = bool(quiz_data.get("post_survey"))
-    periodic_enabled = bool(quiz_data.get("recurrent_survey"))
+    # Check for surveys (per-problem)
+    has_pre = first_problem.get("pre_survey_enabled", False) and bool(first_problem.get("pre_survey"))
+    has_post = first_problem.get("post_survey_enabled", False) and bool(first_problem.get("post_survey"))
+    periodic_enabled = first_problem.get("recurrent_survey_enabled", False) and bool(first_problem.get("recurrent_survey"))
 
     # Create in-memory session
     session_log = SessionLog(
@@ -3166,7 +3193,8 @@ async def student_quiz_join(request: Request):
         "has_pre_survey": has_pre,
         "has_post_survey": has_post,
         "periodic_survey_enabled": periodic_enabled,
-        "periodic_survey_start": int(quiz_data.get("recurrent_survey_start", 5)),
+        "periodic_survey_start": int(first_problem.get("recurrent_survey_start", 5)),
+        "periodic_survey_interval": int(first_problem.get("recurrent_survey_interval", 4)),
         "final_survey_disabled": False,
         "quiz_id": quiz_id,
         "quiz_title": quiz_data.get("title", ""),
@@ -3206,7 +3234,8 @@ async def quiz_next_problem(request: Request):
     # Reset recurrent survey counter for the new problem
     session_log.periodic_survey_count = 0
 
-    # Reset post-survey status for the new problem
+    # Reset survey statuses for the new problem
+    session_log.pre_survey_status = "not_started"
     session_log.post_survey_status = "not_started"
     session_log.post_survey_timestamp = None
 
@@ -3254,7 +3283,11 @@ async def quiz_next_problem(request: Request):
         "constraints": problem.get("constraints", ""),
         "starter_code": starter_code,
         "starter_files": starter_files,
-        "public_test_cases": problem.get("public_test_cases", []),
+        "has_pre_survey": problem.get("pre_survey_enabled", False) and bool(problem.get("pre_survey")),
+        "has_post_survey": problem.get("post_survey_enabled", False) and bool(problem.get("post_survey")),
+        "periodic_survey_enabled": problem.get("recurrent_survey_enabled", False) and bool(problem.get("recurrent_survey")),
+        "periodic_survey_start": int(problem.get("recurrent_survey_start", 5)),
+        "periodic_survey_interval": int(problem.get("recurrent_survey_interval", 4)),
     }
 
 

@@ -36,13 +36,6 @@ class SurveyQuestionCreate(BaseModel):
     content: str = ""  # for info_block
 
 
-# ─── Test Cases ─────────────────────────────────────────────────────────────
-
-class TestCase(BaseModel):
-    input: str
-    expected_output: str
-
-
 # ─── Problem (per-problem data within a quiz) ──────────────────────────────
 
 class ProblemCreate(BaseModel):
@@ -50,8 +43,15 @@ class ProblemCreate(BaseModel):
     problem_statement: str
     constraints: str = ""
     starter_code: Dict[str, Any] = Field(default_factory=dict)
-    public_test_cases: List[TestCase] = Field(default_factory=list)
-    hidden_test_cases: List[TestCase] = Field(default_factory=list)
+    # Per-problem survey config
+    pre_survey_enabled: bool = True
+    pre_survey: List[SurveyQuestionCreate] = Field(default_factory=list)
+    post_survey_enabled: bool = True
+    post_survey: List[SurveyQuestionCreate] = Field(default_factory=list)
+    recurrent_survey_enabled: bool = True
+    recurrent_survey: List[SurveyQuestionCreate] = Field(default_factory=list)
+    recurrent_survey_interval: int = 4
+    recurrent_survey_start: int = 5
 
 
 # ─── Quiz Creation / Update ─────────────────────────────────────────────────

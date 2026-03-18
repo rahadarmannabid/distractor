@@ -865,7 +865,9 @@
             }
 
             async loadSurveyConfig() {
-                const response = await fetch(`/survey-config/${this.assignmentKey}`);
+                const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
+                const problemIndex = authData.currentProblemIndex || 0;
+                const response = await fetch(`/survey-config/${this.assignmentKey}?problem_index=${problemIndex}`);
                 if (!response.ok) throw new Error('Failed to load survey config');
                 
                 const config = await response.json();
@@ -1555,6 +1557,12 @@
                                 authData.problemDescription = nextData.problem_description;
                                 authData.starterCode = nextData.starter_code;
                                 authData.starterFiles = nextData.starter_files;
+                                // Update per-problem survey flags
+                                authData.hasPreSurvey = nextData.has_pre_survey || false;
+                                authData.hasPostSurvey = nextData.has_post_survey || false;
+                                authData.periodicSurveyEnabled = nextData.periodic_survey_enabled || false;
+                                authData.periodicSurveyStart = nextData.periodic_survey_start || 5;
+                                authData.periodicSurveyInterval = nextData.periodic_survey_interval || 4;
                                 sessionStorage.setItem('authData', JSON.stringify(authData));
 
                                 this.clearCachedSubmissionData();
@@ -1570,7 +1578,12 @@
                                 await new Promise(resolve => setTimeout(resolve, 800));
 
                                 allowNavigation = true;
-                                window.location.href = `/index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
+                                // If next problem has a pre-survey, go there first
+                                if (authData.hasPreSurvey) {
+                                    window.location.href = `/survey.html?type=pre&session=${sessionToken}&user=${encodeURIComponent(userId)}`;
+                                } else {
+                                    window.location.href = `/index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
+                                }
 
                             } catch (error) {
                                 if (error.message === '__ALL_DONE__') {

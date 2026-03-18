@@ -185,12 +185,6 @@
     }
     .starter-file-card:last-child { margin-bottom: 0; }
 
-    /* ── Test cases ── */
-    .tc-row { 
-      display: flex; gap: 12px; margin-bottom: 12px; align-items: flex-start; 
-      background: var(--input-bg); padding: 12px; border-radius: 8px; border: 1px solid var(--border);
-    }
-    .tc-row textarea { flex: 1; min-height: 60px; font-family: 'Fira Code', monospace; font-size: 0.85rem; }
     .remove-btn {
       background: rgba(239,68,68,0.1); border: 1px solid transparent; color: var(--danger-light);
       cursor: pointer; font-size: 1.2rem; width: 36px; height: 36px; border-radius: 6px;
@@ -306,6 +300,27 @@
     .inline-input-group input { width: 100px; padding: 10px; }
     .inline-input-group span { color: var(--muted); font-size: 0.85rem; }
 
+    /* ── Toggle switch ── */
+    .toggle-row { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 20px; }
+    .toggle-item { display: flex; align-items: center; gap: 10px; }
+    .toggle-item span { font-size: 0.9rem; font-weight: 500; color: var(--muted); }
+    .toggle-item span.active-label { color: var(--text); }
+    .toggle-switch {
+      position: relative; width: 44px; height: 24px; cursor: pointer;
+    }
+    .toggle-switch input { display: none; }
+    .toggle-slider {
+      position: absolute; inset: 0; border-radius: 12px;
+      background: var(--border); transition: all 0.25s;
+    }
+    .toggle-slider::after {
+      content: ''; position: absolute; top: 3px; left: 3px;
+      width: 18px; height: 18px; border-radius: 50%;
+      background: var(--muted); transition: all 0.25s;
+    }
+    .toggle-switch input:checked + .toggle-slider { background: var(--primary); }
+    .toggle-switch input:checked + .toggle-slider::after { transform: translateX(20px); background: #fff; }
+
   </style>
 </head>
 <body>
@@ -329,11 +344,7 @@
   </div>
   <span class="step-divider">›</span>
   <div class="step-item" data-step="3" onclick="goToStep(3)">
-    <span class="step-num">4</span> <span>Surveys</span>
-  </div>
-  <span class="step-divider">›</span>
-  <div class="step-item" data-step="4" onclick="goToStep(4)">
-    <span class="step-num">5</span> <span>Review</span>
+    <span class="step-num">4</span> <span>Review</span>
   </div>
 </div>
 
@@ -465,70 +476,74 @@
       </div>
     </div>
 
-    <div class="card">
-      <h2>Public Test Cases</h2>
-      <p class="subtitle">These will be visible to students to verify their code.</p>
-      <div id="publicTC"></div>
-      <button class="add-btn" onclick="addTestCase('publicTC')">+ Add Public Test Case</button>
-    </div>
+    <div class="card" id="problemSurveysCard">
+      <h2 id="surveysCardTitle">Surveys for Problem 1</h2>
+      <p class="subtitle">Enable/disable and customize surveys shown to participants for this problem.</p>
 
-    <div class="card">
-      <h2>Hidden Test Cases</h2>
-      <p class="subtitle">Used for final grading. Students cannot see these.</p>
-      <div id="hiddenTC"></div>
-      <button class="add-btn" onclick="addTestCase('hiddenTC')">+ Add Hidden Test Case</button>
-    </div>
-
-  </div>
-</div>
-
-<!-- ═══════════════════ STEP 4: Survey Questions ═══════════════════ -->
-<div class="step-panel" data-step="3">
-  <div class="card">
-    <h2>Survey Configuration</h2>
-    <p class="subtitle">Gather participant data before, during, and after the quiz. Pre-populated with defaults.</p>
-
-    <div class="survey-tabs">
-      <button class="survey-tab active" onclick="switchSurveyTab('pre', this)">Pre-Survey</button>
-      <button class="survey-tab" onclick="switchSurveyTab('post', this)">Post-Survey</button>
-      <button class="survey-tab" onclick="switchSurveyTab('recurrent', this)">Recurrent (In-Task)</button>
-    </div>
-
-    <!-- Pre-survey -->
-    <div class="survey-panel active" id="panel-pre">
-      <div id="preSurveyList"></div>
-      <button class="add-btn" onclick="addSurveyQuestion('preSurveyList')">+ Add Pre-Survey Question</button>
-    </div>
-
-    <!-- Post-survey -->
-    <div class="survey-panel" id="panel-post">
-      <div id="postSurveyList"></div>
-      <button class="add-btn" onclick="addSurveyQuestion('postSurveyList')">+ Add Post-Survey Question</button>
-    </div>
-
-    <!-- Recurrent -->
-    <div class="survey-panel" id="panel-recurrent">
-      <div class="info-box">
-        <label>Survey Trigger Logic</label>
-        <div class="inline-input-group" style="margin-bottom: 12px;">
-          <span style="width:200px; font-weight:500; color:var(--text);">First survey appears after</span>
-          <input type="number" id="recurrentSurveyStart" min="1" max="100" value="{{ quiz.recurrent_survey_start if quiz and quiz.recurrent_survey_start else 5 }}">
-          <span>AI interactions</span>
+      <div class="toggle-row">
+        <div class="toggle-item">
+          <label class="toggle-switch">
+            <input type="checkbox" id="togglePreSurvey" checked onchange="onSurveyToggle()">
+            <span class="toggle-slider"></span>
+          </label>
+          <span id="labelPreSurvey" class="active-label">Pre-Survey</span>
         </div>
-        <div class="inline-input-group">
-          <span style="width:200px; font-weight:500; color:var(--text);">Subsequently show every</span>
-          <input type="number" id="recurrentSurveyInterval" min="1" max="100" value="{{ quiz.recurrent_survey_interval if quiz and quiz.recurrent_survey_interval else 4 }}">
-          <span>AI interactions</span>
+        <div class="toggle-item">
+          <label class="toggle-switch">
+            <input type="checkbox" id="togglePostSurvey" checked onchange="onSurveyToggle()">
+            <span class="toggle-slider"></span>
+          </label>
+          <span id="labelPostSurvey" class="active-label">Post-Survey</span>
+        </div>
+        <div class="toggle-item">
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggleRecurrentSurvey" checked onchange="onSurveyToggle()">
+            <span class="toggle-slider"></span>
+          </label>
+          <span id="labelRecurrentSurvey" class="active-label">Recurrent Survey</span>
         </div>
       </div>
-      <div id="recurrentSurveyList"></div>
-      <button class="add-btn" onclick="addSurveyQuestion('recurrentSurveyList')">+ Add Recurrent Question</button>
+
+      <div class="survey-tabs" id="problemSurveyTabs">
+        <button class="survey-tab active" onclick="switchProblemSurveyTab('pre', this)">Pre-Survey</button>
+        <button class="survey-tab" onclick="switchProblemSurveyTab('post', this)">Post-Survey</button>
+        <button class="survey-tab" onclick="switchProblemSurveyTab('recurrent', this)">Recurrent (In-Task)</button>
+      </div>
+
+      <div class="survey-panel active" id="panel-prob-pre">
+        <div id="probPreSurveyList"></div>
+        <button class="add-btn" onclick="addSurveyQuestion('probPreSurveyList')">+ Add Pre-Survey Question</button>
+      </div>
+
+      <div class="survey-panel" id="panel-prob-post">
+        <div id="probPostSurveyList"></div>
+        <button class="add-btn" onclick="addSurveyQuestion('probPostSurveyList')">+ Add Post-Survey Question</button>
+      </div>
+
+      <div class="survey-panel" id="panel-prob-recurrent">
+        <div class="info-box">
+          <label>Survey Trigger Logic</label>
+          <div class="inline-input-group" style="margin-bottom: 12px;">
+            <span style="width:200px; font-weight:500; color:var(--text);">First survey appears after</span>
+            <input type="number" id="probRecurrentStart" min="1" max="100" value="5">
+            <span>AI interactions</span>
+          </div>
+          <div class="inline-input-group">
+            <span style="width:200px; font-weight:500; color:var(--text);">Subsequently show every</span>
+            <input type="number" id="probRecurrentInterval" min="1" max="100" value="4">
+            <span>AI interactions</span>
+          </div>
+        </div>
+        <div id="probRecurrentSurveyList"></div>
+        <button class="add-btn" onclick="addSurveyQuestion('probRecurrentSurveyList')">+ Add Recurrent Question</button>
+      </div>
     </div>
+
   </div>
 </div>
 
-<!-- ═══════════════════ STEP 5: Review ═══════════════════ -->
-<div class="step-panel" data-step="4">
+<!-- ═══════════════════ STEP 4: Review ═══════════════════ -->
+<div class="step-panel" data-step="3">
   <div class="card">
     <h2>Review Your Quiz</h2>
     <p class="subtitle">Double-check settings before saving to the database.</p>
@@ -556,13 +571,14 @@
 <script>
 const EDIT_MODE = {{ 'true' if edit_mode else 'false' }};
 const QUIZ_ID = '{{ quiz.id if quiz else "" }}';
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 4;
 let currentStep = 0;
 let selectedConditions = {{ quiz.conditions | tojson if quiz and quiz.conditions else '[1]' }};
 
 // Per-problem data store
 let problemsData = [];
 let currentProblemIndex = 0;
+let problemRendered = false; // true after first switchProblem completes
 
 // Starter code storage
 let starterCodeStore = {};
@@ -605,10 +621,32 @@ const DEFAULT_RECURRENT_SURVEY = [
   { id: "rec_q8", question: "I like using CodeOracle for decision making.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
 ];
 
+// Helper: build default survey fields for a new problem
+function defaultSurveyFields() {
+  return {
+    _has_surveys: true,
+    pre_survey_enabled: true,
+    pre_survey: JSON.parse(JSON.stringify(DEFAULT_PRE_SURVEY)),
+    post_survey_enabled: true,
+    post_survey: JSON.parse(JSON.stringify(DEFAULT_POST_SURVEY)),
+    recurrent_survey_enabled: true,
+    recurrent_survey: JSON.parse(JSON.stringify(DEFAULT_RECURRENT_SURVEY)),
+    recurrent_survey_interval: 4,
+    recurrent_survey_start: 5,
+  };
+}
+
 // Init problems data
 {% if quiz and quiz.problems %}
 (function() {
   const rawProblems = {{ quiz.problems | tojson }};
+  // Fallback: quiz-level surveys for legacy quizzes without per-problem surveys
+  const quizPre = {{ quiz.pre_survey | tojson if quiz and quiz.pre_survey else '[]' }};
+  const quizPost = {{ quiz.post_survey | tojson if quiz and quiz.post_survey else '[]' }};
+  const quizRec = {{ quiz.recurrent_survey | tojson if quiz and quiz.recurrent_survey else '[]' }};
+  const quizRecStart = {{ quiz.recurrent_survey_start if quiz and quiz.recurrent_survey_start else 5 }};
+  const quizRecInterval = {{ quiz.recurrent_survey_interval if quiz and quiz.recurrent_survey_interval else 4 }};
+
   rawProblems.forEach(prob => {
     const sc = prob.starter_code || {};
     const normalizedSC = {};
@@ -620,47 +658,34 @@ const DEFAULT_RECURRENT_SURVEY = [
         normalizedSC[lang] = val;
       }
     }
+    // Check if problem has per-problem surveys via sentinel field
+    // (Firebase drops empty arrays, so we use _has_surveys as a reliable marker)
+    const hasSurveys = prob._has_surveys === true;
+    const defaults = defaultSurveyFields();
     problemsData.push({
       problem_statement: prob.problem_statement || '',
       constraints: prob.constraints || '',
       starter_code: normalizedSC,
-      public_test_cases: prob.public_test_cases || [],
-      hidden_test_cases: prob.hidden_test_cases || [],
+      pre_survey_enabled: hasSurveys ? (prob.pre_survey_enabled !== false) : (quizPre.length ? true : defaults.pre_survey_enabled),
+      pre_survey: hasSurveys ? (prob.pre_survey || []) : (quizPre.length ? quizPre : defaults.pre_survey),
+      post_survey_enabled: hasSurveys ? (prob.post_survey_enabled !== false) : (quizPost.length ? true : defaults.post_survey_enabled),
+      post_survey: hasSurveys ? (prob.post_survey || []) : (quizPost.length ? quizPost : defaults.post_survey),
+      recurrent_survey_enabled: hasSurveys ? (prob.recurrent_survey_enabled !== false) : (quizRec.length ? true : defaults.recurrent_survey_enabled),
+      recurrent_survey: hasSurveys ? (prob.recurrent_survey || []) : (quizRec.length ? quizRec : defaults.recurrent_survey),
+      recurrent_survey_interval: hasSurveys ? (prob.recurrent_survey_interval || 4) : (quizRec.length ? quizRecInterval : defaults.recurrent_survey_interval),
+      recurrent_survey_start: hasSurveys ? (prob.recurrent_survey_start || 5) : (quizRec.length ? quizRecStart : defaults.recurrent_survey_start),
     });
   });
 })();
 {% else %}
-problemsData.push({
+problemsData.push(Object.assign({
   problem_statement: '',
   constraints: '',
   starter_code: {},
-  public_test_cases: [],
-  hidden_test_cases: [],
-});
-{% endif %}
-
-{% if quiz and quiz.pre_survey %}
-const INIT_PRE = {{ quiz.pre_survey | tojson }};
-{% else %}
-const INIT_PRE = DEFAULT_PRE_SURVEY;
-{% endif %}
-
-{% if quiz and quiz.post_survey %}
-const INIT_POST = {{ quiz.post_survey | tojson }};
-{% else %}
-const INIT_POST = DEFAULT_POST_SURVEY;
-{% endif %}
-
-{% if quiz and quiz.recurrent_survey %}
-const INIT_RECURRENT = {{ quiz.recurrent_survey | tojson }};
-{% else %}
-const INIT_RECURRENT = DEFAULT_RECURRENT_SURVEY;
+}, defaultSurveyFields()));
 {% endif %}
 
 document.addEventListener('DOMContentLoaded', () => {
-  renderSurveyList('preSurveyList', INIT_PRE);
-  renderSurveyList('postSurveyList', INIT_POST);
-  renderSurveyList('recurrentSurveyList', INIT_RECURRENT);
   switchProblem(0);
   renderProblemTabs();
 });
@@ -732,13 +757,20 @@ function saveCurrentProblem() {
     problem_statement: document.getElementById('currentProblemStatement').value,
     constraints: document.getElementById('currentConstraints').value,
     starter_code: { ...starterCodeStore },
-    public_test_cases: collectTestCases('publicTC'),
-    hidden_test_cases: collectTestCases('hiddenTC'),
+    _has_surveys: true,  // sentinel: survives Firebase even if arrays are empty
+    pre_survey_enabled: document.getElementById('togglePreSurvey').checked,
+    pre_survey: collectSurvey('probPreSurveyList'),
+    post_survey_enabled: document.getElementById('togglePostSurvey').checked,
+    post_survey: collectSurvey('probPostSurveyList'),
+    recurrent_survey_enabled: document.getElementById('toggleRecurrentSurvey').checked,
+    recurrent_survey: collectSurvey('probRecurrentSurveyList'),
+    recurrent_survey_interval: parseInt(document.getElementById('probRecurrentInterval').value) || 4,
+    recurrent_survey_start: parseInt(document.getElementById('probRecurrentStart').value) || 5,
   };
 }
 
 function switchProblem(idx) {
-  if (problemsData[currentProblemIndex] && document.getElementById('currentProblemStatement')) {
+  if (problemRendered && problemsData[currentProblemIndex] && document.getElementById('currentProblemStatement')) {
     saveCurrentProblem();
   }
   currentProblemIndex = idx;
@@ -757,21 +789,33 @@ function switchProblem(idx) {
   activeCodeLang = null;
   updateCodeTabs();
 
-  renderTestCases('publicTC', prob.public_test_cases || []);
-  renderTestCases('hiddenTC', prob.hidden_test_cases || []);
+  // Render per-problem surveys
+  document.getElementById('surveysCardTitle').textContent = 'Surveys for Problem ' + (idx + 1);
+  document.getElementById('togglePreSurvey').checked = prob.pre_survey_enabled !== false;
+  document.getElementById('togglePostSurvey').checked = prob.post_survey_enabled !== false;
+  document.getElementById('toggleRecurrentSurvey').checked = prob.recurrent_survey_enabled !== false;
+  document.getElementById('probRecurrentStart').value = prob.recurrent_survey_start || 5;
+  document.getElementById('probRecurrentInterval').value = prob.recurrent_survey_interval || 4;
+  renderSurveyList('probPreSurveyList', prob.pre_survey || []);
+  renderSurveyList('probPostSurveyList', prob.post_survey || []);
+  renderSurveyList('probRecurrentSurveyList', prob.recurrent_survey || []);
+  onSurveyToggle();
 
+  // Reset survey tab to first enabled
+  const firstTab = document.querySelector('#problemSurveyTabs .survey-tab');
+  if (firstTab) switchProblemSurveyTab('pre', firstTab);
+
+  problemRendered = true;
   renderProblemTabs();
 }
 
 function addProblem() {
   saveCurrentProblem();
-  problemsData.push({
+  problemsData.push(Object.assign({
     problem_statement: '',
     constraints: '',
     starter_code: {},
-    public_test_cases: [],
-    hidden_test_cases: [],
-  });
+  }, defaultSurveyFields()));
   switchProblem(problemsData.length - 1);
 }
 
@@ -781,17 +825,6 @@ function removeCurrentProblem() {
   const newIdx = Math.min(currentProblemIndex, problemsData.length - 1);
   currentProblemIndex = newIdx;
   switchProblem(newIdx);
-}
-
-function renderTestCases(containerId, testCases) {
-  const el = document.getElementById(containerId);
-  el.innerHTML = '';
-  testCases.forEach(tc => {
-    const r = document.createElement('div');
-    r.className = 'tc-row';
-    r.innerHTML = `<textarea class="tc-input" placeholder="Input">${escHtml(tc.input || '')}</textarea><textarea class="tc-output" placeholder="Expected Output">${escHtml(tc.expected_output || '')}</textarea><button class="remove-btn" title="Remove Test Case" onclick="this.parentElement.remove()">✕</button>`;
-    el.appendChild(r);
-  });
 }
 
 // Starter Code
@@ -876,27 +909,42 @@ function getSelectedLanguages() {
   return Array.from(document.querySelectorAll('#langChips input:checked')).map(c => c.value);
 }
 
-// Test Cases
-function addTestCase(id) {
-  const c = document.getElementById(id);
-  const r = document.createElement('div'); r.className = 'tc-row';
-  r.innerHTML = '<textarea class="tc-input" placeholder="Input"></textarea><textarea class="tc-output" placeholder="Expected Output"></textarea><button class="remove-btn" title="Remove Test Case" onclick="this.parentElement.remove()">✕</button>';
-  c.appendChild(r);
-}
-
-function collectTestCases(id) {
-  return Array.from(document.querySelectorAll('#' + id + ' .tc-row')).map(r => ({
-    input: r.querySelector('.tc-input').value,
-    expected_output: r.querySelector('.tc-output').value,
-  })).filter(tc => tc.input || tc.expected_output);
-}
-
 // Surveys
-function switchSurveyTab(name, btn) {
-  document.querySelectorAll('.survey-tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.survey-panel').forEach(p => p.classList.remove('active'));
+function switchProblemSurveyTab(name, btn) {
+  document.querySelectorAll('#problemSurveysCard .survey-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('#problemSurveysCard .survey-panel').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
-  document.getElementById('panel-' + name).classList.add('active');
+  document.getElementById('panel-prob-' + name).classList.add('active');
+}
+
+function onSurveyToggle() {
+  const preOn = document.getElementById('togglePreSurvey').checked;
+  const postOn = document.getElementById('togglePostSurvey').checked;
+  const recOn = document.getElementById('toggleRecurrentSurvey').checked;
+
+  document.getElementById('labelPreSurvey').className = preOn ? 'active-label' : '';
+  document.getElementById('labelPostSurvey').className = postOn ? 'active-label' : '';
+  document.getElementById('labelRecurrentSurvey').className = recOn ? 'active-label' : '';
+
+  // Show/hide survey tabs based on toggles
+  const tabs = document.querySelectorAll('#problemSurveyTabs .survey-tab');
+  if (tabs.length >= 3) {
+    tabs[0].style.display = preOn ? '' : 'none';
+    tabs[1].style.display = postOn ? '' : 'none';
+    tabs[2].style.display = recOn ? '' : 'none';
+  }
+
+  // If active tab was hidden, switch to first visible
+  const activeTab = document.querySelector('#problemSurveyTabs .survey-tab.active');
+  if (activeTab && activeTab.style.display === 'none') {
+    const firstVisible = document.querySelector('#problemSurveyTabs .survey-tab:not([style*="display: none"])');
+    if (firstVisible) {
+      switchProblemSurveyTab(firstVisible.textContent.includes('Pre') ? 'pre' : firstVisible.textContent.includes('Post') ? 'post' : 'recurrent', firstVisible);
+    } else {
+      // All disabled — hide all panels
+      document.querySelectorAll('#problemSurveysCard .survey-panel').forEach(p => p.classList.remove('active'));
+    }
+  }
 }
 
 function renderSurveyList(containerId, questions) {
@@ -1029,7 +1077,7 @@ function goToStep(n) {
   if (currentStep === 2) {
     saveCurrentProblem();
   }
-  if (n === 4) buildReview();
+  if (n === 3) buildReview();
 
   document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
   document.querySelector(`.step-panel[data-step="${n}"]`).classList.add('active');
@@ -1081,14 +1129,16 @@ function buildReview() {
   saveCurrentProblem();
   const langs = getSelectedLanguages();
   const condLabels = { 1: '1. No AI', 2: '2. Explanation + Suggestion', 3: '3. Suggestion Only' };
-  const preSq = collectSurvey('preSurveyList');
-  const postSq = collectSurvey('postSurveyList');
-  const recSq = collectSurvey('recurrentSurveyList');
 
   const condStr = selectedConditions.map(c => condLabels[c]).join('<br>');
   let problemsSummary = problemsData.map((p, i) => {
-    const stmt = (p.problem_statement || '').substring(0, 80);
-    return `<div><span style="color:var(--primary);font-weight:600;">Problem ${i+1}:</span> ${escHtml(stmt)}${stmt.length >= 80 ? '...' : ''}</div>`;
+    const stmt = (p.problem_statement || '').substring(0, 60);
+    const surveys = [];
+    if (p.pre_survey_enabled && (p.pre_survey || []).length) surveys.push('Pre');
+    if (p.post_survey_enabled && (p.post_survey || []).length) surveys.push('Post');
+    if (p.recurrent_survey_enabled && (p.recurrent_survey || []).length) surveys.push(`Recurrent (start: ${p.recurrent_survey_start}, every: ${p.recurrent_survey_interval})`);
+    const surveyStr = surveys.length ? surveys.join(', ') : '<span style="color:var(--muted)">No surveys</span>';
+    return `<div style="margin-bottom:8px;"><span style="color:var(--primary);font-weight:600;">Problem ${i+1}:</span> ${escHtml(stmt)}${stmt.length >= 60 ? '...' : ''}<br><span style="font-size:0.85rem;color:var(--muted);">Surveys: ${surveyStr}</span></div>`;
   }).join('');
 
   document.getElementById('reviewContent').innerHTML = `
@@ -1098,9 +1148,6 @@ function buildReview() {
     <dt>Languages</dt><dd>${langs.join(', ').toUpperCase()}</dd>
     <dt>Time Limit</dt><dd>${document.getElementById('time_limit').value || '0'} min</dd>
     <dt>Conditions (${selectedConditions.length})</dt><dd>${condStr}</dd>
-    <dt>Pre-Survey</dt><dd>${preSq.length} questions</dd>
-    <dt>Post-Survey</dt><dd>${postSq.length} questions</dd>
-    <dt>Recurrent</dt><dd>${recSq.length} questions <span>(Starts at ${document.getElementById('recurrentSurveyStart').value}, interval ${document.getElementById('recurrentSurveyInterval').value})</span></dd>
     <dt>Published</dt><dd>${document.getElementById('published').checked ? '<span style="color:var(--success)">Yes</span>' : 'No (Draft)'}</dd>
   `;
 }
@@ -1122,11 +1169,6 @@ async function saveQuiz() {
     published: document.getElementById('published').checked,
     availability_start: document.getElementById('avail_start').value || null,
     availability_end: document.getElementById('avail_end').value || null,
-    pre_survey: collectSurvey('preSurveyList'),
-    post_survey: collectSurvey('postSurveyList'),
-    recurrent_survey: collectSurvey('recurrentSurveyList'),
-    recurrent_survey_interval: parseInt(document.getElementById('recurrentSurveyInterval').value) || 4,
-    recurrent_survey_start: parseInt(document.getElementById('recurrentSurveyStart').value) || 5,
   };
 
   const url = EDIT_MODE ? '/instructor/update-quiz/' + QUIZ_ID : '/instructor/save-quiz';
