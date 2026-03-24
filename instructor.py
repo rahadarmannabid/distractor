@@ -3,7 +3,7 @@
 Mounted as a sub-router in main.py at prefix /instructor.
 """
 
-from fastapi import APIRouter, Request, BackgroundTasks, HTTPException, Body
+from fastapi import APIRouter, Request, HTTPException, Body
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from datetime import datetime, timedelta
@@ -104,7 +104,7 @@ async def login_page(request: Request):
 
 
 @router.post("/send-otp", response_class=HTMLResponse)
-async def send_otp(request: Request, background_tasks: BackgroundTasks):
+async def send_otp(request: Request):
     form = await request.form()
     email = (form.get("email") or "").lower().strip()
 
@@ -125,8 +125,14 @@ async def send_otp(request: Request, background_tasks: BackgroundTasks):
     store_otp(_get_firebase(), email, otp_hash, salt, expiry)
 
     provider = get_otp_provider()
-    background_tasks.add_task(provider.send, email, otp_plain)
-    logger.info(f"OTP queued for {email}")
+    sent = provider.send(email, otp_plain)
+    if not sent:
+        logger.error(f"OTP send failed for {email}")
+        return templates.TemplateResponse("instructor_login.html", {
+            "request": request,
+            "error": "Failed to send OTP email. Please check SMTP settings and try again.",
+        })
+    logger.info(f"OTP sent to {email}")
 
     return templates.TemplateResponse("instructor_login.html", {
         "request": request,
