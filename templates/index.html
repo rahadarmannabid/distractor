@@ -1177,6 +1177,41 @@
     to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
 }
 
+/* Tab return notification - same style as paste, amber/orange theme */
+.tab-return-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(135deg, #d97706, #f59e0b);
+    color: white;
+    padding: 8px 20px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: bold;
+    z-index: 10000;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    font-family: 'Segoe UI', sans-serif;
+    animation: bannerSlideDown 0.3s ease-out;
+}
+.tab-return-notification {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: linear-gradient(135deg, #d97706, #f59e0b);
+    color: white;
+    padding: 20px 30px;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    z-index: 10001;
+    min-width: 400px;
+    animation: notificationSlideIn 0.3s ease-out;
+}
+
 /* Active Session Warning Banner */
 .session-warning-banner {
     position: fixed;
@@ -2133,6 +2168,7 @@ let currentSession = {
     programmingLanguage: 'javascript',
     startTime: null,
     pasteAllowed: 1,
+    tabTrackingEnabled: true,
     starterCode: null,
     periodicSurveyEnabled: false,
     periodicSurveyStart: null,
@@ -2805,6 +2841,7 @@ async function initializeFromURL() {
             starterFiles: authData.starterFiles || null,
             startTime: authData.timestamp,
             pasteAllowed: authData.pasteAllowed !== undefined ? authData.pasteAllowed : 1,
+            tabTrackingEnabled: authData.tabTrackingEnabled !== false,
             periodicSurveyEnabled: authData.periodicSurveyEnabled || false,
             periodicSurveyStart: authData.periodicSurveyStart ?? null,
             periodicSurveyInterval: authData.periodicSurveyInterval ?? null,
@@ -2977,7 +3014,7 @@ async function initializeFromURL() {
         } else {
         }
         
-        // Add paste status indicator
+        // Add paste status indicator only (no tab tracking badge)
         const pasteStatus = authData.pasteAllowed === 1 ? 'Enabled' : 'Disabled';
         const pasteIndicator = document.createElement('span');
         pasteIndicator.className = authData.pasteAllowed === 1 ? 'session-indicator' : 'condition-indicator';
@@ -3045,6 +3082,11 @@ async function initializeFromURL() {
                 addTerminalOutput(`   This restriction is part of the research study`, 'info');
             } else {
                 addTerminalOutput(`✅ Copy/paste functionality is enabled`, 'info');
+            }
+            if (authData.tabTrackingEnabled !== false) {
+                addTerminalOutput(`📋 Tab switching is tracked`, 'info');
+            } else {
+                addTerminalOutput(`📋 Tab switching: Not tracked`, 'info');
             }
             
             addTerminalOutput(`IMPORTANT: Submitting code will automatically log you out`, 'warning');
@@ -3237,8 +3279,9 @@ async function initializeEditor() {
                 });
 
 
-                // Complete paste control implementation
-                if (currentSession.pasteAllowed === 0 || currentSession.pasteAllowed === "0") {
+                // Complete paste control implementation - must use capture phase to block before Monaco handles paste
+                const pasteDisabled = currentSession.pasteAllowed === 0 || currentSession.pasteAllowed === "0" || currentSession.pasteAllowed === false;
+                if (pasteDisabled) {
                     const logPasteAttempt = () => {
                         logActivity('paste_attempt', {
                             attempt_blocked: true,
@@ -3246,21 +3289,30 @@ async function initializeEditor() {
                         });
                     };
                     
-                    // Block Ctrl+V
+                    // Block paste via capture-phase listener (catches Ctrl+V, Edit menu, context menu, etc.)
+                    const editorDom = window.editor.getDomNode();
+                    if (editorDom) {
+                        editorDom.addEventListener('paste', function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            logPasteAttempt();
+                            showTemporaryPasteNotification();
+                        }, true);
+                    }
+                    
+                    // Block Ctrl+V and Shift+Insert (backup - Monaco keybindings)
                     window.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV, function() {
                         logPasteAttempt();
                         showTemporaryPasteNotification();
                         return null;
                     });
-                    
-                    // Block Shift+Insert
                     window.editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.Insert, function() {
                         logPasteAttempt();
                         showTemporaryPasteNotification();
                         return null;
                     });
                     
-                    // Block context menu paste
+                    // Block context menu (disables right-click Paste)
                     document.addEventListener('contextmenu', function(e) {
                         if (e.target.closest('#editor')) {
                             e.preventDefault();
@@ -3331,6 +3383,33 @@ function showTemporaryPasteNotification() {
         if (mainApp) {
             mainApp.style.marginTop = '0px';
         }
+    }, 3000);
+}
+
+function showTabReturnNotification() {
+    const existingNotification = document.getElementById('tabReturnNotification');
+    const existingBanner = document.getElementById('tabReturnBanner');
+    if (existingNotification) existingNotification.remove();
+    if (existingBanner) existingBanner.remove();
+    const notification = document.createElement('div');
+    notification.id = 'tabReturnNotification';
+    notification.className = 'tab-return-notification';
+    notification.innerHTML = '⚠️ TAB SWITCH DETECTED: You returned to this tab. Tab switching is tracked.';
+    const banner = document.createElement('div');
+    banner.id = 'tabReturnBanner';
+    banner.className = 'tab-return-banner';
+    banner.innerHTML = '⚠️ Tab switch detected. You returned to this tab — tab switching is being tracked.';
+    document.body.appendChild(notification);
+    document.body.appendChild(banner);
+    const mainApp = document.getElementById('application');
+    if (mainApp) {
+        mainApp.style.marginTop = '40px';
+        mainApp.style.transition = 'margin-top 0.3s ease';
+    }
+    setTimeout(() => {
+        if (notification.parentNode) notification.remove();
+        if (banner.parentNode) banner.remove();
+        if (mainApp) mainApp.style.marginTop = '0px';
     }, 3000);
 }
 
@@ -5548,30 +5627,45 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
 }
 
 
+// Remove only stale persistent overlays (tabTrackingNotice), not our temporary tab-return popup
+function removeStaleTabOverlays() {
+    var el = document.getElementById('tabTrackingNotice');
+    if (el) el.remove();
+    document.querySelectorAll('.tab-tracking-notice').forEach(function(e) { e.remove(); });
+}
+document.addEventListener('DOMContentLoaded', removeStaleTabOverlays);
+
 // Enhanced tab visibility tracking with time-based logging
 document.addEventListener('visibilitychange', function() {
     const currentTime = Date.now();
     const newVisibilityState = document.hidden ? 'hidden' : 'visible';
+    const tabTrackingEnabled = currentSession && currentSession.tabTrackingEnabled !== false;
     
     if (newVisibilityState === 'hidden' && isTabVisible) {
         // User switched away from tab
         lastFocusTime = currentTime;
-        logActivity('tab_switching', {
-            start_time: new Date(currentTime).toISOString(),
-            switch_type: 'tab_away',
-            visibility_state: 'hidden'
-        });
+        if (tabTrackingEnabled) {
+            logActivity('tab_switching', {
+                start_time: new Date(currentTime).toISOString(),
+                switch_type: 'tab_away',
+                visibility_state: 'hidden'
+            });
+        }
     } else if (newVisibilityState === 'visible' && !isTabVisible) {
-    // User returned to tab
-    const awayDuration = lastFocusTime ? currentTime - lastFocusTime : 0;
-        logActivity('tab_switching', {
-            start_time: new Date(lastFocusTime).toISOString(),
-            end_time: new Date(currentTime).toISOString(),
-            duration: awayDuration,
-            switch_type: 'tab_return',
-            away_duration_ms: awayDuration,
-            visibility_state: 'visible'
-        });
+        // User returned to tab
+        const awayDuration = lastFocusTime ? currentTime - lastFocusTime : 0;
+        if (tabTrackingEnabled) {
+            logActivity('tab_switching', {
+                start_time: new Date(lastFocusTime).toISOString(),
+                end_time: new Date(currentTime).toISOString(),
+                duration: awayDuration,
+                switch_type: 'tab_return',
+                away_duration_ms: awayDuration,
+                visibility_state: 'visible'
+            });
+            // Show popup like paste notification (center popup + top banner)
+            showTabReturnNotification();
+        }
     }
     
     isTabVisible = newVisibilityState === 'visible';

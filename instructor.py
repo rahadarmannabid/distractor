@@ -287,6 +287,8 @@ async def save_quiz(request: Request, payload: dict = Body(...)):
         "published": payload.get("published", False),
         "availability_start": payload.get("availability_start") or None,
         "availability_end": payload.get("availability_end") or None,
+        "paste_allowed": payload.get("paste_allowed", True),
+        "tab_tracking_enabled": payload.get("tab_tracking_enabled", True),
         "access_code": access_code,
         "created_by": email,
         "created_at": datetime.utcnow().isoformat(),
@@ -375,6 +377,7 @@ async def update_quiz(request: Request, quiz_id: str, payload: dict = Body(...))
         "recurrent_survey", "recurrent_survey_interval", "recurrent_survey_start",
         "pre_survey", "post_survey",
         "published", "availability_start", "availability_end",
+        "paste_allowed", "tab_tracking_enabled",
     ]
     updates = {k: payload[k] for k in updatable_fields if k in payload}
     updates["updated_at"] = datetime.utcnow().isoformat()

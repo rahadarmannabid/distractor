@@ -740,6 +740,7 @@ class AuthResponse(BaseModel):
     problem_description: str | None = None
     session_id: str
     paste_allowed: int = 1
+    tab_tracking_enabled: bool = True
     has_pre_survey: bool = False
     has_post_survey: bool = False
     programming_language: str = "javascript"
@@ -2452,7 +2453,9 @@ async def authenticate_user(request: AuthRequest):
         
         logger.info(f"Authentication successful: {user_id} -> Condition {condition}, Session: {session_id}, Language: {programming_language}")
         
-        paste_allowed = int(os.getenv("PASTE_CONTROL", "1"))
+        # Legacy auth: paste always allowed, tab tracking always on
+        paste_allowed = 1
+        tab_tracking_enabled = True
         
         # Check if periodic surveys are enabled for this assignment
         periodic_config = get_periodic_survey_config()
@@ -2468,6 +2471,7 @@ async def authenticate_user(request: AuthRequest):
             problem_description=problem_description,
             session_id=session_id,
             paste_allowed=paste_allowed,
+            tab_tracking_enabled=tab_tracking_enabled,
             has_pre_survey=has_pre,
             has_post_survey=has_post,
             programming_language=programming_language,
@@ -3189,7 +3193,8 @@ async def student_quiz_join(request: Request):
         "programming_language": programming_language,
         "starter_code": starter_code,
         "starter_files": starter_files,
-        "paste_allowed": 1,
+        "paste_allowed": 1 if quiz_data.get("paste_allowed", True) else 0,
+        "tab_tracking_enabled": quiz_data.get("tab_tracking_enabled", True),
         "has_pre_survey": has_pre,
         "has_post_survey": has_post,
         "periodic_survey_enabled": periodic_enabled,

@@ -404,6 +404,27 @@
       </div>
     </div>
 
+    <div class="fg" style="margin-top: 24px;">
+      <div class="toggle-item">
+        <label class="toggle-switch">
+          <input type="checkbox" id="paste_allowed" {% if not quiz or quiz.paste_allowed|default(True) %}checked{% endif %}>
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="active-label">Allow copy/paste</span>
+      </div>
+      <p class="hint">When disabled, students must type all code manually.</p>
+    </div>
+    <div class="fg">
+      <div class="toggle-item">
+        <label class="toggle-switch">
+          <input type="checkbox" id="tab_tracking_enabled" {% if not quiz or quiz.tab_tracking_enabled|default(True) %}checked{% endif %}>
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="active-label">Track tab switches</span>
+      </div>
+      <p class="hint">Log when students switch away from or return to the tab. Students will see a warning when they return.</p>
+    </div>
+
     <div class="fg" style="margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border);">
       <label class="chip {% if quiz and quiz.published %}selected{% endif %}" onclick="toggleChip(this)" style="display:inline-flex; border-color:var(--success-light); background:rgba(16,185,129,0.05);">
         <input type="checkbox" id="published" {% if quiz and quiz.published %}checked{% endif %}> 🚀 Publish immediately
@@ -1169,6 +1190,8 @@ async function saveQuiz() {
     published: document.getElementById('published').checked,
     availability_start: document.getElementById('avail_start').value || null,
     availability_end: document.getElementById('avail_end').value || null,
+    paste_allowed: document.getElementById('paste_allowed').checked,
+    tab_tracking_enabled: document.getElementById('tab_tracking_enabled').checked,
   };
 
   const url = EDIT_MODE ? '/instructor/update-quiz/' + QUIZ_ID : '/instructor/save-quiz';

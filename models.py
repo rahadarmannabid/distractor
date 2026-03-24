@@ -71,6 +71,8 @@ class QuizCreate(BaseModel):
     published: bool = False
     availability_start: Optional[str] = None
     availability_end: Optional[str] = None
+    paste_allowed: bool = True
+    tab_tracking_enabled: bool = True
 
 
 class QuizUpdate(BaseModel):
@@ -89,6 +91,8 @@ class QuizUpdate(BaseModel):
     published: Optional[bool] = None
     availability_start: Optional[str] = None
     availability_end: Optional[str] = None
+    paste_allowed: Optional[bool] = None
+    tab_tracking_enabled: Optional[bool] = None
 
 
 # ─── Quiz Response (read) ───────────────────────────────────────────────────
