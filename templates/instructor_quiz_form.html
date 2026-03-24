@@ -355,15 +355,12 @@
 
   <div class="card">
     <h2>Quiz Information</h2>
-    <p class="subtitle">Provide the basic details to identify this quiz.</p>
+    <p class="subtitle">Optional teaser shown to students when they start the quiz.</p>
 
     <div class="fg">
-      <label for="title">Title <span style="color:var(--danger)">*</span></label>
-      <input type="text" id="title" placeholder="e.g., Intro to Python Variables" value="{{ quiz.title if quiz else '' }}">
-    </div>
-    <div class="fg">
-      <label for="description">Description</label>
-      <textarea id="description" placeholder="Brief instructions or summary for students...">{{ quiz.description if quiz else '' }}</textarea>
+      <label for="teaser">Teaser</label>
+      <textarea id="teaser" rows="4" placeholder="Optional intro text or instructions shown when students start the quiz...">{{ quiz.teaser if quiz and quiz.teaser else '' }}</textarea>
+      <p class="hint">Leave empty to skip the teaser overlay. If provided, students will see this before they begin coding.</p>
     </div>
   </div>
 
@@ -477,6 +474,11 @@
       <h2 id="problemCardTitle">Problem 1</h2>
       <p class="subtitle">Define what the student needs to solve.</p>
       
+      <div class="fg">
+        <label for="currentProblemTitle">Problem Title <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="currentProblemTitle" placeholder="e.g., Intro to Variables, Loops Practice" required>
+        <p class="hint">Shown in the student's Problem panel and problem tabs. Required for each problem.</p>
+      </div>
       <div class="fg">
         <label>Problem Statement <span style="color:var(--danger)">*</span></label>
         <textarea id="currentProblemStatement" rows="6" placeholder="Describe the problem, input formats, and expected outputs..."></textarea>
@@ -684,6 +686,7 @@ function defaultSurveyFields() {
     const hasSurveys = prob._has_surveys === true;
     const defaults = defaultSurveyFields();
     problemsData.push({
+      title: (prob.title || '').trim(),
       problem_statement: prob.problem_statement || '',
       constraints: prob.constraints || '',
       starter_code: normalizedSC,
@@ -700,6 +703,7 @@ function defaultSurveyFields() {
 })();
 {% else %}
 problemsData.push(Object.assign({
+  title: '',
   problem_statement: '',
   constraints: '',
   starter_code: {},
@@ -748,7 +752,7 @@ function renderProblemTabs() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'prob-tab' + (i === currentProblemIndex ? ' active' : '');
-    btn.textContent = 'Problem ' + (i + 1);
+    btn.textContent = (problemsData[i].title || '').trim() || ('Problem ' + (i + 1));
     btn.onclick = () => switchProblem(i);
     bar.appendChild(btn);
   });
@@ -775,6 +779,7 @@ function renderProblemTabs() {
 function saveCurrentProblem() {
   saveCurrentFiles();
   problemsData[currentProblemIndex] = {
+    title: (document.getElementById('currentProblemTitle').value || '').trim(),
     problem_statement: document.getElementById('currentProblemStatement').value,
     constraints: document.getElementById('currentConstraints').value,
     starter_code: { ...starterCodeStore },
@@ -799,7 +804,8 @@ function switchProblem(idx) {
 
   document.getElementById('currentProblemStatement').value = prob.problem_statement || '';
   document.getElementById('currentConstraints').value = prob.constraints || '';
-  document.getElementById('problemCardTitle').textContent = 'Problem ' + (idx + 1);
+  document.getElementById('currentProblemTitle').value = prob.title || '';
+  document.getElementById('problemCardTitle').textContent = (prob.title || '').trim() || ('Problem ' + (idx + 1));
 
   starterCodeStore = {};
   if (prob.starter_code) {
@@ -811,7 +817,7 @@ function switchProblem(idx) {
   updateCodeTabs();
 
   // Render per-problem surveys
-  document.getElementById('surveysCardTitle').textContent = 'Surveys for Problem ' + (idx + 1);
+  document.getElementById('surveysCardTitle').textContent = 'Surveys for ' + ((prob.title || '').trim() || ('Problem ' + (idx + 1)));
   document.getElementById('togglePreSurvey').checked = prob.pre_survey_enabled !== false;
   document.getElementById('togglePostSurvey').checked = prob.post_survey_enabled !== false;
   document.getElementById('toggleRecurrentSurvey').checked = prob.recurrent_survey_enabled !== false;
@@ -833,6 +839,7 @@ function switchProblem(idx) {
 function addProblem() {
   saveCurrentProblem();
   problemsData.push(Object.assign({
+    title: '',
     problem_statement: '',
     constraints: '',
     starter_code: {},
@@ -1123,7 +1130,6 @@ function goToStep(n) {
 
 function nextStep() {
   if (currentStep === 0) {
-    if (!document.getElementById('title').value.trim()) { showToast('Title is required.', 'error'); return; }
     if (getSelectedLanguages().length === 0) { showToast('Select at least one language.', 'error'); return; }
   }
   if (currentStep === 1) {
@@ -1132,6 +1138,9 @@ function nextStep() {
   if (currentStep === 2) {
     saveCurrentProblem();
     for (let i = 0; i < problemsData.length; i++) {
+      if (!(problemsData[i].title || '').trim()) {
+        showToast(`Problem ${i+1} requires a title.`, 'error'); return;
+      }
       if (!(problemsData[i].problem_statement || '').trim()) {
         showToast(`Problem ${i+1} requires a problem statement.`, 'error'); return;
       }
@@ -1153,18 +1162,18 @@ function buildReview() {
 
   const condStr = selectedConditions.map(c => condLabels[c]).join('<br>');
   let problemsSummary = problemsData.map((p, i) => {
+    const probLabel = (p.title || '').trim() || `Problem ${i+1}`;
     const stmt = (p.problem_statement || '').substring(0, 60);
     const surveys = [];
     if (p.pre_survey_enabled && (p.pre_survey || []).length) surveys.push('Pre');
     if (p.post_survey_enabled && (p.post_survey || []).length) surveys.push('Post');
     if (p.recurrent_survey_enabled && (p.recurrent_survey || []).length) surveys.push(`Recurrent (start: ${p.recurrent_survey_start}, every: ${p.recurrent_survey_interval})`);
     const surveyStr = surveys.length ? surveys.join(', ') : '<span style="color:var(--muted)">No surveys</span>';
-    return `<div style="margin-bottom:8px;"><span style="color:var(--primary);font-weight:600;">Problem ${i+1}:</span> ${escHtml(stmt)}${stmt.length >= 60 ? '...' : ''}<br><span style="font-size:0.85rem;color:var(--muted);">Surveys: ${surveyStr}</span></div>`;
+    return `<div style="margin-bottom:8px;"><span style="color:var(--primary);font-weight:600;">${escHtml(probLabel)}:</span> ${escHtml(stmt)}${stmt.length >= 60 ? '...' : ''}<br><span style="font-size:0.85rem;color:var(--muted);">Surveys: ${surveyStr}</span></div>`;
   }).join('');
 
   document.getElementById('reviewContent').innerHTML = `
-    <dt>Title</dt><dd>${escHtml(document.getElementById('title').value)}</dd>
-    <dt>Description</dt><dd>${escHtml(document.getElementById('description').value) || '<em>None</em>'}</dd>
+    <dt>Teaser</dt><dd>${escHtml(document.getElementById('teaser').value) || '<em>None</em>'}</dd>
     <dt>Problems (${problemsData.length})</dt><dd>${problemsSummary}</dd>
     <dt>Languages</dt><dd>${langs.join(', ').toUpperCase()}</dd>
     <dt>Time Limit</dt><dd>${document.getElementById('time_limit').value || '0'} min</dd>
@@ -1178,11 +1187,20 @@ async function saveQuiz() {
   saveCurrentProblem();
 
   const btn = document.getElementById('nextBtn');
+  saveCurrentProblem();
+  for (let i = 0; i < problemsData.length; i++) {
+    if (!(problemsData[i].title || '').trim()) {
+      showToast(`Problem ${i+1} requires a title.`, 'error'); return;
+    }
+    if (!(problemsData[i].problem_statement || '').trim()) {
+      showToast(`Problem ${i+1} requires a problem statement.`, 'error'); return;
+    }
+  }
+
   btn.disabled = true; btn.textContent = 'Saving...';
 
   const payload = {
-    title: document.getElementById('title').value.trim(),
-    description: document.getElementById('description').value.trim(),
+    teaser: (document.getElementById('teaser').value || '').trim(),
     problems: problemsData,
     allowed_languages: getSelectedLanguages(),
     time_limit_minutes: parseInt(document.getElementById('time_limit').value) || 0,

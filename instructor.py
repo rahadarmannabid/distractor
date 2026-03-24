@@ -58,6 +58,7 @@ def _normalize_quiz_data(quiz_data: dict) -> dict:
     """Backward-compat: wrap legacy single-problem/single-condition into list format."""
     if "problems" not in quiz_data and "problem_statement" in quiz_data:
         quiz_data["problems"] = [{
+            "title": "Problem 1",
             "problem_statement": quiz_data.pop("problem_statement", ""),
             "constraints": quiz_data.pop("constraints", ""),
             "starter_code": quiz_data.pop("starter_code", {}),
@@ -74,7 +75,9 @@ def _normalize_quiz_data(quiz_data: dict) -> dict:
         quiz_rec = quiz_data.get("recurrent_survey", [])
         quiz_rec_interval = quiz_data.get("recurrent_survey_interval", 4)
         quiz_rec_start = quiz_data.get("recurrent_survey_start", 5)
-        for prob in quiz_data["problems"]:
+        for i, prob in enumerate(quiz_data["problems"]):
+            if not (prob.get("title") or "").strip():
+                prob["title"] = f"Problem {i + 1}"
             if not prob.get("_has_surveys"):
                 prob["_has_surveys"] = True
                 prob["pre_survey_enabled"] = bool(quiz_pre)
@@ -247,15 +250,18 @@ async def save_quiz(request: Request, payload: dict = Body(...)):
     if not email:
         return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
 
-    title = (payload.get("title") or "").strip()
-    if not title:
-        return JSONResponse({"success": False, "error": "Title is required."}, status_code=400)
+    # Derive title for internal use: teaser, first problem title, or "Quiz"
+    teaser = (payload.get("teaser") or "").strip()
+    problems = payload.get("problems", [])
+    first_prob_title = (problems[0].get("title") or "").strip() if problems else ""
+    title = teaser or first_prob_title or "Quiz"
 
     # Validate problems list (at least one required)
-    problems = payload.get("problems", [])
     if not problems or not isinstance(problems, list):
         return JSONResponse({"success": False, "error": "At least one problem is required."}, status_code=400)
     for i, prob in enumerate(problems):
+        if not (prob.get("title") or "").strip():
+            return JSONResponse({"success": False, "error": f"Problem {i+1} requires a title."}, status_code=400)
         if not (prob.get("problem_statement") or "").strip():
             return JSONResponse({"success": False, "error": f"Problem {i+1} requires a problem statement."}, status_code=400)
 
@@ -274,7 +280,8 @@ async def save_quiz(request: Request, payload: dict = Body(...)):
     quiz_data = {
         "id": quiz_id,
         "title": title,
-        "description": (payload.get("description") or "").strip(),
+        "description": "",
+        "teaser": teaser,
         "problems": problems,
         "allowed_languages": payload.get("allowed_languages", ["python", "javascript", "c"]),
         "time_limit_minutes": int(payload.get("time_limit_minutes", 0)),
@@ -368,11 +375,13 @@ async def update_quiz(request: Request, quiz_id: str, payload: dict = Body(...))
         if not isinstance(problems, list) or not problems:
             return JSONResponse({"success": False, "error": "At least one problem is required."}, status_code=400)
         for i, prob in enumerate(problems):
+            if not (prob.get("title") or "").strip():
+                return JSONResponse({"success": False, "error": f"Problem {i+1} requires a title."}, status_code=400)
             if not (prob.get("problem_statement") or "").strip():
                 return JSONResponse({"success": False, "error": f"Problem {i+1} requires a problem statement."}, status_code=400)
 
     updatable_fields = [
-        "title", "description", "problems",
+        "teaser", "problems",
         "allowed_languages", "time_limit_minutes", "conditions",
         "recurrent_survey", "recurrent_survey_interval", "recurrent_survey_start",
         "pre_survey", "post_survey",
@@ -380,6 +389,12 @@ async def update_quiz(request: Request, quiz_id: str, payload: dict = Body(...))
         "paste_allowed", "tab_tracking_enabled",
     ]
     updates = {k: payload[k] for k in updatable_fields if k in payload}
+    # Derive title from teaser or first problem
+    teaser = (payload.get("teaser") or "").strip()
+    problems = payload.get("problems") or existing.get("problems", [])
+    first_title = (problems[0].get("title") or "").strip() if problems else ""
+    updates["title"] = teaser or first_title or "Quiz"
+    updates["description"] = ""
     updates["updated_at"] = datetime.utcnow().isoformat()
 
     db.reference(f"quizzes/{quiz_id}").update(updates)

@@ -2825,13 +2825,14 @@ async def get_assignment_text(assignment_key: str, problem_index: int = 0):
                     qval = normalize_quiz_data(qval)
                     import html as html_mod
                     parts = []
-                    if qval.get("title"):
-                        parts.append(f'<div class="quiz-title">{html_mod.escape(qval["title"])}</div>')
-                    if qval.get("description"):
-                        parts.append(f'{html_mod.escape(qval["description"])}')
+                    # No quiz-level title/description; teaser is shown in overlay at start
                     # Load problem data from the problems array
                     problems = qval.get("problems", [])
                     problem = problems[problem_index] if problem_index < len(problems) else (problems[0] if problems else {})
+                    # Per-problem title (shown above problem statement)
+                    prob_title = (problem.get("title") or "").strip()
+                    if prob_title:
+                        parts.append(f'<div class="problem-title">{html_mod.escape(prob_title)}</div>')
                     if problem.get("problem_statement"):
                         parts.append(f'<span class="section-label">Problem</span>{html_mod.escape(problem["problem_statement"])}')
                     if problem.get("constraints"):
@@ -3064,11 +3065,11 @@ async def student_quiz_entry(request: Request, access_code: str):
             pass
 
     allowed_langs = quiz_data.get("allowed_languages", ["python", "javascript", "c"])
+    quiz_teaser = quiz_data.get("teaser", "")
     return templates.TemplateResponse("home.html", {
         "request": request,
         "quiz_mode": True,
-        "quiz_title": quiz_data.get("title", "Custom Quiz"),
-        "quiz_description": quiz_data.get("description", ""),
+        "quiz_teaser": quiz_teaser,
         "access_code": access_code,
         "allowed_languages": allowed_langs,
     })
@@ -3202,7 +3203,7 @@ async def student_quiz_join(request: Request):
         "periodic_survey_interval": int(first_problem.get("recurrent_survey_interval", 4)),
         "final_survey_disabled": False,
         "quiz_id": quiz_id,
-        "quiz_title": quiz_data.get("title", ""),
+        "quiz_teaser": quiz_data.get("teaser", ""),
         "time_limit_minutes": quiz_data.get("time_limit_minutes", 0),
         "total_problems": len(problems),
         "current_problem_index": 0,

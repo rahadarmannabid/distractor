@@ -703,9 +703,9 @@
             </div>
 
             <form class="login-form" id="loginForm">
-                {% if quiz_mode is defined and quiz_mode %}
+                {% if quiz_mode is defined and quiz_mode and quiz_teaser %}
                 <div style="background:rgba(88,166,255,0.1);padding:14px;border-left:4px solid #58a6ff;border-radius:8px;margin-bottom:18px;font-size:14px;color:#c9d1d9;">
-                    <strong>{{ quiz_title }}</strong>{% if quiz_description %}<br>{{ quiz_description }}{% endif %}
+                    {{ quiz_teaser }}
                 </div>
                 {% endif %}
                 <div class="form-group">
@@ -1008,7 +1008,7 @@
                         periodicSurveyInterval: data.periodic_survey_interval || 4,
                         finalSurveyDisabled: data.final_survey_disabled || false,
                         quizId: data.quiz_id || null,
-                        quizTitle: data.quiz_title || null,
+                        quizTeaser: data.quiz_teaser || '',
                         timeLimitMinutes: data.time_limit_minutes || 0,
                         totalProblems: data.total_problems || 1,
                         currentProblemIndex: data.current_problem_index || 0,

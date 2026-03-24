@@ -115,6 +115,14 @@
             color: #e6edf3;
             margin-bottom: 12px;
         }
+        .problem-panel__body .problem-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #4ade80;
+            margin: 16px 0 8px 0;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #30363d;
+        }
         .problem-panel__placeholder {
             color: #666;
             font-style: italic;
@@ -614,6 +622,12 @@
         .teaser-slide p {
             margin-bottom: 0;
             color: #e5e7eb;
+        }
+        .teaser-quiz-text {
+            font-size: 16px;
+            line-height: 1.7;
+            color: #e5e7eb;
+            white-space: pre-wrap;
         }
         .teaser-overlay-footer {
             display: flex;
@@ -1752,17 +1766,22 @@
                         <div class="teaser-progress">
                             <span id="teaserStepIndicator">1 / 4</span>
                         </div>
-                        <div class="teaser-slide active" data-step="1">
-                            <h3 id="teaserSlideTitle">CodeOracle is Not a Productivity Tool</h3>
+                        <div id="teaserDefaultSlides">
+                            <div class="teaser-slide active" data-step="1">
+                                <h3 id="teaserSlideTitle">CodeOracle is Not a Productivity Tool</h3>
+                            </div>
+                            <div class="teaser-slide" data-step="2" aria-hidden="true">
+                                <h3 id="teaserSlideTitle2">CodeOracle tries to interpret your code in real time and provide next line suggestions like Github Copilot</h3>
+                            </div>
+                            <div class="teaser-slide" data-step="3" aria-hidden="true">
+                                <h3 id="teaserSlideTitle3">CodeOracle is Powered by ChatGPT</h3>
+                            </div>
+                            <div class="teaser-slide" data-step="4" aria-hidden="true">
+                                <h3 id="teaserSlideTitle4">Ultimately CodeOracle teaches you how AI coding Assistant works</h3>
+                            </div>
                         </div>
-                        <div class="teaser-slide" data-step="2" aria-hidden="true">
-                            <h3 id="teaserSlideTitle2">CodeOracle tries to interpret your code in real time and provide next line suggestions like Github Copilot</h3>
-                        </div>
-                        <div class="teaser-slide" data-step="3" aria-hidden="true">
-                            <h3 id="teaserSlideTitle3">CodeOracle is Powered by ChatGPT</h3>
-                        </div>
-                        <div class="teaser-slide" data-step="4" aria-hidden="true">
-                            <h3 id="teaserSlideTitle4">Ultimately CodeOracle teaches you how AI coding Assistant works</h3>
+                        <div id="teaserQuizContent" class="teaser-slide" style="display:none;">
+                            <div class="teaser-quiz-text" id="teaserQuizText"></div>
                         </div>
                         <div class="teaser-overlay-footer">
                             <button class="teaser-next-button" id="teaserNextButton">Next</button>
@@ -2258,11 +2277,23 @@ let isSubmissionInProgress = false;
     let teaserCurrentIndex = 0;
     let teaserActive = false;
     let teaserAcknowledged = false;
+    let teaserQuizMode = false;  // true when showing instructor-provided quiz teaser
 
 function updateTeaserSlide() {
-    if (!teaserOverlay || teaserSlides.length === 0) {
+    if (!teaserOverlay) return;
+
+    if (teaserQuizMode) {
+        const quizSlide = document.getElementById('teaserQuizContent');
+        if (quizSlide) {
+            quizSlide.classList.add('active');
+            quizSlide.style.display = 'block';
+        }
+        if (teaserStepIndicator) teaserStepIndicator.textContent = '1 / 1';
+        if (teaserNextButton) teaserNextButton.textContent = 'Start coding';
         return;
     }
+
+    if (teaserSlides.length === 0) return;
 
     teaserSlides.forEach((slide, index) => {
         const isActive = index === teaserCurrentIndex;
@@ -2287,10 +2318,25 @@ function updateTeaserSlide() {
     }
 }
 
-function showTeaserOverlay() {
-    if (!teaserOverlay || teaserSlides.length === 0) {
-        return;
+function showTeaserOverlay(quizTeaserText) {
+    if (!teaserOverlay) return;
+
+    const defaultSlides = document.getElementById('teaserDefaultSlides');
+    const quizContent = document.getElementById('teaserQuizContent');
+    const quizTextEl = document.getElementById('teaserQuizText');
+
+    if (quizTeaserText && quizTextEl && quizContent) {
+        teaserQuizMode = true;
+        quizTextEl.textContent = quizTeaserText;
+        if (defaultSlides) defaultSlides.style.display = 'none';
+    } else {
+        teaserQuizMode = false;
+        if (defaultSlides) defaultSlides.style.display = '';
+        if (quizContent) quizContent.style.display = 'none';
     }
+
+    if (teaserQuizMode && !quizTeaserText) return;
+    if (!teaserQuizMode && teaserSlides.length === 0) return;
 
     teaserActive = true;
     teaserOverlay.classList.remove('hidden');
@@ -2311,12 +2357,16 @@ function showTeaserOverlay() {
 }
 
 function hideTeaserOverlay() {
-    if (!teaserOverlay) {
-        return;
-    }
+    if (!teaserOverlay) return;
 
     teaserActive = false;
     teaserAcknowledged = true;
+    teaserQuizMode = false;
+
+    const defaultSlides = document.getElementById('teaserDefaultSlides');
+    const quizContent = document.getElementById('teaserQuizContent');
+    if (defaultSlides) defaultSlides.style.display = '';
+    if (quizContent) { quizContent.style.display = 'none'; quizContent.classList.remove('active'); }
 
     teaserOverlay.classList.add('hidden');
 
@@ -2331,30 +2381,28 @@ function hideTeaserOverlay() {
 }
 
 function maybeShowTeaser() {
-    // Check if any teaser keys are configured
+    if (!currentSession.assignmentKey) return;
+    if (teaserAcknowledged) return;
+
+    // Quiz with instructor-provided teaser: show it
+    const isQuiz = currentSession.assignmentKey.toLowerCase().startsWith('quiz_');
+    const quizTeaser = (currentSession.quizTeaser || '').trim();
+    if (isQuiz && quizTeaser) {
+        showTeaserOverlay(quizTeaser);
+        return;
+    }
+
+    // Default teaser from env (for non-quiz assignments)
     if (!teaserAssignmentKeys || teaserAssignmentKeys.length === 0) {
         teaserAcknowledged = true;
         return;
     }
 
-    // Check if current session has an assignment key
-    if (!currentSession.assignmentKey) {
-        return;
-    }
-
-    // Normalize current assignment key
     const normalizedAssignmentKey = currentSession.assignmentKey.toLowerCase().trim();
-    
-    // Check if current assignment key matches ANY of the teaser keys (exact match)
     const shouldShowTeaser = teaserAssignmentKeys.includes(normalizedAssignmentKey);
-    
+
     if (!shouldShowTeaser) {
         teaserAcknowledged = true;
-        return;
-    }
-
-    // Don't show if already acknowledged
-    if (teaserAcknowledged) {
         return;
     }
 
@@ -2363,7 +2411,10 @@ function maybeShowTeaser() {
 
 if (teaserNextButton) {
     teaserNextButton.addEventListener('click', () => {
-        if (!teaserActive) {
+        if (!teaserActive) return;
+
+        if (teaserQuizMode) {
+            hideTeaserOverlay();
             return;
         }
 
@@ -2859,6 +2910,7 @@ async function initializeFromURL() {
             // Multi-problem tracking
             totalProblems: authData.totalProblems || 1,
             currentProblemIndex: authData.currentProblemIndex || 0,
+            quizTeaser: authData.quizTeaser || '',
         };
 
         // If returning for a new problem (not the first), reset all survey state fresh

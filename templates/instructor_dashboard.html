@@ -189,8 +189,8 @@
     <div class="quiz-grid">
       {% for q in quizzes %}
       <div class="quiz-card" data-id="{{ q.id }}">
-        <h3>{{ q.title }}</h3>
-        <div class="desc">{{ q.description[:120] }}{% if q.description|length > 120 %}...{% endif %}</div>
+        <h3>{{ q.teaser or (q.problems[0].title if q.problems and q.problems|length > 0 else '') or q.title or 'Quiz' }}</h3>
+        <div class="desc">{% set t = q.teaser or '' %}{{ t[:120] }}{% if t|length > 120 %}...{% endif %}</div>
 
         <div class="meta">
           {% if q.published %}
