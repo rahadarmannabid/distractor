@@ -43,6 +43,7 @@ class ProblemCreate(BaseModel):
     title: str  # Required per-problem title, e.g. "Intro to Variables"
     problem_statement: str
     constraints: str = ""
+    test_cases: str = ""
     starter_code: Dict[str, Any] = Field(default_factory=dict)
     # Per-problem survey config
     pre_survey_enabled: bool = True

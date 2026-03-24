@@ -484,6 +484,10 @@
         <textarea id="currentProblemStatement" rows="6" placeholder="Describe the problem, input formats, and expected outputs..."></textarea>
       </div>
       <div class="fg">
+        <label>Test Cases</label>
+        <textarea id="currentTestCases" rows="4" placeholder="Optional example input/output test cases for students..."></textarea>
+      </div>
+      <div class="fg">
         <label>Constraints</label>
         <textarea id="currentConstraints" rows="3" placeholder="e.g., 1 <= N <= 10^5"></textarea>
       </div>
@@ -689,6 +693,7 @@ function defaultSurveyFields() {
       title: (prob.title || '').trim(),
       problem_statement: prob.problem_statement || '',
       constraints: prob.constraints || '',
+      test_cases: prob.test_cases || '',
       starter_code: normalizedSC,
       pre_survey_enabled: hasSurveys ? (prob.pre_survey_enabled !== false) : (quizPre.length ? true : defaults.pre_survey_enabled),
       pre_survey: hasSurveys ? (prob.pre_survey || []) : (quizPre.length ? quizPre : defaults.pre_survey),
@@ -706,6 +711,7 @@ problemsData.push(Object.assign({
   title: '',
   problem_statement: '',
   constraints: '',
+  test_cases: '',
   starter_code: {},
 }, defaultSurveyFields()));
 {% endif %}
@@ -782,6 +788,7 @@ function saveCurrentProblem() {
     title: (document.getElementById('currentProblemTitle').value || '').trim(),
     problem_statement: document.getElementById('currentProblemStatement').value,
     constraints: document.getElementById('currentConstraints').value,
+    test_cases: document.getElementById('currentTestCases').value,
     starter_code: { ...starterCodeStore },
     _has_surveys: true,  // sentinel: survives Firebase even if arrays are empty
     pre_survey_enabled: document.getElementById('togglePreSurvey').checked,
@@ -804,6 +811,7 @@ function switchProblem(idx) {
 
   document.getElementById('currentProblemStatement').value = prob.problem_statement || '';
   document.getElementById('currentConstraints').value = prob.constraints || '';
+  document.getElementById('currentTestCases').value = prob.test_cases || '';
   document.getElementById('currentProblemTitle').value = prob.title || '';
   document.getElementById('problemCardTitle').textContent = (prob.title || '').trim() || ('Problem ' + (idx + 1));
 
@@ -842,6 +850,7 @@ function addProblem() {
     title: '',
     problem_statement: '',
     constraints: '',
+    test_cases: '',
     starter_code: {},
   }, defaultSurveyFields()));
   switchProblem(problemsData.length - 1);

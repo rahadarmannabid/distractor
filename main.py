@@ -2835,6 +2835,8 @@ async def get_assignment_text(assignment_key: str, problem_index: int = 0):
                         parts.append(f'<div class="problem-title">{html_mod.escape(prob_title)}</div>')
                     if problem.get("problem_statement"):
                         parts.append(f'<span class="section-label">Problem</span>{html_mod.escape(problem["problem_statement"])}')
+                    if problem.get("test_cases"):
+                        parts.append(f'<span class="section-label">Test Cases</span>{html_mod.escape(problem["test_cases"])}')
                     if problem.get("constraints"):
                         parts.append(f'<span class="section-label">Constraints</span>{html_mod.escape(problem["constraints"])}')
                     html_out = "\n\n".join(parts)

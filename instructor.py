@@ -61,6 +61,7 @@ def _normalize_quiz_data(quiz_data: dict) -> dict:
             "title": "Problem 1",
             "problem_statement": quiz_data.pop("problem_statement", ""),
             "constraints": quiz_data.pop("constraints", ""),
+            "test_cases": "",
             "starter_code": quiz_data.pop("starter_code", {}),
         }]
     if "conditions" not in quiz_data and "condition" in quiz_data:
@@ -78,6 +79,8 @@ def _normalize_quiz_data(quiz_data: dict) -> dict:
         for i, prob in enumerate(quiz_data["problems"]):
             if not (prob.get("title") or "").strip():
                 prob["title"] = f"Problem {i + 1}"
+            if "test_cases" not in prob:
+                prob["test_cases"] = ""
             if not prob.get("_has_surveys"):
                 prob["_has_surveys"] = True
                 prob["pre_survey_enabled"] = bool(quiz_pre)
