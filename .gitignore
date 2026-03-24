@@ -81,9 +81,7 @@ docker-compose*.yml
 README.md
 readme.md
 *.md
-backend.txt
 frontend.txt
-home.txt
 docs/
 documentation/
 

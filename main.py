@@ -4,14 +4,17 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import os
+from pathlib import Path
 from dotenv import load_dotenv
+
+# Load project .env first; override=True so repo config wins over stale shell/IDE env (e.g. old FIREBASE_*).
+load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=True)
 from openai import OpenAI
 import re
 import subprocess
 import sys
 import tempfile
 import time
-from pathlib import Path
 import uuid
 import json
 import mimetypes 
@@ -24,20 +27,14 @@ import asyncio
 import shlex
 from typing import List, Dict, Optional, Any
 import smtplib
-import email
-from email import encoders
+from email.message import EmailMessage
 import traceback
 from typing import List, Dict, Optional, Any
 from enum import Enum
 import json
-from pathlib import Path
 from fastapi.responses import FileResponse
 from admin import router as admin_router
 from instructor import router as instructor_router
-
-
-# Load environment variables
-load_dotenv()
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -47,15 +44,16 @@ def initialize_firebase():
     try:
         if not firebase_admin._apps:
             # Try to initialize from individual environment variables first
-            if all(os.getenv(var) for var in [
-                "FIREBASE_PROJECT_ID", "FIREBASE_PRIVATE_KEY_ID", 
-                "FIREBASE_PRIVATE_KEY", "FIREBASE_CLIENT_EMAIL", "FIREBASE_CLIENT_ID"
+            private_key = os.getenv("FIREBASE_PRIVATE_KEY")
+            if private_key and all(os.getenv(var) for var in [
+                "FIREBASE_PROJECT_ID", "FIREBASE_PRIVATE_KEY_ID",
+                "FIREBASE_CLIENT_EMAIL", "FIREBASE_CLIENT_ID"
             ]):
                 cred_dict = {
                     "type": "service_account",
                     "project_id": os.getenv("FIREBASE_PROJECT_ID"),
                     "private_key_id": os.getenv("FIREBASE_PRIVATE_KEY_ID"),
-                    "private_key": os.getenv("FIREBASE_PRIVATE_KEY").replace("\\n", "\n"),
+                    "private_key": private_key.replace("\\n", "\n"),
                     "client_email": os.getenv("FIREBASE_CLIENT_EMAIL"),
                     "client_id": os.getenv("FIREBASE_CLIENT_ID"),
                     "auth_uri": os.getenv("FIREBASE_AUTH_URI", "https://accounts.google.com/o/oauth2/auth"),
@@ -71,7 +69,11 @@ def initialize_firebase():
                     firebase_admin.initialize_app(cred, {
                         'databaseURL': database_url
                     })
-                    logger.info("Firebase Realtime Database initialized successfully")
+                    logger.info(
+                        "Firebase Realtime Database initialized: project_id=%s databaseURL=%s",
+                        os.getenv("FIREBASE_PROJECT_ID"),
+                        database_url,
+                    )
                     return db.reference()
                 else:
                     logger.warning("FIREBASE_DATABASE_URL not found in environment variables")
@@ -80,14 +82,17 @@ def initialize_firebase():
             # Fallback to service account file if available
             elif os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
                 cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-                if os.path.exists(cred_path):
+                if cred_path and os.path.exists(cred_path):
                     cred = credentials.Certificate(cred_path)
                     database_url = os.getenv("FIREBASE_DATABASE_URL")
                     if database_url:
                         firebase_admin.initialize_app(cred, {
                             'databaseURL': database_url
                         })
-                        logger.info("Firebase Realtime Database initialized successfully using service account file")
+                        logger.info(
+                            "Firebase initialized (GOOGLE_APPLICATION_CREDENTIALS): databaseURL=%s",
+                            database_url,
+                        )
                         return db.reference()
                     else:
                         logger.warning("FIREBASE_DATABASE_URL not found in environment variables")
@@ -334,7 +339,8 @@ def send_notification_email(submission_data):
         if not all([smtp_server, email_address, email_password, notification_email]):
             logger.error("Missing email configuration in environment variables")
             return False
-        
+        assert smtp_server and email_address and email_password and notification_email
+
         # Email body
         body = f"""New code submission received:
 
@@ -358,8 +364,7 @@ Code Preview (First 200 characters):
 This is an automated notification from the AI Code Assistant Research Platform.
 """
         
-        # Create message using email.message
-        msg = email.message.EmailMessage()
+        msg = EmailMessage()
         msg['From'] = email_address
         msg['To'] = notification_email
         msg['Subject'] = f"New Code Submission - User {submission_data['user_id']}"
@@ -449,7 +454,9 @@ def detect_programming_language(code):
     # Default to generic programming language
     return "code"
 
-async def execute_code_safely(code: str, language: str, timeout: int = 10, files: list = None):
+async def execute_code_safely(
+    code: str, language: str, timeout: int = 10, files: Optional[List[Dict[str, str]]] = None
+):
     """
     Execute code safely in a subprocess with timeout and security restrictions.
     When files is provided, all files are written to a shared temp directory
@@ -471,7 +478,7 @@ async def execute_code_safely(code: str, language: str, timeout: int = 10, files
         logger.error(f"Code execution error: {e}")
         return {"success": False, "output": "", "error": f"Execution failed: {str(e)}"}
 
-async def execute_python_code(code: str, timeout: int = 10, files: list = None):
+async def execute_python_code(code: str, timeout: int = 10, files: Optional[List[Dict[str, str]]] = None):
     """
     Execute Python code safely with restrictions.
     When `files` is provided, all files are written to a shared temp directory
@@ -569,7 +576,7 @@ async def execute_python_code(code: str, timeout: int = 10, files: list = None):
             _shutil.rmtree(tmpdir)
         except Exception:
             pass
-async def execute_c_code(code: str, timeout: int = 10, files: list = None):
+async def execute_c_code(code: str, timeout: int = 10, files: Optional[List[Dict[str, str]]] = None):
     """
     Execute C code safely with security restrictions and async compilation.
     When `files` is provided, all files are written to a shared temp directory
@@ -804,7 +811,7 @@ class SessionLog(BaseModel):
 
     post_survey_status: str = "not_started"
     post_survey_timestamp: Optional[str] = None
-    post_survey_responses: Optional[List[Dict[str, Any]]] = None
+    post_survey_responses: Optional[Dict[str, Any]] = None
 
     periodic_survey_count: int = 0
 
@@ -877,7 +884,9 @@ def save_session_to_local(session_log: SessionLog):
     except Exception as e:
         logger.error(f"Failed to save session log locally: {e}")
 
-def extract_survey_ai_history_summary(session_log: SessionLog, survey_data: Dict[str, Any] = None) -> Dict[str, Any]:
+def extract_survey_ai_history_summary(
+    session_log: SessionLog, survey_data: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """Extract a summary of AI history context for surveys"""
     if not survey_data:
         return {
@@ -1093,10 +1102,10 @@ async def get_full_code_suggestion_async(problem_description, code, is_correct_d
 
 class CodeRequest(BaseModel):
     code: str
-    user_id: str = None
-    assignment_key: str = None
-    session_id: str = None
-    programming_language: str = None
+    user_id: Optional[str] = None
+    assignment_key: Optional[str] = None
+    session_id: Optional[str] = None
+    programming_language: Optional[str] = None
 
 class CodeResponse(BaseModel):
     analysis: str
@@ -1111,8 +1120,8 @@ class FileItem(BaseModel):
 class ExecuteRequest(BaseModel):
     code: str
     language: str
-    user_id: str = None
-    session_id: str = None
+    user_id: Optional[str] = None
+    session_id: Optional[str] = None
     files: Optional[List[FileItem]] = None
 
 class ExecuteResponse(BaseModel):
@@ -1377,11 +1386,11 @@ async def execute_code(request: ExecuteRequest):
 
 class SubmitRequest(BaseModel):
     code: str
-    user_id: str = None
-    assignment_key: str = None
-    session_id: str = None
-    programming_language: str = None
-    timestamp: str = None
+    user_id: Optional[str] = None
+    assignment_key: Optional[str] = None
+    session_id: Optional[str] = None
+    programming_language: Optional[str] = None
+    timestamp: Optional[str] = None
     suggestion_clicked: int = 0
     compiler_clicked: int = 0
     survey_data: Optional[Dict[str, Any]] = None
@@ -1449,14 +1458,15 @@ async def submit_code(request: SubmitRequest):
                 save_session_to_local(session_log)
                 
                 # Remove from active sessions - FORCE LOGOUT
-                del active_sessions[session_id]
+                if session_id:
+                    del active_sessions[session_id]
                 
             except Exception as firebase_error:
                 logger.error(f"Firebase submission save failed: {firebase_error}")
                 firebase_status = "failed"
                 
                 # Still remove from active sessions even if Firebase fails
-                if session_id in active_sessions:
+                if session_id and session_id in active_sessions:
                     del active_sessions[session_id]
         
         # Save submission file locally as backup
@@ -1649,11 +1659,11 @@ async def debug_firebase():
         "firebase_db_exists": firebase_db is not None,
         "firebase_apps_count": len(firebase_admin._apps),
         "environment_vars": {
-            "FIREBASE_PROJECT_ID": bool(os.getenv("FIREBASE_PROJECT_ID")),
-            "FIREBASE_PRIVATE_KEY": bool(os.getenv("FIREBASE_PRIVATE_KEY")),
+            "FIREBASE_PROJECT_ID": os.getenv("FIREBASE_PROJECT_ID"),
+            "FIREBASE_PRIVATE_KEY_set": bool(os.getenv("FIREBASE_PRIVATE_KEY")),
             "FIREBASE_DATABASE_URL": os.getenv("FIREBASE_DATABASE_URL"),
             "FIREBASE_CLIENT_EMAIL": os.getenv("FIREBASE_CLIENT_EMAIL"),
-            "GOOGLE_APPLICATION_CREDENTIALS": bool(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+            "GOOGLE_APPLICATION_CREDENTIALS": bool(os.getenv("GOOGLE_APPLICATION_CREDENTIALS")),
         }
     }
 
@@ -2426,7 +2436,7 @@ async def authenticate_user(request: AuthRequest):
         
         has_pre = False
         has_post = False
-        if has_surveys:
+        if has_surveys and survey_file is not None:
             try:
                 with open(survey_file, 'r', encoding='utf-8') as f:
                     survey_config = json.load(f)
@@ -2532,11 +2542,11 @@ async def log_periodic_survey(request: Request):
 
 
 async def save_session_to_firebase(
-    session_log: SessionLog, 
-    suggestion_clicked: int, 
-    compiler_clicked: int, 
-    programming_language: str = "unknown", 
-    survey_data: Dict[str, Any] = None
+    session_log: SessionLog,
+    suggestion_clicked: int,
+    compiler_clicked: int,
+    programming_language: str = "unknown",
+    survey_data: Optional[Dict[str, Any]] = None,
 ):
     """Save complete session data to Firebase with surveys as separate top-level entries"""
     if not firebase_db:
@@ -2697,10 +2707,11 @@ async def save_session_to_firebase(
             user_data['post_survey'] = post_survey
         
         if periodic_surveys_data:
+            survey_meta = survey_data or {}
             user_data['periodic_surveys'] = {
                 'metadata': {
-                    'total_occurrences': survey_data.get('total_occurrences', len(periodic_surveys_data)),
-                    'survey_interval': survey_data.get('survey_interval', 4),
+                    'total_occurrences': survey_meta.get('total_occurrences', len(periodic_surveys_data)),
+                    'survey_interval': survey_meta.get('survey_interval', 4),
                     'questions_asked': periodic_survey_questions  # Store questions for reference
                 },
                 'occurrences': {
@@ -2988,11 +2999,12 @@ async def validate_survey_images(assignment_key: str):
 @app.get("/debug/sidebar-config")
 async def debug_sidebar_config():
     """Debug sidebar configuration"""
+    processed = get_side_panel_hidden_assignment_keys()
     return {
         "SIDE_PANEL_HIDDEN_raw": os.getenv("SIDE_PANEL_HIDDEN", "NOT_SET"),
-        "processed_prefixes": get_side_panel_hidden_prefixes(),
-        "split_prefixes": get_side_panel_hidden_prefixes().split(','),
-        "environment_loaded": bool(os.getenv("OPENAI_API_KEY"))  # Check if .env loaded at all
+        "processed_prefixes": processed,
+        "split_prefixes": [p for p in processed.split(",") if p] if processed else [],
+        "environment_loaded": bool(os.getenv("OPENAI_API_KEY")),
     }
     
 # ─── Quiz data helpers ──────────────────────────────────────────────────────
