@@ -3260,6 +3260,8 @@ async def quiz_next_problem(request: Request):
 
     problem = problems[idx]
     problem_description = problem.get("problem_statement", "")
+    completed_problem = problems[idx - 1] if idx > 0 else {}
+    completed_problem_title = (completed_problem.get("title") or "").strip() or f"Problem {idx}"
 
     # Get starter code for the next problem
     quiz_starter = problem.get("starter_code", {})
@@ -3285,6 +3287,7 @@ async def quiz_next_problem(request: Request):
         "status": "next",
         "problem_index": idx,
         "total_problems": session_log.total_problems,
+        "completed_problem_title": completed_problem_title,
         "problem_description": problem_description if session_log.condition == 1 else None,
         "constraints": problem.get("constraints", ""),
         "starter_code": starter_code,

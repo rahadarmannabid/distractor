@@ -2582,12 +2582,20 @@ function captureAllSubmissionData() {
         const model = window.editor ? window.editor.getModel() : null;
         const allFiles = getAllFileContents();
         
+        const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
+        const currentProbIdx = authData.currentProblemIndex || 0;
+        const titleEl = document.querySelector('.problem-panel__body .problem-title');
+        const currentProblemTitle = titleEl ? titleEl.textContent.trim() : `Problem ${currentProbIdx + 1}`;
+
         const submissionData = {
             code: code,
             files: allFiles,
             lineCount: model ? model.getLineCount() : 0,
             characterCount: code.length,
-            
+            currentProblemIndex: currentProbIdx,
+            currentProblemTitle: currentProblemTitle,
+            totalProblems: authData.totalProblems || 1,
+
             // Session data
             session: {
                 sessionId: currentSession.sessionId,
@@ -2656,6 +2664,9 @@ function retrieveCachedSubmissionData() {
 function clearCachedSubmissionData() {
     try {
         sessionStorage.removeItem('pendingSubmissionData');
+        if (currentSession && currentSession.sessionId) {
+            sessionStorage.removeItem(`perProblemCodes_${currentSession.sessionId}`);
+        }
     } catch (error) {
         console.error('❌ Failed to clear cached data:', error);
     }
@@ -4477,6 +4488,36 @@ async function submitFinalSurvey() {
     }
 }
 
+function getCombinedCodeForDownload(currentCode) {
+    const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
+    const totalProblems = authData.totalProblems || 1;
+    const currentProbIdx = authData.currentProblemIndex || 0;
+
+    if (totalProblems <= 1) return currentCode;
+
+    const perProblemKey = `perProblemCodes_${currentSession.sessionId}`;
+    let stored = [];
+    try {
+        const raw = sessionStorage.getItem(perProblemKey);
+        if (raw) stored = JSON.parse(raw);
+    } catch (e) {}
+
+    const language = currentSession.programmingLanguage || 'javascript';
+    const commentPrefix = (language === 'python' || language === 'sql') ? '#' : '//';
+
+    const titleEl = document.querySelector('.problem-panel__body .problem-title');
+    const currentTitle = titleEl ? titleEl.textContent.trim() : `Problem ${currentProbIdx + 1}`;
+
+    stored.push({ problemIndex: currentProbIdx, title: currentTitle, code: currentCode });
+    stored.sort((a, b) => a.problemIndex - b.problemIndex);
+
+    const parts = stored.map(function(p) {
+        const sep = `${commentPrefix} ========== ${p.title} ==========\n`;
+        return sep + (p.code || '').trim() + '\n';
+    });
+    return parts.join('\n').trim();
+}
+
 function downloadCodeFile() {
     try {
         const code = window.editor.getValue();
@@ -4484,8 +4525,9 @@ function downloadCodeFile() {
             console.warn('No code to download');
             return false;
         }
-        
-        // Determine file extension based on programming language
+
+        const contentToDownload = getCombinedCodeForDownload(code);
+
         const languageExtensions = {
             'javascript': '.js',
             'python': '.py',
@@ -4497,35 +4539,31 @@ function downloadCodeFile() {
             'css': '.css',
             'sql': '.sql'
         };
-        
+
         const language = currentSession.programmingLanguage || 'javascript';
         const extension = languageExtensions[language] || '.txt';
-        
-        // Create filename with user and assignment info
+
         const fileName = `${currentSession.userId}_${currentSession.assignmentKey}_code${extension}`;
-        
-        // Create blob and download
-        const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
+
+        const blob = new Blob([contentToDownload], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
         link.download = fileName;
-        
-        // Trigger download
+
         document.body.appendChild(link);
         link.click();
-        
-        // Cleanup
+
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
         addTerminalOutput(`✅ Code downloaded as: ${fileName}`, 'success');
         logActivity('code_download', {
             file_name: fileName,
             language: language,
-            code_length: code.length,
+            code_length: contentToDownload.length,
             download_trigger: 'final_survey_completion'
         });
-        
+
         return true;
     } catch (error) {
         console.error('❌ Code download failed:', error);
@@ -5216,6 +5254,20 @@ async function checkAndShowPostSurvey() {
             if (nextData.status === 'complete') {
                 // All done — fall through to final submission
             } else {
+                // Store current problem's code for combined download at final submission
+                const perProblemKey = `perProblemCodes_${currentSession.sessionId}`;
+                let stored = [];
+                try {
+                    const raw = sessionStorage.getItem(perProblemKey);
+                    if (raw) stored = JSON.parse(raw);
+                } catch (e) {}
+                stored.push({
+                    problemIndex: currentProbIdx,
+                    title: nextData.completed_problem_title || `Problem ${currentProbIdx + 1}`,
+                    code: code
+                });
+                sessionStorage.setItem(perProblemKey, JSON.stringify(stored));
+
                 // Update authData with next problem info
                 authData.currentProblemIndex = nextData.problem_index;
                 authData.problemDescription = nextData.problem_description;

@@ -1552,6 +1552,20 @@
                                     throw new Error('__ALL_DONE__');
                                 }
 
+                                // Store current problem's code for combined download at final submission
+                                const perProblemKey = `perProblemCodes_${authData.sessionId}`;
+                                let stored = [];
+                                try {
+                                    const raw = sessionStorage.getItem(perProblemKey);
+                                    if (raw) stored = JSON.parse(raw);
+                                } catch (e) {}
+                                stored.push({
+                                    problemIndex: currentProbIdx,
+                                    title: nextData.completed_problem_title || `Problem ${currentProbIdx + 1}`,
+                                    code: code
+                                });
+                                sessionStorage.setItem(perProblemKey, JSON.stringify(stored));
+
                                 // Update authData with next problem info
                                 authData.currentProblemIndex = nextData.problem_index;
                                 authData.problemDescription = nextData.problem_description;
@@ -1697,6 +1711,10 @@
             clearCachedSubmissionData() {
                 try {
                     sessionStorage.removeItem('pendingSubmissionData');
+                    const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
+                    if (authData.sessionId) {
+                        sessionStorage.removeItem(`perProblemCodes_${authData.sessionId}`);
+                    }
                 } catch (error) {
                     console.error('Failed to clear cached data:', error);
                 }
@@ -1709,8 +1727,32 @@
                         console.warn('No code to download');
                         return false;
                     }
-                    
-                    // Determine file extension based on programming language
+
+                    const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
+                    const totalProblems = authData.totalProblems || 1;
+                    const currentProbIdx = authData.currentProblemIndex || 0;
+                    let contentToDownload = code;
+
+                    if (totalProblems > 1) {
+                        const perProblemKey = `perProblemCodes_${cachedData.session.sessionId}`;
+                        let stored = [];
+                        try {
+                            const raw = sessionStorage.getItem(perProblemKey);
+                            if (raw) stored = JSON.parse(raw);
+                        } catch (e) {}
+                        stored.push({ problemIndex: currentProbIdx, title: (cachedData.currentProblemTitle || `Problem ${currentProbIdx + 1}`), code: code });
+                        stored.sort((a, b) => a.problemIndex - b.problemIndex);
+
+                        const language = cachedData.session.programmingLanguage || 'javascript';
+                        const commentPrefix = (language === 'python' || language === 'sql') ? '#' : '//';
+
+                        const parts = stored.map(function(p) {
+                            const sep = `${commentPrefix} ========== ${p.title} ==========\n`;
+                            return sep + (p.code || '').trim() + '\n';
+                        });
+                        contentToDownload = parts.join('\n').trim();
+                    }
+
                     const languageExtensions = {
                         'javascript': '.js',
                         'python': '.py',
@@ -1722,28 +1764,24 @@
                         'css': '.css',
                         'sql': '.sql'
                     };
-                    
+
                     const language = cachedData.session.programmingLanguage || 'javascript';
                     const extension = languageExtensions[language] || '.txt';
-                    
-                    // Create filename with user and assignment info
+
                     const fileName = `${cachedData.session.userId}_${cachedData.session.assignmentKey}_code${extension}`;
-                    
-                    // Create blob and download
-                    const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
+
+                    const blob = new Blob([contentToDownload], { type: 'text/plain;charset=utf-8' });
                     const url = URL.createObjectURL(blob);
                     const link = document.createElement('a');
                     link.href = url;
                     link.download = fileName;
-                    
-                    // Trigger download
+
                     document.body.appendChild(link);
                     link.click();
-                    
-                    // Cleanup
+
                     document.body.removeChild(link);
                     URL.revokeObjectURL(url);
-                    
+
                     console.log(`✅ Code downloaded as: ${fileName}`);
                     return true;
                 } catch (error) {
