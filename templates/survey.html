@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Survey - AI Code Assistant</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -824,6 +825,46 @@
 
     <script>
         // Survey Manager - ALL JavaScript INLINE
+
+        function surveyExtensionForLanguage(language) {
+            const languageExtensions = {
+                'javascript': '.js', 'python': '.py', 'c': '.c', 'cpp': '.cpp',
+                'java': '.java', 'csharp': '.cs', 'html': '.html', 'css': '.css', 'sql': '.sql'
+            };
+            return languageExtensions[language] || '.txt';
+        }
+
+        function surveySanitizeIdPart(s) {
+            const t = String(s || 'unknown').replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80);
+            return t || 'unknown';
+        }
+
+        function surveyDownloadTimestampSegment() {
+            return new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_');
+        }
+
+        function surveyBuildStemForProblem(userId, assignmentKey, quizId, problemNumber, timestampSeg) {
+            const parts = [surveySanitizeIdPart(userId), surveySanitizeIdPart(assignmentKey)];
+            if (quizId) {
+                let q = surveySanitizeIdPart(String(quizId));
+                if (q.length > 24) q = q.slice(0, 24);
+                parts.push('q' + q);
+            }
+            parts.push('p' + String(problemNumber));
+            parts.push(timestampSeg);
+            return parts.join('_');
+        }
+
+        function surveyBuildZipStem(userId, assignmentKey, quizId, timestampSeg) {
+            const parts = [surveySanitizeIdPart(userId), surveySanitizeIdPart(assignmentKey)];
+            if (quizId) {
+                let q = surveySanitizeIdPart(String(quizId));
+                if (q.length > 24) q = q.slice(0, 24);
+                parts.push('q' + q);
+            }
+            parts.push(timestampSeg);
+            return parts.join('_');
+        }
         
         // Navigation control flag to prevent warning during legitimate redirects
         let allowNavigation = false;
@@ -1622,8 +1663,8 @@
                                 const cachedData = this.retrieveCachedSubmissionData();
 
                                 // Download code file after post-survey completion
-                                if (cachedData && cachedData.code) {
-                                    this.downloadCodeFromCache(cachedData);
+                                if (cachedData && ((cachedData.code && cachedData.code.trim()) || (cachedData.files && cachedData.files.length))) {
+                                    await this.downloadCodeFromCache(cachedData);
                                     await new Promise(resolve => setTimeout(resolve, 1500));
                                 }
 
@@ -1642,6 +1683,7 @@
                                     },
                                     body: JSON.stringify({
                                         code: cachedData.code,
+                                        files: cachedData.files || null,
                                         user_id: cachedData.session.userId,
                                         assignment_key: cachedData.session.assignmentKey,
                                         session_id: cachedData.session.sessionId,
@@ -1720,69 +1762,92 @@
                 }
             }
 
-            downloadCodeFromCache(cachedData) {
+            async downloadCodeFromCache(cachedData) {
                 try {
-                    const code = cachedData.code;
-                    if (!code || code.trim().length === 0) {
+                    const lang = cachedData.session.programmingLanguage || 'javascript';
+                    const ext = surveyExtensionForLanguage(lang);
+                    const timestampSeg = surveyDownloadTimestampSegment();
+                    const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
+                    const quizId = cachedData.session.quizId || authData.quizId || null;
+                    const currentProbIdx = authData.currentProblemIndex || 0;
+                    const uid = cachedData.session.userId;
+                    const akey = cachedData.session.assignmentKey;
+
+                    const perProblemKey = `perProblemCodes_${cachedData.session.sessionId}`;
+                    let stored = [];
+                    try {
+                        const raw = sessionStorage.getItem(perProblemKey);
+                        if (raw) stored = JSON.parse(raw);
+                    } catch (e) {}
+                    stored.sort((a, b) => a.problemIndex - b.problemIndex);
+
+                    const entries = [];
+
+                    for (const p of stored) {
+                        const problemNum = p.problemIndex + 1;
+                        const stem = surveyBuildStemForProblem(uid, akey, quizId, problemNum, timestampSeg);
+                        entries.push({ filename: `${stem}${ext}`, content: (p.code || '').trim() });
+                    }
+
+                    const problemNum = currentProbIdx + 1;
+                    const stem = surveyBuildStemForProblem(uid, akey, quizId, problemNum, timestampSeg);
+                    if (cachedData.files && Array.isArray(cachedData.files) && cachedData.files.length > 0) {
+                        if (cachedData.files.length === 1) {
+                            entries.push({ filename: `${stem}${ext}`, content: cachedData.files[0].content || '' });
+                        } else {
+                            for (let i = 0; i < cachedData.files.length; i++) {
+                                entries.push({
+                                    filename: `${stem}_${i + 1}${ext}`,
+                                    content: cachedData.files[i].content || ''
+                                });
+                            }
+                        }
+                    } else {
+                        entries.push({ filename: `${stem}${ext}`, content: (cachedData.code || '').trim() });
+                    }
+
+                    const totalChars = entries.reduce((s, e) => s + (e.content || '').length, 0);
+                    if (!entries.length || !totalChars) {
                         console.warn('No code to download');
                         return false;
                     }
 
-                    const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
-                    const totalProblems = authData.totalProblems || 1;
-                    const currentProbIdx = authData.currentProblemIndex || 0;
-                    let contentToDownload = code;
+                    const zipStem = surveyBuildZipStem(uid, akey, quizId, timestampSeg);
 
-                    if (totalProblems > 1) {
-                        const perProblemKey = `perProblemCodes_${cachedData.session.sessionId}`;
-                        let stored = [];
-                        try {
-                            const raw = sessionStorage.getItem(perProblemKey);
-                            if (raw) stored = JSON.parse(raw);
-                        } catch (e) {}
-                        stored.push({ problemIndex: currentProbIdx, title: (cachedData.currentProblemTitle || `Problem ${currentProbIdx + 1}`), code: code });
-                        stored.sort((a, b) => a.problemIndex - b.problemIndex);
-
-                        const language = cachedData.session.programmingLanguage || 'javascript';
-                        const commentPrefix = (language === 'python' || language === 'sql') ? '#' : '//';
-
-                        const parts = stored.map(function(p) {
-                            const sep = `${commentPrefix} ========== ${p.title} ==========\n`;
-                            return sep + (p.code || '').trim() + '\n';
-                        });
-                        contentToDownload = parts.join('\n').trim();
+                    if (entries.length === 1) {
+                        const e = entries[0];
+                        const blob = new Blob([e.content], { type: 'text/plain;charset=utf-8' });
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = e.filename;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        URL.revokeObjectURL(url);
+                        console.log(`✅ Code downloaded as: ${e.filename}`);
+                        return true;
                     }
 
-                    const languageExtensions = {
-                        'javascript': '.js',
-                        'python': '.py',
-                        'c': '.c',
-                        'cpp': '.cpp',
-                        'java': '.java',
-                        'csharp': '.cs',
-                        'html': '.html',
-                        'css': '.css',
-                        'sql': '.sql'
-                    };
+                    if (typeof JSZip === 'undefined') {
+                        console.error('JSZip not loaded');
+                        return false;
+                    }
 
-                    const language = cachedData.session.programmingLanguage || 'javascript';
-                    const extension = languageExtensions[language] || '.txt';
-
-                    const fileName = `${cachedData.session.userId}_${cachedData.session.assignmentKey}_code${extension}`;
-
-                    const blob = new Blob([contentToDownload], { type: 'text/plain;charset=utf-8' });
+                    const zip = new JSZip();
+                    entries.forEach((ent) => zip.file(ent.filename, ent.content));
+                    const blob = await zip.generateAsync({ type: 'blob' });
+                    const zipName = `${zipStem}.zip`;
                     const url = URL.createObjectURL(blob);
                     const link = document.createElement('a');
                     link.href = url;
-                    link.download = fileName;
-
+                    link.download = zipName;
                     document.body.appendChild(link);
                     link.click();
-
                     document.body.removeChild(link);
                     URL.revokeObjectURL(url);
 
-                    console.log(`✅ Code downloaded as: ${fileName}`);
+                    console.log(`✅ Downloaded ${entries.length} files in ${zipName}`);
                     return true;
                 } catch (error) {
                     console.error('Download error:', error);

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CodeOracle</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -2604,6 +2605,7 @@ function captureAllSubmissionData() {
                 sessionToken: currentSession.sessionToken,
                 condition: currentSession.condition,
                 programmingLanguage: currentSession.programmingLanguage,
+                quizId: authData.quizId || null,
                 startTime: currentSession.startTime,
                 endTime: new Date().toISOString()
             },
@@ -4468,7 +4470,7 @@ async function submitFinalSurvey() {
         if (!authData.hasPostSurvey && isLastProblem) {
             // No post-survey and last problem — download code now
             addTerminalOutput('📥 Downloading your code...', 'info');
-            const downloadSuccess = downloadCodeFile();
+            const downloadSuccess = await downloadCodeFile();
 
             if (downloadSuccess) {
                 addTerminalOutput('✅ Code file downloaded successfully!', 'success');
@@ -4488,80 +4490,169 @@ async function submitFinalSurvey() {
     }
 }
 
-function getCombinedCodeForDownload(currentCode) {
-    const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
-    const totalProblems = authData.totalProblems || 1;
-    const currentProbIdx = authData.currentProblemIndex || 0;
-
-    if (totalProblems <= 1) return currentCode;
-
-    const perProblemKey = `perProblemCodes_${currentSession.sessionId}`;
-    let stored = [];
-    try {
-        const raw = sessionStorage.getItem(perProblemKey);
-        if (raw) stored = JSON.parse(raw);
-    } catch (e) {}
-
-    const language = currentSession.programmingLanguage || 'javascript';
-    const commentPrefix = (language === 'python' || language === 'sql') ? '#' : '//';
-
-    const titleEl = document.querySelector('.problem-panel__body .problem-title');
-    const currentTitle = titleEl ? titleEl.textContent.trim() : `Problem ${currentProbIdx + 1}`;
-
-    stored.push({ problemIndex: currentProbIdx, title: currentTitle, code: currentCode });
-    stored.sort((a, b) => a.problemIndex - b.problemIndex);
-
-    const parts = stored.map(function(p) {
-        const sep = `${commentPrefix} ========== ${p.title} ==========\n`;
-        return sep + (p.code || '').trim() + '\n';
-    });
-    return parts.join('\n').trim();
+function extensionForProgrammingLanguage(language) {
+    var languageExtensions = {
+        'javascript': '.js',
+        'python': '.py',
+        'c': '.c',
+        'cpp': '.cpp',
+        'java': '.java',
+        'csharp': '.cs',
+        'html': '.html',
+        'css': '.css',
+        'sql': '.sql'
+    };
+    return languageExtensions[language] || '.txt';
 }
 
-function downloadCodeFile() {
+/** Safe segment for user_id / assignment_key (filename-safe). */
+function sanitizeDownloadPart(s) {
+    var t = String(s || 'unknown').replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80);
+    return t || 'unknown';
+}
+
+/** ISO timestamp safe for filenames (no : or .). */
+function downloadTimestampSegment() {
+    return new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_');
+}
+
+/** user_id_assignment_key[_q{quizId}]_p{problemNumber}_timestamp — quiz segment only when quizId is set (multiple quizzes per course). */
+function buildDownloadStemForProblem(userId, assignmentKey, quizId, problemNumber, timestampSeg) {
+    var parts = [sanitizeDownloadPart(userId), sanitizeDownloadPart(assignmentKey)];
+    if (quizId) {
+        var q = sanitizeDownloadPart(String(quizId));
+        if (q.length > 24) {
+            q = q.slice(0, 24);
+        }
+        parts.push('q' + q);
+    }
+    parts.push('p' + String(problemNumber));
+    parts.push(timestampSeg);
+    return parts.join('_');
+}
+
+/** ZIP archive name: user_id_assignment_key[_q{quizId}]_timestamp.zip (no problem suffix). */
+function buildDownloadZipStem(userId, assignmentKey, quizId, timestampSeg) {
+    var parts = [sanitizeDownloadPart(userId), sanitizeDownloadPart(assignmentKey)];
+    if (quizId) {
+        var q = sanitizeDownloadPart(String(quizId));
+        if (q.length > 24) {
+            q = q.slice(0, 24);
+        }
+        parts.push('q' + q);
+    }
+    parts.push(timestampSeg);
+    return parts.join('_');
+}
+
+/**
+ * One entry per completed problem + current problem (multi-tab = multiple files for last problem).
+ * Each file: ..._p{problemNum}_timestamp.ext or ..._p{n}_timestamp_{part}.ext for multiple tabs on one problem.
+ */
+function collectDownloadEntriesForIde(userId, assignmentKey, timestampSeg, ext) {
+    var authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
+    var quizId = authData.quizId || null;
+    var currentProbIdx = authData.currentProblemIndex || 0;
+
+    var perProblemKey = 'perProblemCodes_' + currentSession.sessionId;
+    var stored = [];
     try {
-        const code = window.editor.getValue();
-        if (!code || code.trim().length === 0) {
+        var raw = sessionStorage.getItem(perProblemKey);
+        if (raw) stored = JSON.parse(raw);
+    } catch (e) {}
+    stored.sort(function(a, b) { return a.problemIndex - b.problemIndex; });
+
+    var entries = [];
+
+    stored.forEach(function(p) {
+        var problemNum = p.problemIndex + 1;
+        var stem = buildDownloadStemForProblem(userId, assignmentKey, quizId, problemNum, timestampSeg);
+        entries.push({ filename: stem + ext, content: (p.code || '').trim() });
+    });
+
+    var problemNum = currentProbIdx + 1;
+    var stem = buildDownloadStemForProblem(userId, assignmentKey, quizId, problemNum, timestampSeg);
+    var allFiles = getAllFileContents();
+    if (allFiles && allFiles.length > 0) {
+        if (allFiles.length === 1) {
+            entries.push({ filename: stem + ext, content: allFiles[0].content || '' });
+        } else {
+            for (var i = 0; i < allFiles.length; i++) {
+                entries.push({ filename: stem + '_' + (i + 1) + ext, content: allFiles[i].content || '' });
+            }
+        }
+    } else {
+        var code = window.editor ? window.editor.getValue() : '';
+        entries.push({ filename: stem + ext, content: (code || '').trim() });
+    }
+
+    return entries;
+}
+
+function triggerBlobDownload(blob, fileName) {
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
+async function downloadCodeFile() {
+    try {
+        var language = currentSession.programmingLanguage || 'javascript';
+        var ext = extensionForProgrammingLanguage(language);
+        var timestampSeg = downloadTimestampSegment();
+        var authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
+        var quizId = authData.quizId || null;
+        var entries = collectDownloadEntriesForIde(
+            currentSession.userId,
+            currentSession.assignmentKey,
+            timestampSeg,
+            ext
+        );
+        var zipStem = buildDownloadZipStem(currentSession.userId, currentSession.assignmentKey, quizId, timestampSeg);
+        var totalChars = entries.reduce(function(s, e) { return s + (e.content || '').length; }, 0);
+        if (!entries.length || !totalChars) {
             console.warn('No code to download');
             return false;
         }
 
-        const contentToDownload = getCombinedCodeForDownload(code);
+        if (entries.length === 1) {
+            var e = entries[0];
+            var blob = new Blob([e.content], { type: 'text/plain;charset=utf-8' });
+            triggerBlobDownload(blob, e.filename);
+            addTerminalOutput('✅ Code downloaded as: ' + e.filename, 'success');
+            logActivity('code_download', {
+                file_name: e.filename,
+                language: language,
+                code_length: e.content.length,
+                download_trigger: 'final_survey_completion'
+            });
+            return true;
+        }
 
-        const languageExtensions = {
-            'javascript': '.js',
-            'python': '.py',
-            'c': '.c',
-            'cpp': '.cpp',
-            'java': '.java',
-            'csharp': '.cs',
-            'html': '.html',
-            'css': '.css',
-            'sql': '.sql'
-        };
+        if (typeof JSZip === 'undefined') {
+            addTerminalOutput('⚠️ ZIP library not loaded; download one combined file from the IDE.', 'warning');
+            return false;
+        }
 
-        const language = currentSession.programmingLanguage || 'javascript';
-        const extension = languageExtensions[language] || '.txt';
-
-        const fileName = `${currentSession.userId}_${currentSession.assignmentKey}_code${extension}`;
-
-        const blob = new Blob([contentToDownload], { type: 'text/plain;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = fileName;
-
-        document.body.appendChild(link);
-        link.click();
-
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        addTerminalOutput(`✅ Code downloaded as: ${fileName}`, 'success');
+        var zip = new JSZip();
+        entries.forEach(function(ent) {
+            zip.file(ent.filename, ent.content);
+        });
+        var zipBlob = await zip.generateAsync({ type: 'blob' });
+        var zipName = zipStem + '.zip';
+        triggerBlobDownload(zipBlob, zipName);
+        addTerminalOutput('✅ Downloaded ' + entries.length + ' files in ' + zipName + ' (extract for separate sources)', 'success');
         logActivity('code_download', {
-            file_name: fileName,
+            file_name: zipName,
             language: language,
-            code_length: contentToDownload.length,
-            download_trigger: 'final_survey_completion'
+            code_length: totalChars,
+            download_trigger: 'final_survey_completion',
+            file_count: entries.length
         });
 
         return true;
@@ -5172,7 +5263,7 @@ async function submitToDatabase() {
         if (!authData.hasPostSurvey && isLastProblem) {
             // No post-survey and last problem — download code now
             addTerminalOutput('📥 Downloading your code...', 'info');
-            const downloadSuccess = downloadCodeFile();
+            const downloadSuccess = await downloadCodeFile();
 
             if (downloadSuccess) {
                 addTerminalOutput('✅ Code file downloaded successfully!', 'success');
