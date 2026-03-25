@@ -50,6 +50,27 @@
         .editor-wrapper.editor-wrapper--suggestion-loading * {
             cursor: wait !important;
         }
+        /* Blinking dot loading indicator next to cursor */
+        .ai-loading-indicator {
+            display: inline-block;
+            position: absolute;
+            z-index: 100;
+            pointer-events: none;
+        }
+        .ai-loading-indicator::after {
+            content: '';
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #58a6ff;
+            animation: ai-dot-pulse 0.8s ease-in-out infinite;
+            box-shadow: 0 0 6px 2px rgba(88,166,255,0.5);
+        }
+        @keyframes ai-dot-pulse {
+            0%, 100% { opacity: 0.3; transform: scale(0.8); }
+            50% { opacity: 1; transform: scale(1.2); }
+        }
         #editor {
             flex: 1;
             min-height: 0;
@@ -1704,7 +1725,7 @@
                         <div id="copilotPopupExplanation">Waiting for analysis...</div>
                     </div>
                     <div class="copilot-popup__section copilot-popup__suggestion">
-                        <div class="copilot-popup__suggestion-label">Suggested Line</div>
+                        <div class="copilot-popup__suggestion-label" id="copilotPopupSuggestionLabel">Suggested Line</div>
                         <div class="copilot-popup__code" id="copilotPopupCode">--</div>
                     </div>
                     <div class="copilot-popup__actions">
@@ -1820,6 +1841,114 @@ const AUTOSAVE_KEY_PREFIX = 'ide_autosave_';
 const AUTOSAVE_INTERVAL = 15000;
 let autosaveTimer = null;
 let lastSaveTime = null;
+var _lastServerEditorCheckpointAt = 0;
+var SERVER_EDITOR_CHECKPOINT_MIN_MS = 12000;
+var _serverEditorCheckpointTimer = null;
+
+function getPendingActivityStorageKey() {
+    if (!currentSession.sessionId) return null;
+    return 'pending_activity_batches_' + currentSession.sessionId;
+}
+
+function stashPendingActivityBatch(batch) {
+    try {
+        var key = getPendingActivityStorageKey();
+        if (!key) return;
+        var raw = localStorage.getItem(key);
+        var arr = raw ? JSON.parse(raw) : [];
+        arr.push(batch);
+        if (arr.length > 25) arr = arr.slice(-25);
+        localStorage.setItem(key, JSON.stringify(arr));
+    } catch (e) {
+        console.warn('stashPendingActivityBatch failed', e);
+    }
+}
+
+async function postActivityBatchToServer(activities) {
+    const response = await fetch('/log-activities', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            activities: activities,
+            session_id: currentSession.sessionId
+        })
+    });
+    return response.ok;
+}
+
+async function flushPendingActivityQueueFromStorage() {
+    var key = getPendingActivityStorageKey();
+    if (!key || !navigator.onLine) return;
+    var raw = localStorage.getItem(key);
+    if (!raw) return;
+    var batches;
+    try { batches = JSON.parse(raw); } catch (e) { return; }
+    if (!Array.isArray(batches) || batches.length === 0) return;
+    var remaining = [];
+    for (var i = 0; i < batches.length; i++) {
+        var ok = false;
+        for (var attempt = 0; attempt < 3; attempt++) {
+            try {
+                ok = await postActivityBatchToServer(batches[i]);
+                if (ok) break;
+            } catch (e) {
+                await new Promise(function(r) { setTimeout(r, 400 * Math.pow(2, attempt)); });
+            }
+        }
+        if (!ok) remaining.push(batches[i]);
+    }
+    if (remaining.length) localStorage.setItem(key, JSON.stringify(remaining));
+    else localStorage.removeItem(key);
+}
+
+async function serverEditorCheckpoint() {
+    if (!currentSession.sessionId || !window.editor || aiDisabled) return;
+    if (!navigator.onLine) {
+        updateAutosaveIndicator('pending', 'Offline — saved locally');
+        return;
+    }
+    var now = Date.now();
+    if (now - _lastServerEditorCheckpointAt < SERVER_EDITOR_CHECKPOINT_MIN_MS) return;
+    try {
+        updateAutosaveIndicator('syncing', 'Syncing…');
+        var ed = window.editor;
+        var pos = ed.getPosition();
+        var body = {
+            session_id: currentSession.sessionId,
+            user_id: currentSession.userId,
+            assignment_key: currentSession.assignmentKey,
+            code: ed.getValue(),
+            programming_language: currentSession.programmingLanguage || 'javascript',
+            cursor_line: pos ? pos.lineNumber : null,
+            cursor_column: pos ? pos.column : null,
+            scroll_top: ed.getScrollTop(),
+            current_problem_index: typeof currentSession.currentProblemIndex === 'number' ? currentSession.currentProblemIndex : 0
+        };
+        var resp = await fetch('/checkpoint-editor', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        _lastServerEditorCheckpointAt = Date.now();
+        if (resp.ok) {
+            var t = document.querySelector('.autosave-text');
+            if (t) t.textContent = 'Saved locally & at ' + new Date().toLocaleTimeString();
+            updateAutosaveIndicator('saved');
+        } else {
+            updateAutosaveIndicator('error', 'Cloud sync failed — retrying');
+        }
+    } catch (err) {
+        console.warn('serverEditorCheckpoint:', err);
+        updateAutosaveIndicator('error', 'Cloud sync failed');
+    }
+}
+
+function scheduleServerEditorCheckpoint() {
+    if (_serverEditorCheckpointTimer) clearTimeout(_serverEditorCheckpointTimer);
+    _serverEditorCheckpointTimer = setTimeout(function() {
+        serverEditorCheckpoint();
+    }, 4000);
+}
 
 function getAutosaveKey() {
     if (!currentSession.userId || !currentSession.sessionId) return null;
@@ -1848,6 +1977,14 @@ function updateAutosaveIndicator(status, message) {
         case 'error':
             icon.textContent = '⚠️';
             text.textContent = message || 'Save failed';
+            break;
+        case 'pending':
+            icon.textContent = '☁';
+            text.textContent = message || 'Offline — will sync when online';
+            break;
+        case 'syncing':
+            icon.textContent = '⏳';
+            text.textContent = message || 'Syncing to server...';
             break;
         default:
             icon.textContent = '💾';
@@ -1904,6 +2041,7 @@ function saveProgress() {
         localStorage.setItem(key, compressed);
         
         updateAutosaveIndicator('saved');
+        scheduleServerEditorCheckpoint();
         
         logActivity('autosave', {
             data_size: compressed.length,
@@ -2697,32 +2835,27 @@ function scheduleCodeEditingEnd() {
 // Batch upload function
 async function uploadActivityBatch() {
     if (activityBuffer.length === 0) return;
-    
-    try {
-        const response = await fetch('/log-activities', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                activities: activityBuffer,
-                session_id: currentSession.sessionId
-            })
-        });
-        
-        if (response.ok) {
-            activityBuffer = [];
-        } else {
-            const errorData = await response.json().catch(() => ({}));
-            console.warn(`Activity upload failed: ${response.status} - ${errorData.message || 'Unknown error'}`);
-            // Keep activities in buffer for retry, but limit buffer size to prevent memory issues
-            if (activityBuffer.length > 100) {
-                activityBuffer = activityBuffer.slice(-50); // Keep only last 50 activities
-            }
+    await flushPendingActivityQueueFromStorage();
+
+    var batch = activityBuffer.splice(0, activityBuffer.length);
+    var ok = false;
+    for (var attempt = 0; attempt < 3; attempt++) {
+        try {
+            ok = await postActivityBatchToServer(batch);
+            if (ok) break;
+        } catch (error) {
+            console.warn('Activity upload attempt ' + (attempt + 1) + ':', error);
         }
-    } catch (error) {
-        console.error('Activity upload failed:', error);
-        // Keep activities in buffer for retry, but limit buffer size
+        await new Promise(function(r) { setTimeout(r, 400 * Math.pow(2, attempt)); });
+    }
+
+    if (ok) {
+        await flushPendingActivityQueueFromStorage();
+    } else {
+        activityBuffer = batch.concat(activityBuffer);
+        if (!navigator.onLine) {
+            updateAutosaveIndicator('pending', 'Offline — will retry when online');
+        }
         if (activityBuffer.length > 100) {
             activityBuffer = activityBuffer.slice(-50);
         }
@@ -2979,12 +3112,12 @@ async function initializeFromURL() {
                         if (headingEl) headingEl.textContent = defaultProblemHeading();
                     } else {
                         problemBody.innerHTML = '<span class="problem-panel__placeholder">No problem description available for this assignment.</span>';
-                        if (headingEl) headingEl.textContent = 'Problem';
+                        if (headingEl) headingEl.textContent = 'Problem Description';
                     }
                 })
                 .catch(function() {
                     problemBody.innerHTML = '<span class="problem-panel__placeholder">No problem description available for this assignment.</span>';
-                    if (headingEl) headingEl.textContent = 'Problem';
+                    if (headingEl) headingEl.textContent = 'Problem Description';
                 });
         })();
 
@@ -3177,6 +3310,19 @@ async function initializeFromURL() {
                     uploadActivityBatch();
                 }
             }, 30000); // Upload every 30 seconds
+
+            setInterval(function() {
+                if (currentSession.sessionId) {
+                    flushPendingActivityQueueFromStorage();
+                }
+            }, 45000);
+
+            window.addEventListener('online', function() {
+                flushPendingActivityQueueFromStorage();
+                if (activityBuffer.length > 0) uploadActivityBatch();
+                serverEditorCheckpoint();
+            });
+            setTimeout(function() { flushPendingActivityQueueFromStorage(); }, 2000);
         }, 100);
         
         // Initialize enhanced activity tracking
@@ -3259,15 +3405,47 @@ async function initializeEditor() {
                     folding: true,
                     selectOnLineNumbers: true,
                     matchBrackets: 'always',
-                    fontSize: 12
+                    fontSize: 12,
+                    quickSuggestions: false,
+                    suggestOnTriggerCharacters: false,
+                    wordBasedSuggestions: 'off',
+                    parameterHints: { enabled: false },
+                    suggest: {
+                        showKeywords: false,
+                        showSnippets: false,
+                        showVariables: false,
+                        showFunctions: false,
+                        showClasses: false,
+                        showModules: false,
+                        showProperties: false,
+                        showMethods: false,
+                        showValues: false,
+                        showConstants: false,
+                        showEnums: false,
+                        showInterfaces: false,
+                        showStructs: false,
+                        showEvents: false,
+                        showOperators: false,
+                        showUnits: false,
+                        showReferences: false,
+                        showColors: false,
+                        showFiles: false,
+                        showFolders: false,
+                        showWords: false
+                    },
+                    readOnlyMessage: { value: '' }
                 });
 
                 if (teaserActive) {
                     window.editor.updateOptions({ readOnly: true });
                 }
 
+                _lastActivityForBlankIdle = Date.now();
+                _prevCursorLineBlankIdle = window.editor.getPosition().lineNumber;
+
                 // Enhanced Monaco Editor event handlers with time tracking
                 window.editor.onDidChangeModelContent((e) => {
+                    _lastActivityForBlankIdle = Date.now();
                     updateUserInteraction();
                     onEditorChange();
                     
@@ -3316,21 +3494,34 @@ async function initializeEditor() {
                         
                         // Trigger AI analysis on new lines - fast response
                         if (change.text.includes('\n')) {
-                            debounceNewlineAnalysis(300);
+                            debounceNewlineAnalysis(0);
                             break;
                         }
                     }
                 });
 
-                // Trigger AI analysis when keypress released, allows for more midline analysis
-                document.addEventListener('keypress', (e) => {
-                    if (e.key !== 'Enter') {
-                        debounceGeneralAnalysis(1500);
-                    }
-                });
+                setInterval(function() {
+                    if (aiDisabled || !window.editor || isAnalyzing) return;
+                    if (!currentSession || !currentSession.sessionId) return;
+                    if (Date.now() - _lastActivityForBlankIdle < 2000) return;
+                    var pos = window.editor.getPosition();
+                    var lineNum = pos.lineNumber;
+                    var ln = window.editor.getModel().getLineContent(lineNum);
+                    if (ln.trim() !== '') return;
+                    var codeProbe = window.editor.getValue().replace(/^\s+/, '');
+                    if (!codeProbe || codeProbe === '// Start coding here...' || codeProbe === '# Start coding here...') return;
+                    // Avoid hammering the API if the user stays on an empty line
+                    if (Date.now() - _lastBlankIdleAnalyzeAt < 5000) return;
+                    _lastBlankIdleAnalyzeAt = Date.now();
+                    analyzeCurrentCode({ skipPreviousCodeCheck: true });
+                }, 300);
 
                 // ACTIVITY LOGGING: Cursor position tracking (for user interaction only - no logging)
                 window.editor.onDidChangeCursorPosition((e) => {
+                    if (e.position.lineNumber !== _prevCursorLineBlankIdle) {
+                        _prevCursorLineBlankIdle = e.position.lineNumber;
+                        _lastActivityForBlankIdle = Date.now();
+                    }
                     updateUserInteraction();
                     // Cursor movement tracking removed to reduce database load
                 });
@@ -3499,9 +3690,15 @@ function debounceGeneralAnalysis(delay = 1500) {
 
 
 let previousCode = ''
+// Blank-line idle: 2s with no edits and no line change (column moves on same line do not reset)
+var _lastActivityForBlankIdle = Date.now();
+var _prevCursorLineBlankIdle = 1;
+var _lastBlankIdleAnalyzeAt = 0;
 
 // Analyze current code
-async function analyzeCurrentCode() {
+// opts.skipPreviousCodeCheck — allow re-run when code unchanged (e.g. idle on blank line)
+async function analyzeCurrentCode(opts) {
+    opts = opts || {};
     // Check if AI is disabled for this assignment
     if (aiDisabled) {
         console.log('AI analysis skipped - disabled for this assignment');
@@ -3518,15 +3715,22 @@ async function analyzeCurrentCode() {
         return;
     }
     
-    const code = window.editor.getValue().trim();
+    const code = window.editor.getValue().replace(/^\s+/, '');
     if (!code || code === '// Start coding here...' || code === '# Start coding here...') return;
 
     // Don't start new analysis if code hasn't changed
-    if (code === previousCode) return;
+    if (!opts.skipPreviousCodeCheck && code === previousCode) return;
 
     // Set analyzing flag
     isAnalyzing = true;
     previousCode = code;
+
+    // Snapshot cursor position NOW — before any async work.
+    // This is the position the backend uses and the accept handler should insert at.
+    var snapshotPos = window.editor.getPosition();
+    var triggerLine   = snapshotPos.lineNumber;
+    var triggerColumn = snapshotPos.column;
+
     // ACTIVITY LOG: AI analysis trigger
 logActivity('ai_analysis_trigger', {
     trigger_reason: 'new_line_added',
@@ -3548,7 +3752,9 @@ logActivity('ai_analysis_trigger', {
                 user_id: currentSession.userId,
                 assignment_key: currentSession.assignmentKey,
                 session_id: currentSession.sessionId,
-                programming_language: currentSession.programmingLanguage
+                programming_language: currentSession.programmingLanguage,
+                cursor_line: triggerLine,
+                cursor_column: triggerColumn
             })
         });
 
@@ -3569,7 +3775,8 @@ logActivity('ai_analysis_complete', {
 
 
         const problemDescription = data.analysis || "Problem description not available";
-        let nextLineCode = data.next_line || "// No suggestions available";
+        let nextLineCode = data.next_line || "";
+        var suggestionKind = data.suggestion_kind || 'next_line';
 
         console.log("analysis complete, data on next line")
         let correctNextLineCode = nextLineCode;
@@ -3624,15 +3831,19 @@ logActivity('ai_analysis_complete', {
         incrementAnalysisCount();
 
         // Show the floating Copilot popup at cursor position (safe — never blocks analysis)
-        try {
-            var popupType = currentSession.condition === 3 ? 'suggestions'
-                          : currentSession.condition === 1 ? 'guess' : 'guess';
-            var popupExplanation = currentSession.condition === 3
-                ? 'AI Code Suggestion'
-                : problemDescription;
-            showCopilotPopup(popupExplanation, nextLineCode, popupType);
-        } catch (popupErr) {
-            console.warn('Copilot popup failed (non-blocking):', popupErr);
+        // Skip popup entirely when backend returned no real suggestion
+        if (nextLineCode) {
+            try {
+                var popupType = currentSession.condition === 3 ? 'suggestions'
+                              : currentSession.condition === 1 ? 'guess' : 'guess';
+                var popupExplanation = currentSession.condition === 3
+                    ? 'AI Code Suggestion'
+                    : problemDescription;
+                showCopilotPopup(popupExplanation, nextLineCode, popupType, suggestionKind,
+                    { lineNumber: triggerLine, column: triggerColumn });
+            } catch (popupErr) {
+                console.warn('Copilot popup failed (non-blocking):', popupErr);
+            }
         }
 
 
@@ -3645,6 +3856,8 @@ logActivity('ai_analysis_complete', {
             hideAIThinking();
             // Reset analyzing flag after animation completes
             isAnalyzing = false;
+            // Restart blank-line idle clock so we don't immediately re-trigger analyze
+            _lastActivityForBlankIdle = Date.now();
         }, 500); // Small delay to show completion
     }
 }
@@ -3658,7 +3871,7 @@ function clearSuggestionSignifier(type) {}
 function shakeAndGlowBox(boxElement) {}
 
 async function animateAnalysisResults(problemDescription, nextLineCode, correctNextLineCode = null) {
-    addTerminalOutput('AI analysis completed - suggestion available via popup', 'success');
+    // (silent — no terminal output for analysis completion)
 }
 
 function showHistoryInline(type) {}
@@ -3675,7 +3888,32 @@ function getCurrentIndentation(lineContent) {
 // ═══════════════════════════════════════════════════════════
 var _copilotPopupText = '';
 var _copilotPopupType = '';
+var _copilotSuggestionKind = 'next_line';
+var _copilotOriginPosition = null;   // cursor pos when suggestion was generated
 var _copilotDismissAttached = false;
+
+function computeBaseIndentForSuggestion(model, lineNumber) {
+    var lineContent = model.getLineContent(lineNumber);
+    var base = getCurrentIndentation(lineContent);
+    if (lineContent.trim() !== '') return base;
+    var prev = lineNumber - 1;
+    while (prev >= 1) {
+        var prevLine = model.getLineContent(prev);
+        if (prevLine.trim() !== '') {
+            var baseIndent = getCurrentIndentation(prevLine);
+            var trimmed = prevLine.trimEnd();
+            var opts = model.getOptions();
+            var tabSize = opts.tabSize || 4;
+            var oneLevel = opts.insertSpaces !== false ? ' '.repeat(tabSize) : '\t';
+            if (trimmed.endsWith('{') || trimmed.endsWith(':') || trimmed.endsWith('(')) {
+                return baseIndent + oneLevel;
+            }
+            return baseIndent;
+        }
+        prev--;
+    }
+    return base;
+}
 
 function _copilotPositionAtCursor() {
     try {
@@ -3690,22 +3928,6 @@ function _copilotPositionAtCursor() {
         var lineHeight = window.editor.getOption(monaco.editor.EditorOption.lineHeight);
         var model      = window.editor.getModel();
 
-        // Target the next line — that's where the suggestion will be inserted
-        var insertLineNumber = position.lineNumber + 1;
-        var topForInsertLine = window.editor.getTopForLineNumber(insertLineNumber);
-
-        // X: align with the indentation of the current line (where the new code will sit)
-        var currentLineContent = model.getLineContent(position.lineNumber);
-        var indentCols = currentLineContent.match(/^(\s*)/)[1].length;
-
-        // If current line ends with a block opener, the insertion will be indented one level deeper
-        var trimmed = currentLineContent.trimEnd();
-        if (trimmed.endsWith('{') || trimmed.endsWith(':') || trimmed.endsWith('(')) {
-            var opts     = model.getOptions();
-            var tabSize  = opts.tabSize || 4;
-            indentCols += tabSize;
-        }
-
         var editorDom  = window.editor.getDomNode();
         if (!editorDom) return;
         var editorRect  = editorDom.getBoundingClientRect();
@@ -3713,9 +3935,23 @@ function _copilotPositionAtCursor() {
         if (!wrapper) return;
         var wrapperRect = wrapper.getBoundingClientRect();
 
-        // Use Monaco's computed font info so width scales with font size
         var fontInfo = window.editor.getOption(monaco.editor.EditorOption.fontInfo);
         var charWidth = (fontInfo && fontInfo.typicalHalfwidthCharacterWidth) || 7.2;
+
+        // Position popup near the next line (where the suggestion will be inserted)
+        var insertLineNumber = position.lineNumber + 1;
+        var topForInsertLine = window.editor.getTopForLineNumber(insertLineNumber);
+
+        var currentLineContent = model.getLineContent(position.lineNumber);
+        var indentCols = computeBaseIndentForSuggestion(model, position.lineNumber).length;
+
+        var trimmed = currentLineContent.trimEnd();
+        if (trimmed.endsWith('{') || trimmed.endsWith(':') || trimmed.endsWith('(')) {
+            var opts     = model.getOptions();
+            var tabSize  = opts.tabSize || 4;
+            indentCols += tabSize;
+        }
+
         var cursorX = layoutInfo.contentLeft
                     + indentCols * charWidth
                     - scrollLeft
@@ -3740,18 +3976,26 @@ function _copilotPositionAtCursor() {
     }
 }
 
-function showCopilotPopup(explanation, suggestionCode, suggestionType) {
+function showCopilotPopup(explanation, suggestionCode, suggestionType, suggestionKind, originPosition) {
     try {
+        if (!suggestionCode || !suggestionCode.trim()) return;
+
         var popup         = document.getElementById('copilotPopup');
         var elExplanation = document.getElementById('copilotPopupExplanation');
         var elCode        = document.getElementById('copilotPopupCode');
+        var elKindLabel   = document.getElementById('copilotPopupSuggestionLabel');
         if (!popup || !elExplanation || !elCode) return;
 
-        _copilotPopupText = suggestionCode  || '';
+        _copilotPopupText = suggestionCode;
         _copilotPopupType = suggestionType  || 'guess';
+        _copilotSuggestionKind = suggestionKind || 'next_line';
+        _copilotOriginPosition = originPosition || window.editor.getPosition();
 
         elExplanation.textContent = explanation    || 'No explanation available';
-        elCode.textContent        = suggestionCode || '// No suggestion';
+        elCode.textContent        = suggestionCode;
+        if (elKindLabel) {
+            elKindLabel.textContent = 'Next line';
+        }
 
         // Hide explanation section for condition 3 (suggestion only)
         var explanationSection = elExplanation.closest('.copilot-popup__explanation');
@@ -3792,28 +4036,29 @@ function _copilotHandleAccept() {
             return;
         }
 
-        var position    = window.editor.getPosition();
-        var model       = window.editor.getModel();
-        var lineContent = model.getLineContent(position.lineNumber);
-        var baseIndent  = getCurrentIndentation(lineContent);
+        var model = window.editor.getModel();
 
-        // Detect editor indent settings
+        // Use the cursor position from when the suggestion was generated,
+        // not where the cursor is now (user may have moved).
+        var position = _copilotOriginPosition || window.editor.getPosition();
+        var lineContent = model.getLineContent(position.lineNumber);
+
+        // next_line mode: compute indentation from the ORIGIN line (where the
+        // suggestion was generated), regardless of where the cursor sits now.
+        var baseIndent  = computeBaseIndentForSuggestion(model, position.lineNumber);
+
         var opts      = model.getOptions();
         var tabSize   = opts.tabSize || 4;
         var useSpaces = opts.insertSpaces !== false;
         var oneLevel  = useSpaces ? ' '.repeat(tabSize) : '\t';
 
-        // If the current line ends with a block opener, indent one level deeper
         var trimmedLine = lineContent.trimEnd();
         if (trimmedLine.endsWith('{') || trimmedLine.endsWith(':') || trimmedLine.endsWith('(')) {
             baseIndent = baseIndent + oneLevel;
         }
 
-        // Strip any existing leading whitespace from the suggestion,
-        // then re-indent every line to the correct level
         var rawLines = _copilotPopupText.split('\n');
 
-        // Find the smallest common indent in the suggestion so we can strip it
         var minSuggestionIndent = Infinity;
         for (var si = 0; si < rawLines.length; si++) {
             if (rawLines[si].trim().length === 0) continue;
@@ -3827,43 +4072,55 @@ function _copilotHandleAccept() {
             return baseIndent + line.substring(minSuggestionIndent);
         });
 
-        var atEnd        = position.column > lineContent.length;
-        var needsNewLine = lineContent.trim() !== '' || !atEnd;
+        // Insert relative to the origin line.
+        // If the origin line is empty/blank, place the suggestion ON that line
+        // (replacing it) so we don't create an extra blank line above.
+        var insertLine   = position.lineNumber;
+        var insertColumn;
+        var text;
 
-        var text = needsNewLine
-            ? '\n' + reindented.join('\n')
-            : reindented.join('\n');
+        if (lineContent.trim() === '') {
+            insertColumn = 1;
+            var endColumn = lineContent.length + 1;
+            text = reindented.join('\n');
+            window.editor.executeEdits('copilot-popup-accept', [{
+                range: {
+                    startLineNumber: insertLine,
+                    startColumn:     insertColumn,
+                    endLineNumber:   insertLine,
+                    endColumn:       endColumn
+                },
+                text: text
+            }]);
+        } else {
+            insertColumn = lineContent.length + 1;
+            text = '\n' + reindented.join('\n');
 
-        if (!needsNewLine && position.column > 1 && !lineContent.endsWith(' ')) {
-            text = ' ' + text;
+            window.editor.executeEdits('copilot-popup-accept', [{
+                range: {
+                    startLineNumber: insertLine,
+                    startColumn:     insertColumn,
+                    endLineNumber:   insertLine,
+                    endColumn:       insertColumn
+                },
+                text: text
+            }]);
         }
 
-        window.editor.executeEdits('copilot-popup-accept', [{
-            range: {
-                startLineNumber: position.lineNumber,
-                startColumn:     position.column,
-                endLineNumber:   position.lineNumber,
-                endColumn:       position.column
-            },
-            text: text
-        }]);
-
         var inserted = text.split('\n');
-        var newLine  = position.lineNumber + inserted.length - 1;
+        var newLine  = insertLine + inserted.length - 1;
         var lastPart = inserted[inserted.length - 1];
-        var newCol   = inserted.length === 1
-            ? position.column + text.length
-            : lastPart.length + 1;
+        var newCol   = lastPart.length + 1;
 
         window.editor.setPosition({ lineNumber: newLine, column: newCol });
         window.editor.focus();
 
         logActivity('copilot_popup_accept', {
             suggestion_type: _copilotPopupType,
+            suggestion_kind: _copilotSuggestionKind,
             suggestion_text: _copilotPopupText.substring(0, 80),
-            insertion_line: position.lineNumber
+            insertion_line: insertLine
         });
-        addTerminalOutput('Accepted suggestion from popup', 'success');
         currentSession.suggestionClickCount++;
         checkSuggestionBasedPeriodicSurvey();
     } catch (e) {
@@ -3878,7 +4135,6 @@ function _copilotHandleReject() {
             suggestion_type: _copilotPopupType,
             suggestion_text: _copilotPopupText.substring(0, 80)
         });
-        addTerminalOutput('Dismissed suggestion popup', 'info');
         currentSession.suggestionClickCount++;
         checkSuggestionBasedPeriodicSurvey();
     } catch (e) {
@@ -3946,11 +4202,33 @@ function _copilotDetachKeyboard() {
 function showAIThinking() {
     var wrap = document.querySelector('.editor-wrapper');
     if (wrap) wrap.classList.add('editor-wrapper--suggestion-loading');
+    if (window.editor) {
+        window.editor.updateOptions({ readOnly: true });
+        try {
+            var pos = window.editor.getPosition();
+            var coords = window.editor.getScrolledVisiblePosition(pos);
+            var layoutInfo = window.editor.getLayoutInfo();
+            var editorDom = window.editor.getDomNode();
+            if (coords && editorDom) {
+                var dot = document.createElement('div');
+                dot.className = 'ai-loading-indicator';
+                dot.id = 'aiLoadingDot';
+                dot.style.left = (layoutInfo.contentLeft + coords.left + 2) + 'px';
+                dot.style.top  = (coords.top + 4) + 'px';
+                editorDom.appendChild(dot);
+            }
+        } catch (e) {}
+    }
 }
 
 function hideAIThinking() {
     var wrap = document.querySelector('.editor-wrapper');
     if (wrap) wrap.classList.remove('editor-wrapper--suggestion-loading');
+    var dot = document.getElementById('aiLoadingDot');
+    if (dot) dot.remove();
+    if (window.editor) {
+        window.editor.updateOptions({ readOnly: false });
+    }
 }
 
 // Survey Functions
@@ -5759,10 +6037,29 @@ window.addEventListener('beforeunload', (e) => {
         
         // Upload any remaining activities synchronously
         if (activityBuffer.length > 0) {
-            navigator.sendBeacon('/log-activities', JSON.stringify({
+            var actPayload = JSON.stringify({
                 activities: activityBuffer,
                 session_id: currentSession.sessionId
-            }));
+            });
+            var actBlob = new Blob([actPayload], { type: 'application/json' });
+            navigator.sendBeacon('/log-activities', actBlob);
+        }
+        if (window.editor && currentSession.sessionId) {
+            try {
+                var pos = window.editor.getPosition();
+                var ckPayload = JSON.stringify({
+                    session_id: currentSession.sessionId,
+                    user_id: currentSession.userId,
+                    assignment_key: currentSession.assignmentKey,
+                    code: window.editor.getValue(),
+                    programming_language: currentSession.programmingLanguage || 'javascript',
+                    cursor_line: pos ? pos.lineNumber : null,
+                    cursor_column: pos ? pos.column : null,
+                    scroll_top: window.editor.getScrollTop(),
+                    current_problem_index: currentSession.currentProblemIndex || 0
+                });
+                navigator.sendBeacon('/checkpoint-editor', new Blob([ckPayload], { type: 'application/json' }));
+            } catch (be) {}
         }
         
         e.preventDefault();

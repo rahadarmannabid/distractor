@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=True)
 from openai import OpenAI
 import re
+import keyword
 import subprocess
 import sys
 import tempfile
@@ -18,7 +19,7 @@ import time
 import uuid
 import json
 import mimetypes 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 import firebase_admin
 from firebase_admin import credentials, db
@@ -797,6 +798,9 @@ class SessionLog(BaseModel):
     code_submit_timestamp: Optional[str] = None
     submitted_full_code: Optional[str] = None
     submitted_files: Optional[List[Dict[str, Any]]] = None
+    # Latest server-side editor draft (within-phase durability)
+    editor_draft_checkpoint: Optional[str] = None
+    editor_draft_updated_at: Optional[str] = None
 
     # Multi-problem tracking
     current_problem_index: int = 0
@@ -814,6 +818,7 @@ class SessionLog(BaseModel):
     post_survey_responses: Optional[Dict[str, Any]] = None
 
     periodic_survey_count: int = 0
+    periodic_surveys: List[Dict[str, Any]] = Field(default_factory=list)
 
     ai_guess_history: List[AIGuessEntry] = []
     correct_description_history: Optional[List[AIGuessEntry]] = None
@@ -884,6 +889,111 @@ def save_session_to_local(session_log: SessionLog):
     except Exception as e:
         logger.error(f"Failed to save session log locally: {e}")
 
+
+# ─── Firebase reliability: retries + incremental checkpoints ─────────────────
+_firebase_checkpoint_last_at: Dict[str, float] = {}
+CHECKPOINT_ACTIVITY_THROTTLE_SEC = float(os.getenv("FIREBASE_CHECKPOINT_ACTIVITY_SEC", "12"))
+_last_editor_full_checkpoint_at: Dict[str, float] = {}
+EDITOR_FULL_CHECKPOINT_SEC = float(os.getenv("EDITOR_FULL_CHECKPOINT_SEC", "45"))
+
+
+def firebase_rtdb_set_with_retry(ref, value, *, max_attempts: int = 3) -> bool:
+    """Realtime Database set() with exponential backoff."""
+    last_err: Optional[Exception] = None
+    for attempt in range(max_attempts):
+        try:
+            ref.set(value)
+            return True
+        except Exception as e:
+            last_err = e
+            logger.warning("Firebase set attempt %s/%s failed: %s", attempt + 1, max_attempts, e)
+            if attempt < max_attempts - 1:
+                time.sleep(0.35 * (2**attempt))
+    logger.error("Firebase set failed after %s attempts: %s", max_attempts, last_err)
+    return False
+
+
+def firebase_rtdb_update_with_retry(ref, value: Dict[str, Any], *, max_attempts: int = 3) -> bool:
+    """Realtime Database update() with exponential backoff (shallow merge)."""
+    last_err: Optional[Exception] = None
+    for attempt in range(max_attempts):
+        try:
+            ref.update(value)
+            return True
+        except Exception as e:
+            last_err = e
+            logger.warning("Firebase update attempt %s/%s failed: %s", attempt + 1, max_attempts, e)
+            if attempt < max_attempts - 1:
+                time.sleep(0.35 * (2**attempt))
+    logger.error("Firebase update failed after %s attempts: %s", max_attempts, last_err)
+    return False
+
+
+def checkpoint_session_to_firebase(
+    session_log: SessionLog, checkpoint_type: str, *, force: bool = False
+) -> bool:
+    """
+    Full session snapshot under sessions/{session_id} for recovery if the user drops off
+    before final submit. Throttled for high-frequency activity batches unless force=True.
+    """
+    if not firebase_db:
+        logger.debug("Firebase checkpoint skipped (not configured)")
+        return False
+    sid = session_log.session_id
+    now = time.time()
+    if not force and checkpoint_type in ("activity_batch", "periodic_survey_batch"):
+        last = _firebase_checkpoint_last_at.get(sid, 0.0)
+        if now - last < CHECKPOINT_ACTIVITY_THROTTLE_SEC:
+            return True  # throttled — treat as OK
+
+    try:
+        session_json = json.loads(json.dumps(session_log.dict(), default=str))
+        payload = {
+            "checkpoint_type": checkpoint_type,
+            "checkpoint_time_utc": datetime.now(timezone.utc).isoformat(),
+            "user_id": session_log.user_id,
+            "assignment_id": session_log.assignment_id,
+            "condition": session_log.condition,
+            "session": session_json,
+        }
+        # Under .../checkpoint so we do not overwrite sessions/{id}/periodic_surveys etc.
+        ref = firebase_db.child("sessions").child(sid).child("checkpoint")
+        ok = firebase_rtdb_set_with_retry(ref, payload, max_attempts=3)
+        if ok and checkpoint_type in ("activity_batch", "periodic_survey_batch"):
+            _firebase_checkpoint_last_at[sid] = time.time()
+        elif ok:
+            _firebase_checkpoint_last_at[sid] = time.time()
+        return ok
+    except Exception as e:
+        logger.error("checkpoint_session_to_firebase failed: %s", e)
+        return False
+
+
+def checkpoint_pre_post_survey_file_payload_to_firebase(
+    session_id: str,
+    user_id: str,
+    assignment_key: str,
+    survey_type: str,
+    file_data: Dict[str, Any],
+) -> bool:
+    """If SessionLog is not in memory, still persist submitted survey JSON to Firebase."""
+    if not firebase_db:
+        return False
+    try:
+        payload = {
+            "checkpoint_type": f"survey_{survey_type}_orphan",
+            "checkpoint_time_utc": datetime.now(timezone.utc).isoformat(),
+            "user_id": user_id,
+            "assignment_id": assignment_key,
+            "survey_type": survey_type,
+            "survey_file_payload": json.loads(json.dumps(file_data, default=str)),
+        }
+        ref = firebase_db.child("sessions").child(session_id).child("orphan_survey")
+        return firebase_rtdb_set_with_retry(ref, payload, max_attempts=3)
+    except Exception as e:
+        logger.error("checkpoint_pre_post_survey_file_payload_to_firebase failed: %s", e)
+        return False
+
 def extract_survey_ai_history_summary(
     session_log: SessionLog, survey_data: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
@@ -940,7 +1050,7 @@ def get_response(prompt):
             model="gpt-4.1-nano",
         )
         response = chat_completion.choices[0].message.content
-        return response.strip() if response else "No response generated"
+        return response.strip() if response else ""
     except Exception as e:
         logger.error(f"OpenAI API error: {e}")
         return f"Error getting AI response: {str(e)}"
@@ -976,11 +1086,265 @@ def analyze_problem_statement(existing_code, language=None):
     problem_description = get_response(what_problem_is_this)
     return problem_description
 
+
+def _normalized_code_lines(code: str) -> list:
+    return code.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+
+def _line_is_comment_only(line: str, language: Optional[str]) -> bool:
+    """True if the line is only a comment (used to sanitize short AI snippets)."""
+    s = line.strip()
+    if not s:
+        return False
+    lang = (language or "").lower()
+    if lang == "python":
+        return s.startswith("#")
+    if lang in ("html", "xml"):
+        return s.startswith("<!--")
+    if lang == "css":
+        return s.startswith("/*") or s.startswith("//")
+    if lang in (
+        "javascript",
+        "typescript",
+        "js",
+        "ts",
+        "java",
+        "cpp",
+        "csharp",
+        "c",
+        "go",
+        "rust",
+        "swift",
+        "kotlin",
+        "scala",
+    ):
+        return s.startswith("//") or (s.startswith("/*") and "*/" in s)
+    if s.startswith("#") or s.startswith("//"):
+        return True
+    if s.startswith("/*") and s.endswith("*/"):
+        return True
+    return False
+
+
+def _strip_comment_only_lines(text: str, language: Optional[str]) -> str:
+    """Drop comment-only lines from 1–2 line suggestions if the model ignores instructions."""
+    if not text or not text.strip():
+        return text
+    lines = text.split("\n")
+    kept = [ln for ln in lines if not _line_is_comment_only(ln, language)]
+    out = "\n".join(kept).strip()
+    if out:
+        return out
+    # Entire suggestion was comment-only — discard so callers can fall back
+    return ""
+
+
+# Keywords for "cursor at end of line but word is incomplete" (e.g. retu → return)
+_PYTHON_KW = frozenset(keyword.kwlist) | {"True", "False", "None"}
+_JS_KW = frozenset(
+    """
+    break case catch class const continue debugger default delete do else export extends
+    finally for function if import in instanceof let new return super switch this throw
+    try typeof var void while with yield await async null undefined true false
+    """.split()
+)
+
+
+def _last_identifier_at_line_end(stripped: str) -> str:
+    """Last identifier token on the line (handles `x = retu` → retu)."""
+    m = re.search(r"([A-Za-z_][\w]*)$", stripped.rstrip())
+    return m.group(1) if m else ""
+
+
+def _is_strict_prefix_of_any_keyword(word: str, keywords: frozenset) -> bool:
+    """True if `word` is not a full keyword but is a strict prefix of some keyword (retu → return)."""
+    if len(word) < 2:
+        return False
+    if word in keywords:
+        return False
+    return any(len(kw) > len(word) and kw.startswith(word) for kw in keywords)
+
+
+def _line_looks_incomplete_python(stripped: str) -> bool:
+    """Heuristic: line at cursor end still needs characters on the same line."""
+    if not stripped or stripped.endswith("#"):
+        return False
+    stack: list = []
+    for ch in stripped:
+        if ch in "([{":
+            stack.append(ch)
+        elif ch in ")]}":
+            if stack:
+                stack.pop()
+    if stack:
+        return True
+    if stripped.endswith((",", "\\")):
+        return True
+    if re.search(r"[=+\-*/%]$", stripped) and not stripped.endswith("=="):
+        return True
+    if re.search(r"\b(and|or|not|is|in)$", stripped):
+        return True
+    if stripped.count('"') % 2 == 1 or stripped.count("'") % 2 == 1:
+        return True
+    if re.search(r"\b(def|class)\s+\w+$", stripped):
+        return True
+    if stripped.endswith("("):
+        return True
+    return False
+
+
+def _line_looks_incomplete_generic(stripped: str) -> bool:
+    if not stripped:
+        return False
+    stack: list = []
+    for ch in stripped:
+        if ch in "([{":
+            stack.append(ch)
+        elif ch in ")]}":
+            if stack:
+                stack.pop()
+    if stack:
+        return True
+    if stripped.endswith((",", "(", "\\")):
+        return True
+    if stripped.count('"') % 2 == 1 or stripped.count("'") % 2 == 1:
+        return True
+    return False
+
+
+def infer_suggestion_mode(code: str, line_number: int, column: int, language: Optional[str]) -> str:
+    """
+    complete_current: insert at cursor (finish current line).
+    next_line: insert as new line after current position (new statement).
+    """
+    lines = _normalized_code_lines(code)
+    if not lines:
+        return "next_line"
+    line_number = max(1, min(line_number, len(lines)))
+    line = lines[line_number - 1]
+    col = max(1, column) - 1
+
+    if len(line) > 0 and col < len(line):
+        return "complete_current"
+
+    stripped = line.rstrip()
+    if not stripped:
+        return "next_line"
+
+    lang = (language or "").lower()
+    # Cursor at end of line: still "mid-word" if typing a keyword prefix (e.g. retu → return)
+    last_id = _last_identifier_at_line_end(stripped)
+    if last_id:
+        if lang == "python":
+            if _is_strict_prefix_of_any_keyword(last_id, _PYTHON_KW):
+                return "complete_current"
+        elif lang in ("javascript", "typescript", "js", "ts"):
+            if _is_strict_prefix_of_any_keyword(last_id, _JS_KW):
+                return "complete_current"
+
+    if lang == "python":
+        if _line_looks_incomplete_python(stripped):
+            return "complete_current"
+    else:
+        if _line_looks_incomplete_generic(stripped):
+            return "complete_current"
+    return "next_line"
+
+
+def predict_complete_line_suffix(
+    problem_description: str,
+    existing_code: str,
+    line_number: int,
+    column: int,
+    language: Optional[str] = None,
+) -> str:
+    """Return text to insert at cursor to continue the current line (suffix)."""
+    if not existing_code or not existing_code.strip():
+        return ""
+
+    if not language:
+        language = detect_programming_language(existing_code)
+
+    lines = _normalized_code_lines(existing_code)
+    if line_number < 1 or line_number > len(lines):
+        line_number = len(lines)
+    line = lines[line_number - 1]
+    col = max(1, column) - 1
+    col = min(col, len(line))
+    before = line[:col]
+    after = line[col:]
+
+    prompt = f"""
+You are an expert {language} programmer.
+
+Problem / code context summary:
+{problem_description}
+
+Full current code:
+```{language}
+{existing_code}
+```
+
+The cursor is on line {line_number}. Text on that line BEFORE the cursor (do not repeat this): {before!r}
+Text AFTER the cursor on the same line: {after!r}
+
+Output ONLY the characters to INSERT at the cursor position to properly complete or continue THIS LINE.
+Rules:
+- Do NOT repeat the "before cursor" text.
+- Do NOT include a leading newline at the start.
+- At most 2 lines total if a line break is strictly required; otherwise one line.
+- No explanations, markdown fences, or commentary — only the insertable characters.
+- Do NOT output comments of any kind (no #, //, /* */, <!-- -->, docstrings, or inline comments).
+"""
+    suffix = get_response(prompt.strip())
+    suffix = re.sub(r"```\w*\n?", "", suffix)
+    suffix = re.sub(r"```\n?", "", suffix)
+    suffix = suffix.strip()
+    suffix = _strip_comment_only_lines(suffix, language)
+
+    # Prefix-overlap safety: if the AI repeated some or all of the
+    # "before cursor" text, strip the overlapping prefix so we don't
+    # produce e.g. "retreturn" when "before" is "ret" and suffix is "return".
+    if before and suffix:
+        # Work on content only (no indentation) to avoid false matches
+        before_content = before.lstrip().lower()
+        # Strip leading whitespace from suffix — it's inserted at cursor,
+        # so AI-supplied indent is wrong / duplicate.
+        suffix = suffix.lstrip()
+        suffix_rest = ""
+        if "\n" in suffix:
+            first_nl = suffix.index("\n")
+            suffix_rest = suffix[first_nl:]
+            suffix_first = suffix[:first_nl]
+        else:
+            suffix_first = suffix
+
+        if before_content and suffix_first:
+            sf_lower = suffix_first.lower()
+            if sf_lower.startswith(before_content):
+                # Full echo: AI repeated the typed text at the start
+                suffix_first = suffix_first[len(before_content):]
+            else:
+                # Partial overlap: longest tail of typed text matching
+                # head of suffix (e.g. "ret" overlaps "return")
+                for overlap_len in range(min(len(before_content), len(sf_lower)), 0, -1):
+                    if before_content.endswith(sf_lower[:overlap_len]):
+                        suffix_first = suffix_first[overlap_len:]
+                        break
+
+        suffix = (suffix_first + suffix_rest).rstrip()
+
+    lines_out = suffix.split("\n")
+    if len(lines_out) > 2:
+        suffix = "\n".join(lines_out[:2])
+    return suffix if suffix else ""
+
+
 def predict_next_line(problem_description, existing_code, language=None):
     """Predict the next line of code based on problem and existing code - language agnostic"""
 
     if not existing_code or not existing_code.strip():
-        return "// Start coding here"
+        return ""
 
     if not language:
         language = detect_programming_language(existing_code)
@@ -1015,11 +1379,16 @@ def predict_next_line(problem_description, existing_code, language=None):
     
     examples = syntax_examples.get(language, [
         "    }",
-        "    // Continue implementation",
+        "    doSomething();",
         "    variable = value;",
         "function_name() {"
     ])
     
+    # Show the AI the last few lines explicitly so it can't miss them
+    code_lines = _normalized_code_lines(existing_code)
+    last_lines = code_lines[-5:] if len(code_lines) > 5 else code_lines
+    last_lines_str = "\n".join(f"  {ln}" for ln in last_lines)
+
     what_is_the_next_line = f"""
     You are an expert programmer. Based on this problem: {problem_description}
     
@@ -1028,13 +1397,21 @@ def predict_next_line(problem_description, existing_code, language=None):
     {existing_code}
     ```
     
-    Generate ONLY the next single line of code that should logically follow. 
+    The last lines already written are:
+    {last_lines_str}
+    
+    The cursor is at the END of the code above, on a new blank line.
+    Generate ONLY the next single line of code that should logically follow AFTER the last line above.
     
     Rules:
     - Provide EXACTLY ONE line of code (maximum 2 lines if absolutely necessary)
     - Maintain proper {language} syntax and indentation
-    - No explanations, comments, or multiple code blocks
-    - Focus on the immediate next logical step
+    - Output executable code only: no explanations, no markdown, no multiple code blocks
+    - Do NOT include any comments: no #, //, /* */, <!-- -->, docstrings, or inline comments
+    - CRITICAL: NEVER repeat or duplicate any line that already exists in the code — especially function definitions, return statements, or print calls that are already present
+    - The suggestion must CONTINUE the program, not rewrite what exists
+    - If a function body is complete (has a return), suggest calling it or defining the NEXT function
+    - Focus on what is MISSING, not what is already written
     
     Examples of good responses for {language}:
     {chr(10).join([f'    - "{example}"' for example in examples[:4]])}    
@@ -1042,12 +1419,21 @@ def predict_next_line(problem_description, existing_code, language=None):
     """
     
     next_line = get_response(what_is_the_next_line)
+    next_line = _strip_comment_only_lines(next_line, language)
+
+    # Post-processing: reject if the suggestion duplicates an existing line
+    if next_line:
+        existing_stripped = {ln.strip().lower() for ln in code_lines if ln.strip()}
+        suggestion_lines = next_line.strip().split("\n")
+        kept = [ln for ln in suggestion_lines if ln.strip().lower() not in existing_stripped]
+        next_line = "\n".join(kept).strip()
+
     return next_line
 
 def generate_full_code_suggestion(problem_description, existing_code, is_correct_description=False, language=None):
     """Generate full code completion suggestion"""
     if not existing_code or not existing_code.strip():
-        return "// No code provided for completion"
+        return ""
 
     if not language:
         language = detect_programming_language(existing_code)
@@ -1069,7 +1455,8 @@ def generate_full_code_suggestion(problem_description, existing_code, is_correct
     - Don't change anything of the existing code. 
     - Don't provide any explanation of the code.
     - Use proper {language} syntax.
-    - Don't include any comments or extraneous text.
+    - Do NOT add comments of any kind: no line comments (#, //), block comments (/* */), HTML comments, or docstrings
+    - Don't include extraneous text outside the code.
     - Output should be in markdown text. 
 
     Complete code:
@@ -1081,7 +1468,12 @@ def generate_full_code_suggestion(problem_description, existing_code, is_correct
     full_suggestion = re.sub(r'```\w*\n?', '', full_suggestion)
     full_suggestion = re.sub(r'```\n?', '', full_suggestion)
     full_suggestion = full_suggestion.strip()
-    
+    # Drop whole lines that are only comments (best-effort; avoids stripping # inside strings)
+    full_lines = full_suggestion.split("\n")
+    full_suggestion = "\n".join(
+        ln for ln in full_lines if not _line_is_comment_only(ln, language)
+    ).strip()
+
     return full_suggestion
 
 
@@ -1095,6 +1487,21 @@ async def get_correct_next_line_async(correct_description, code, language=None):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, predict_next_line, correct_description, code, language)
 
+
+async def get_complete_line_suffix_async(problem_description, code, line_number, column, language=None):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None, predict_complete_line_suffix, problem_description, code, line_number, column, language
+    )
+
+
+async def get_correct_complete_line_suffix_async(correct_description, code, line_number, column, language=None):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None, predict_complete_line_suffix, correct_description, code, line_number, column, language
+    )
+
+
 async def get_full_code_suggestion_async(problem_description, code, is_correct_description=False, language=None):
     """Async wrapper for full code suggestion"""
     loop = asyncio.get_event_loop()
@@ -1106,11 +1513,14 @@ class CodeRequest(BaseModel):
     assignment_key: Optional[str] = None
     session_id: Optional[str] = None
     programming_language: Optional[str] = None
+    cursor_line: Optional[int] = None
+    cursor_column: Optional[int] = None
 
 class CodeResponse(BaseModel):
     analysis: str
     next_line: str
     correct_next_line: Optional[str] = None
+    suggestion_kind: str = "next_line"  # "complete_current" | "next_line"
 
 
 class FileItem(BaseModel):
@@ -1148,7 +1558,8 @@ async def analyze_code(request: CodeRequest):
         if not code:
             return CodeResponse(
                 analysis="Start typing code to get AI-powered problem analysis...",
-                next_line="// Start coding here"
+                next_line="",
+                suggestion_kind="next_line",
             )
         
         language = request.programming_language or detect_programming_language(code)
@@ -1157,7 +1568,8 @@ async def analyze_code(request: CodeRequest):
         if len(code.strip()) < 10:
             return CodeResponse(
                 analysis=f"Code snippet in progress: {code.strip()} (detected: {language})",
-                next_line="// Continue your statement"
+                next_line="",
+                suggestion_kind="next_line",
             )
 
         # Step 1: Analyze what problem the code is trying to solve
@@ -1168,6 +1580,9 @@ async def analyze_code(request: CodeRequest):
         problem_description = re.sub(r'^Problem.*?:\s*', '', problem_description, flags=re.IGNORECASE)
         problem_description = problem_description.strip()
         
+        # Always use next_line mode (suggestions only on new lines)
+        suggestion_kind = "next_line"
+        
         # Step 2 & 3: Concurrent API calls for better performance
         session_log = None
         if session_id and session_id in active_sessions:
@@ -1176,7 +1591,6 @@ async def analyze_code(request: CodeRequest):
         # Prepare concurrent tasks
         tasks = []
         
-        # Always get AI next line and full suggestion
         ai_next_line_task = get_ai_next_line_async(problem_description, code, language=language)
         ai_full_code_task = get_full_code_suggestion_async(problem_description, code, is_correct_description=False, language=language)
         tasks.extend([ai_next_line_task, ai_full_code_task])
@@ -1212,19 +1626,9 @@ async def analyze_code(request: CodeRequest):
         else:
             ai_next_line = ai_next_line.strip()
         
-        # Ensure we have something useful
-        if not ai_next_line or len(ai_next_line.strip()) < 2:
-            language = detect_programming_language(code)
-            if language == "python":
-                ai_next_line = "# Continue your implementation here"
-            elif language in ["javascript", "java", "cpp", "csharp"]:
-                ai_next_line = "// Continue your implementation here"
-            elif language == "html":
-                ai_next_line = "<!-- Continue your markup here -->"
-            elif language == "css":
-                ai_next_line = "/* Continue your styles here */"
-            else:
-                ai_next_line = "// Continue your implementation here"
+        # Ensure we have something useful (suffix can be a single character)
+        if not ai_next_line or not str(ai_next_line).strip():
+            ai_next_line = ""
         
         # Clean correct next line suggestion (for condition 1)
         if session_log and session_log.condition == 1 and correct_next_line != ai_next_line:
@@ -1240,9 +1644,8 @@ async def analyze_code(request: CodeRequest):
             else:
                 correct_next_line = correct_next_line.strip()
             
-            # Ensure we have something useful
-            if not correct_next_line or len(correct_next_line.strip()) < 2:
-                correct_next_line = ai_next_line  # Fallback to AI suggestion
+            if not correct_next_line or not str(correct_next_line).strip():
+                correct_next_line = ai_next_line
         
         # Log this analysis to session if session_id provided
         if session_log:
@@ -1304,7 +1707,8 @@ async def analyze_code(request: CodeRequest):
         return CodeResponse(
             analysis=problem_description,
             next_line=ai_next_line,
-            correct_next_line=correct_next_line if session_log and session_log.condition == 1 else None
+            correct_next_line=correct_next_line if session_log and session_log.condition == 1 else None,
+            suggestion_kind=suggestion_kind,
         )
         
     except HTTPException:
@@ -1322,7 +1726,8 @@ async def analyze_code(request: CodeRequest):
         
         return CodeResponse(
             analysis=fallback_analysis,
-            next_line="// Analysis temporarily unavailable - continue coding"
+            next_line="",
+            suggestion_kind="next_line",
         )
     
 
@@ -1747,6 +2152,90 @@ class ActivityLogRequest(BaseModel):
     activities: List[ActivityEntry]
     session_id: str
 
+
+class EditorCheckpointRequest(BaseModel):
+    """Idempotent server-side editor draft (coding phase durability)."""
+    session_id: str
+    user_id: str
+    assignment_key: str
+    code: str = ""
+    programming_language: str = "javascript"
+    cursor_line: Optional[int] = None
+    cursor_column: Optional[int] = None
+    scroll_top: Optional[float] = None
+    current_problem_index: Optional[int] = None
+
+
+@app.post("/checkpoint-editor")
+async def checkpoint_editor(request: EditorCheckpointRequest):
+    """
+    Persist current editor content to Firebase (sessions/{session_id}/editor_draft)
+    and to local session_logs. Full session Firebase checkpoint is throttled.
+    """
+    max_len = int(os.getenv("MAX_SUBMISSION_LENGTH", "150000"))
+    if len(request.code) > max_len:
+        raise HTTPException(status_code=400, detail=f"Code too long (max {max_len} chars)")
+
+    session_id = request.session_id.strip()
+    uid = request.user_id.strip()
+    aid = request.assignment_key.strip()
+    if not session_id or not uid:
+        raise HTTPException(status_code=400, detail="session_id and user_id are required")
+
+    session_log = active_sessions.get(session_id)
+    if session_log is not None:
+        if session_log.user_id not in ("unknown", uid) and session_log.user_id != uid:
+            raise HTTPException(status_code=403, detail="user_id does not match this session")
+        session_log.editor_draft_checkpoint = request.code
+        session_log.editor_draft_updated_at = datetime.now(timezone.utc).isoformat()
+        if aid and session_log.assignment_id == "unknown":
+            session_log.assignment_id = aid
+        save_session_to_local(session_log)
+
+    firebase_editor_ok = False
+    if firebase_db:
+        payload = {
+            "user_id": uid,
+            "assignment_id": aid,
+            "programming_language": request.programming_language,
+            "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "code": request.code,
+            "cursor_line": request.cursor_line,
+            "cursor_column": request.cursor_column,
+            "scroll_top": request.scroll_top,
+            "current_problem_index": request.current_problem_index,
+        }
+        try:
+            clean = json.loads(json.dumps(payload, default=str))
+            ref = firebase_db.child("sessions").child(session_id).child("editor_draft")
+            firebase_editor_ok = firebase_rtdb_set_with_retry(ref, clean, max_attempts=3)
+        except Exception as e:
+            logger.error("Firebase editor_draft set failed: %s", e)
+
+    firebase_full = "skipped"
+    if session_log is not None:
+        now = time.time()
+        last = _last_editor_full_checkpoint_at.get(session_id, 0.0)
+        if now - last >= EDITOR_FULL_CHECKPOINT_SEC:
+            try:
+                ok = await asyncio.to_thread(
+                    lambda: checkpoint_session_to_firebase(session_log, "editor_sync", force=True)
+                )
+                firebase_full = "ok" if ok else "failed"
+                if ok:
+                    _last_editor_full_checkpoint_at[session_id] = now
+            except Exception as e:
+                logger.warning("Full Firebase checkpoint after editor sync failed: %s", e)
+                firebase_full = "error"
+
+    return {
+        "status": "success",
+        "firebase_editor_draft": firebase_editor_ok,
+        "firebase_full_checkpoint": firebase_full,
+        "session_known": session_log is not None,
+    }
+
+
 @app.post("/log-activities")
 async def log_activities(request: ActivityLogRequest):
     """Log user activities during the session"""
@@ -1759,7 +2248,12 @@ async def log_activities(request: ActivityLogRequest):
         # Validate that activities list is not empty
         if not request.activities:
             logger.warning(f"Empty activities list for session {session_id}")
-            return {"status": "success", "logged_activities": 0, "message": "No activities to log"}
+            return {
+                "status": "success",
+                "logged_activities": 0,
+                "message": "No activities to log",
+                "firebase_checkpoint": "n/a",
+            }
         
         if session_id not in active_sessions:
             logger.warning(f"Session {session_id} not found in active sessions - creating minimal session for logging")
@@ -1901,8 +2395,22 @@ async def log_activities(request: ActivityLogRequest):
         
         # Save updated session locally
         save_session_to_local(session_log)
-        
-        return {"status": "success", "logged_activities": len(request.activities)}
+
+        firebase_checkpoint = "skipped"
+        try:
+            ck = await asyncio.to_thread(
+                lambda: checkpoint_session_to_firebase(session_log, "activity_batch", force=False)
+            )
+            firebase_checkpoint = "ok" if ck else "failed"
+        except Exception as fb_e:
+            logger.warning("Firebase activity checkpoint error: %s", fb_e)
+            firebase_checkpoint = "error"
+
+        return {
+            "status": "success",
+            "logged_activities": len(request.activities),
+            "firebase_checkpoint": firebase_checkpoint,
+        }
         
     except HTTPException:
         raise
@@ -2245,6 +2753,15 @@ async def update_survey_status(
         
         # Save updated session to local backup
         save_session_to_local(session_log)
+
+        try:
+            await asyncio.to_thread(
+                lambda: checkpoint_session_to_firebase(
+                    session_log, f"survey_status_{survey_type}", force=True
+                )
+            )
+        except Exception as fb_e:
+            logger.warning("Firebase checkpoint after survey status failed: %s", fb_e)
         
         logger.info(f"Survey status updated: {session_id} - {survey_type} - {status}")
         
@@ -2332,6 +2849,14 @@ async def submit_pre_post_survey(request: PrePostSurveySubmission):
             
             # Save updated session
             save_session_to_local(session_log)
+            try:
+                await asyncio.to_thread(
+                    lambda: checkpoint_session_to_firebase(
+                        session_log, f"survey_{request.survey_type}_complete", force=True
+                    )
+                )
+            except Exception as fb_e:
+                logger.warning("Firebase checkpoint after pre/post survey failed: %s", fb_e)
         
         # Save survey data to separate file (backup)
         surveys_dir = Path(os.getenv("SUBMISSIONS_DIR", "submissions")) / "pre_post_surveys"
@@ -2358,6 +2883,20 @@ async def submit_pre_post_survey(request: PrePostSurveySubmission):
         
         with open(survey_file, 'w', encoding='utf-8') as f:
             json.dump(file_data, f, indent=2, default=str)
+
+        if request.session_id not in active_sessions:
+            try:
+                await asyncio.to_thread(
+                    lambda: checkpoint_pre_post_survey_file_payload_to_firebase(
+                        request.session_id,
+                        request.user_id,
+                        request.assignment_key,
+                        request.survey_type,
+                        file_data,
+                    )
+                )
+            except Exception as fb_e:
+                logger.warning("Firebase orphan survey checkpoint failed: %s", fb_e)
         
         logger.info(f"{request.survey_type.upper()} survey saved: {request.user_id} - {survey_file.name}")
         
@@ -2460,6 +2999,13 @@ async def authenticate_user(request: AuthRequest):
         
         active_sessions[session_id] = session_log
         save_session_to_local(session_log)
+
+        try:
+            await asyncio.to_thread(
+                lambda: checkpoint_session_to_firebase(session_log, "session_start", force=True)
+            )
+        except Exception as fb_e:
+            logger.warning("Firebase checkpoint at auth failed: %s", fb_e)
         
         logger.info(f"Authentication successful: {user_id} -> Condition {condition}, Session: {session_id}, Language: {programming_language}")
         
@@ -2520,7 +3066,9 @@ async def log_periodic_survey(request: Request):
                     existing = []
                 
                 existing.append(survey_data)
-                session_ref.child('periodic_surveys').set(existing)
+                per_ref = session_ref.child("periodic_surveys")
+                if not firebase_rtdb_set_with_retry(per_ref, existing, max_attempts=3):
+                    logger.error("Firebase periodic_surveys write failed for session %s", session_id)
                 
                 logger.info(f"Periodic survey #{survey_data.get('survey_number')} logged for session {session_id}")
             except Exception as e:
@@ -2529,10 +3077,14 @@ async def log_periodic_survey(request: Request):
         # Also log locally
         if session_id in active_sessions:
             session_log = active_sessions[session_id]
-            if not hasattr(session_log, 'periodic_surveys'):
-                session_log.periodic_surveys = []
             session_log.periodic_surveys.append(survey_data)
             save_session_to_local(session_log)
+            try:
+                await asyncio.to_thread(
+                    lambda: checkpoint_session_to_firebase(session_log, "periodic_survey_batch", force=False)
+                )
+            except Exception as fb_e:
+                logger.warning("Firebase checkpoint after periodic survey failed: %s", fb_e)
         
         return {"status": "success", "message": "Periodic survey logged"}
         
@@ -2728,8 +3280,22 @@ async def save_session_to_firebase(
                 }
             }
         user_ref = firebase_db.child(f'{condition_path}/{session_log.assignment_id}/{session_log.user_id}')
-        user_ref.set(user_data)
-        
+        if not firebase_rtdb_set_with_retry(user_ref, user_data, max_attempts=3):
+            return False
+
+        # Mirror final payload under sessions/{session_id} for recovery / cross-refs
+        session_ref = firebase_db.child("sessions").child(session_log.session_id).child("final_submit")
+        firebase_rtdb_set_with_retry(
+            session_ref,
+            {
+                "checkpoint_type": "final_submit",
+                "checkpoint_time_utc": datetime.now(timezone.utc).isoformat(),
+                "condition_path": condition_path,
+                "user_data": user_data,
+            },
+            max_attempts=3,
+        )
+
         logger.info(f"Session with separated surveys saved to Firebase: {condition_path}/{session_log.assignment_id}/{session_log.user_id}")
         logger.info(f"  - Session metadata: {len(str(session_metadata))} bytes")
         logger.info(f"  - Pre-survey: {'saved' if pre_survey else 'not present'}")
@@ -2845,7 +3411,7 @@ async def get_assignment_text(assignment_key: str, problem_index: int = 0):
                     if prob_title:
                         parts.append(f'<div class="problem-title">{html_mod.escape(prob_title)}</div>')
                     if problem.get("problem_statement"):
-                        parts.append(f'<span class="section-label">Problem</span>{html_mod.escape(problem["problem_statement"])}')
+                        parts.append(f'<span class="section-label">Problem Description</span>{html_mod.escape(problem["problem_statement"])}')
                     if problem.get("test_cases"):
                         parts.append(f'<span class="section-label">Test Cases</span>{html_mod.escape(problem["test_cases"])}')
                     if problem.get("constraints"):
