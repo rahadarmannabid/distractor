@@ -45,6 +45,11 @@
             min-height: 0;
             display: flex;
         }
+        /* Wait cursor while /analyze is in flight (Monaco overrides cursor; !important needed) */
+        .editor-wrapper.editor-wrapper--suggestion-loading,
+        .editor-wrapper.editor-wrapper--suggestion-loading * {
+            cursor: wait !important;
+        }
         #editor {
             flex: 1;
             min-height: 0;
@@ -71,58 +76,61 @@
             flex-shrink: 0;
         }
         .problem-panel__header {
-            padding: 8px 15px;
+            padding: 10px 16px 8px;
             min-height: 40px;
             display: flex;
             align-items: center;
-            background: #333334;
-            border-bottom: 1px solid #333;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            background: linear-gradient(180deg, #2d2d30 0%, #252526 100%);
+            border-bottom: 1px solid #30363d;
+            box-shadow: 0 1px 0 rgba(0,0,0,0.25);
             flex-shrink: 0;
         }
-        .problem-panel__header h3 {
+        .problem-panel__current-label {
             margin: 0;
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 600;
-            color: #cccccc;
-            letter-spacing: 0.3px;
+            color: #4ade80;
+            line-height: 1.35;
+            letter-spacing: -0.02em;
         }
         .problem-panel__body {
             flex: 1;
             overflow-y: auto;
-            padding: 18px;
+            padding: 4px 16px 20px;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             font-size: 15px;
-            line-height: 1.75;
+            line-height: 1.7;
             color: #d4d4d4;
             white-space: pre-wrap;
             word-wrap: break-word;
         }
         .problem-panel__body .section-label {
             display: block;
-            font-size: 13px;
+            font-size: 11px;
             font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 1.2px;
+            letter-spacing: 1.1px;
             color: #58a6ff;
-            margin: 20px 0 6px 0;
+            margin: 0 0 6px 0;
             padding-bottom: 4px;
             border-bottom: 1px solid #30363d;
         }
-        .problem-panel__body .section-label:first-child { margin-top: 0; }
+        .problem-panel__body .section-label:first-of-type {
+            margin-top: 0;
+            padding-top: 0;
+        }
+        .problem-panel__body .section-label:not(:first-of-type) {
+            margin-top: 18px;
+        }
         .problem-panel__body .quiz-title {
             font-size: 20px;
             font-weight: 700;
             color: #e6edf3;
             margin-bottom: 12px;
         }
+        /* Title is shown in header; server may still emit .problem-title briefly before JS moves it */
         .problem-panel__body .problem-title {
-            font-size: 18px;
-            font-weight: 600;
-            color: #4ade80;
-            margin: 16px 0 8px 0;
-            padding-bottom: 6px;
-            border-bottom: 1px solid #30363d;
+            display: none;
         }
         .problem-panel__placeholder {
             color: #666;
@@ -259,7 +267,6 @@
         }
 
         /* Hide unwanted header elements */
-        .url-display,
         #sessionIndicator,
         #conditionIndicator,
         #logoutBtn {
@@ -271,18 +278,6 @@
             display: none !important;
         }
 
-        /* Assignment Key Display */
-        .assignment-key {
-            background: rgba(64, 64, 64, 0.3);
-            color: #569cd6;
-            padding: 4px 12px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 600;
-            font-family: 'Consolas', monospace;
-            margin-right: 10px;
-        }
-
         /* Header Button Styling */
         .user-info {
             margin-left: auto;
@@ -290,6 +285,22 @@
             display: flex;
             align-items: center;
             gap: 10px;
+        }
+        .user-info__identity {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        /* Abstract shapes only (no human/gendered imagery) — DiceBear "shapes" style */
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid #404040;
+            background: #252526;
+            flex-shrink: 0;
+            display: block;
         }
         .logout-btn {
             background: #ef4444;
@@ -429,35 +440,6 @@
             text-align: center;
         }
 
-        /* Auto-Save Indicator */
-        .autosave-indicator {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            background: rgba(64, 64, 64, 0.3);
-            padding: 4px 10px;
-            border-radius: 4px;
-            margin-left: 10px;
-            font-size: 11px;
-            color: #888;
-            transition: all 0.3s ease;
-        }
-        .autosave-indicator.saving {
-            color: #f59e0b;
-        }
-        .autosave-indicator.saved {
-            color: #22c55e;
-        }
-        .autosave-indicator.error {
-            color: #ef4444;
-        }
-        .autosave-icon {
-            font-size: 14px;
-            animation: none;
-        }
-        .autosave-indicator.saving .autosave-icon {
-            animation: spin 1s linear infinite;
-        }
         @keyframes spin {
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
@@ -833,21 +815,6 @@
         #problemDescriptionDisplay li {
             margin: 4px 0;
             font-size: 12px;
-        }
-
-        /* URL display in header */
-        .url-display {
-            background: rgba(64, 64, 64, 0.3);
-            color: #888;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 10px;
-            font-family: 'Consolas', monospace;
-            margin-right: 10px;
-            max-width: 200px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
         }
 
         /* Loading screen */
@@ -1353,10 +1320,6 @@
         padding: 8px 10px;
     }
     
-    .url-display {
-        display: none !important;
-    }
-    
     .header h2 {
         font-size: 14px;
         margin-right: 5px;
@@ -1380,10 +1343,6 @@
         gap: 4px;
         padding: 6px 8px;
         min-height: 44px;
-    }
-    
-    .autosave-indicator {
-        display: none;
     }
     
     .font-controls {
@@ -1719,22 +1678,19 @@
             <div class="editor-col">
             <div id="header" class="header">
                 <h2>Code Editor</h2>
-                <div class="url-display" id="urlDisplay">Loading...</div>
-                <div class="autosave-indicator" id="autosaveIndicator">
-                    <span class="autosave-icon">💾</span>
-                    <span class="autosave-text">Not saved</span>
-                </div>
                 <div class="font-controls">
                     <button class="font-button" id="decreaseFontBtn">A-</button>
                     <span class="font-size-display" id="fontSizeDisplay">14px</span>
                     <button class="font-button" id="increaseFontBtn">A+</button>
                 </div>
-                <div class="assignment-key" id="assignmentKey">pattern</div>
                 <div class="user-info">
                     <span class="session-indicator" id="sessionIndicator">Session: --</span>
                     <span class="condition-indicator" id="conditionIndicator">Condition ?</span>
                     <span class="condition-indicator" id="problemProgress" style="display:none;background:linear-gradient(135deg,#7c3aed,#a78bfa);">Problem 1/1</span>
-                    <span id="userDisplay">User: --</span>
+                    <div class="user-info__identity" title="Anonymous session icon (not a person)">
+                        <img id="userAvatar" class="user-avatar" src="" alt="" width="32" height="32" decoding="async" referrerpolicy="no-referrer" />
+                        <span id="userDisplay">User: --</span>
+                    </div>
                     <button class="logout-btn" id="logoutBtn">End Session</button>
                 </div>
             </div>
@@ -1820,7 +1776,7 @@
         <!-- Right Problem Description Panel -->
         <div id="problemPanel">
             <div class="problem-panel__header">
-                <h2>Problem</h2>
+                <span id="problemPanelHeading" class="problem-panel__current-label">Loading…</span>
             </div>
             <div class="problem-panel__body" id="problemPanelBody">
                 Loading problem...
@@ -2585,8 +2541,11 @@ function captureAllSubmissionData() {
         
         const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
         const currentProbIdx = authData.currentProblemIndex || 0;
-        const titleEl = document.querySelector('.problem-panel__body .problem-title');
-        const currentProblemTitle = titleEl ? titleEl.textContent.trim() : `Problem ${currentProbIdx + 1}`;
+        const headingEl = document.getElementById('problemPanelHeading');
+        const currentProblemTitle =
+            headingEl && headingEl.textContent.trim() && headingEl.textContent.trim() !== 'Loading…'
+                ? headingEl.textContent.trim()
+                : `Problem ${currentProbIdx + 1}`;
 
         const submissionData = {
             code: code,
@@ -2944,6 +2903,31 @@ async function initializeFromURL() {
 
         // Update UI
         userDisplay.textContent = `User: ${authData.userId}`;
+        (function initUserAvatar() {
+            var img = document.getElementById('userAvatar');
+            if (!img) return;
+            var sk = 'avatarSeed_' + (authData.sessionId || 'default');
+            var seed = sessionStorage.getItem(sk);
+            if (!seed) {
+                if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+                    var a = new Uint8Array(12);
+                    crypto.getRandomValues(a);
+                    seed = Array.from(a, function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+                } else {
+                    seed = Math.random().toString(36).slice(2) + Date.now().toString(36);
+                }
+                sessionStorage.setItem(sk, seed);
+            }
+            var url = 'https://api.dicebear.com/7.x/shapes/svg?seed=' + encodeURIComponent(seed) + '&size=64';
+            img.onerror = function() {
+                img.onerror = null;
+                var raw = (authData.userId && String(authData.userId).trim().charAt(0)) || '?';
+                var initial = /[a-zA-Z0-9]/.test(raw) ? raw.toUpperCase() : '?';
+                var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect fill="%23374151" width="64" height="64" rx="32"/><text x="32" y="42" text-anchor="middle" fill="%23e2e8f0" font-size="26" font-family="system-ui,sans-serif">' + initial + '</text></svg>';
+                img.src = 'data:image/svg+xml,' + encodeURIComponent(svg);
+            };
+            img.src = url;
+        })();
         sessionIndicator.textContent = `Session: ${authData.sessionId.substring(0, 16)}...`;
         conditionIndicator.textContent = `Condition ${authData.condition}`;
 
@@ -2957,20 +2941,30 @@ async function initializeFromURL() {
         }
         
         // Update URL display
-        const urlDisplay = document.getElementById('urlDisplay');
-        const currentURL = window.location.href;
-        urlDisplay.textContent = `URL: ${currentURL.substring(0, 50)}${currentURL.length > 50 ? '...' : ''}`;
-        
-        // Update assignment key display
-        const assignmentKeyDisplay = document.getElementById('assignmentKey');
-        if (assignmentKeyDisplay && authData.assignmentKey) {
-            assignmentKeyDisplay.textContent = authData.assignmentKey;
-        }
-
-        // Populate left problem panel from assignment .txt file
+        // Populate right problem panel (title in header; body = sections only)
         (function loadProblemPanel() {
             var problemBody = document.getElementById('problemPanelBody');
+            var headingEl = document.getElementById('problemPanelHeading');
             if (!problemBody || !authData.assignmentKey) return;
+
+            function defaultProblemHeading() {
+                var idx = (authData.currentProblemIndex || 0) + 1;
+                var tot = authData.totalProblems || 1;
+                return tot > 1 ? 'Problem ' + idx + ' of ' + tot : 'Problem ' + idx;
+            }
+
+            function applyHeadingFromDom() {
+                if (!headingEl) return;
+                var pt = problemBody.querySelector('.problem-title');
+                if (pt) {
+                    var t = pt.textContent.trim();
+                    headingEl.textContent = t || defaultProblemHeading();
+                    pt.remove();
+                } else {
+                    headingEl.textContent = defaultProblemHeading();
+                }
+            }
+
             fetch('/assignment-text/' + encodeURIComponent(authData.assignmentKey) + '?problem_index=' + (currentSession.currentProblemIndex || 0))
                 .then(function(res) {
                     if (!res.ok) throw new Error(res.status);
@@ -2979,14 +2973,18 @@ async function initializeFromURL() {
                 .then(function(data) {
                     if (data.html) {
                         problemBody.innerHTML = data.html;
+                        applyHeadingFromDom();
                     } else if (data.text) {
                         problemBody.textContent = data.text;
+                        if (headingEl) headingEl.textContent = defaultProblemHeading();
                     } else {
                         problemBody.innerHTML = '<span class="problem-panel__placeholder">No problem description available for this assignment.</span>';
+                        if (headingEl) headingEl.textContent = 'Problem';
                     }
                 })
                 .catch(function() {
                     problemBody.innerHTML = '<span class="problem-panel__placeholder">No problem description available for this assignment.</span>';
+                    if (headingEl) headingEl.textContent = 'Problem';
                 });
         })();
 
@@ -3945,8 +3943,15 @@ function _copilotDetachKeyboard() {
     _copilotKeyHandler = null;
 }
 
-function showAIThinking() {}
-function hideAIThinking() {}
+function showAIThinking() {
+    var wrap = document.querySelector('.editor-wrapper');
+    if (wrap) wrap.classList.add('editor-wrapper--suggestion-loading');
+}
+
+function hideAIThinking() {
+    var wrap = document.querySelector('.editor-wrapper');
+    if (wrap) wrap.classList.remove('editor-wrapper--suggestion-loading');
+}
 
 // Survey Functions
 function loadSurveyConfig() {
