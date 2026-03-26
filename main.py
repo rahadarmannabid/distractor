@@ -850,6 +850,47 @@ class SurveyConfig(BaseModel):
 # Global session storage (in-memory, will be sent to Firebase on submit)
 active_sessions: Dict[str, SessionLog] = {}
 
+
+def get_active_quiz_session_counts(quiz_id: str) -> Dict[str, Any]:
+    """Count students currently in an in-progress session for this quiz (this process only).
+
+    Sessions are held in memory until submit; multi-worker or restarted servers only see
+    their own processes' sessions.
+    """
+    target = str(quiz_id).strip().lower()
+    by_idx: Dict[int, int] = {}
+    total = 0
+    for _sid, log in active_sessions.items():
+        lid = getattr(log, "quiz_id", None)
+        if lid is None or str(lid).strip().lower() != target:
+            continue
+        total += 1
+        try:
+            pi = int(getattr(log, "current_problem_index", 0) or 0)
+        except (TypeError, ValueError):
+            pi = 0
+        by_idx[pi] = by_idx.get(pi, 0) + 1
+    return {"total_active": total, "by_problem_index": by_idx}
+
+
+def forget_active_sessions_for_quiz_user(quiz_id: str, user_id: str) -> int:
+    """Drop in-memory SessionLog rows for this user on this quiz (same id scheme as Firebase)."""
+    uid = str(user_id or "").strip()
+    q = str(quiz_id or "").strip()
+    if len(q) < 8 or not uid:
+        return 0
+    prefix = f"{uid}_quiz_{q[:8]}_"
+    n = 0
+    for sid in list(active_sessions.keys()):
+        if isinstance(sid, str) and sid.startswith(prefix):
+            try:
+                del active_sessions[sid]
+                n += 1
+            except KeyError:
+                pass
+    return n
+
+
 app = FastAPI(title=os.getenv("APP_TITLE", "AI Code Assistant API"))
 
 # Enable CORS for frontend - MUST be before other middleware
@@ -1801,6 +1842,31 @@ class SubmitRequest(BaseModel):
     compiler_clicked: int = 0
     survey_data: Optional[Dict[str, Any]] = None
     files: Optional[List[FileItem]] = None
+    # Full client activity log (may be ahead of server /log-activities batches)
+    activity_logs: Optional[List[Dict[str, Any]]] = None
+
+
+def _merge_client_activity_logs(session_log: SessionLog, raw_logs: Optional[List[Dict[str, Any]]]) -> None:
+    """Union server and client activity rows so Firebase keeps accept/reject and per-problem context."""
+    if not raw_logs or not isinstance(raw_logs, list):
+        return
+    parsed: List[ActivityEntry] = []
+    for raw in raw_logs:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            parsed.append(ActivityEntry(**raw))
+        except Exception as ex:
+            logger.debug("Skipping malformed activity entry: %s", ex)
+            continue
+    if not parsed:
+        return
+    merged: Dict[tuple, ActivityEntry] = {}
+    for e in session_log.activity_log:
+        merged[(e.timestamp, e.activity_type)] = e
+    for e in parsed:
+        merged[(e.timestamp, e.activity_type)] = e
+    session_log.activity_log = sorted(merged.values(), key=lambda x: x.timestamp)
 
 class SubmitResponse(BaseModel):
     status: str
@@ -1845,6 +1911,15 @@ async def submit_code(request: SubmitRequest):
             session_log.submitted_full_code = code
             if submitted_files:
                 session_log.submitted_files = submitted_files
+            # Record final problem code for instructor analytics (next-problem only stores intermediate)
+            if session_log.quiz_id and session_log.total_problems >= 1:
+                session_log.per_problem_submissions.append({
+                    "problem_index": session_log.current_problem_index,
+                    "code": code,
+                    "timestamp": timestamp,
+                    "final_submit": True,
+                })
+            _merge_client_activity_logs(session_log, request.activity_logs)
         
         detected_language = detect_programming_language(code)
         submission_id = f"{user_id}_{assignment_key}_{uuid.uuid4().hex[:8]}"
@@ -3123,6 +3198,8 @@ async def save_session_to_firebase(
             'total_problems': session_log.total_problems,
             'per_problem_submissions': session_log.per_problem_submissions,
         }
+        if session_log.quiz_id:
+            session_metadata['quiz_id'] = session_log.quiz_id
         pre_survey = None
         if session_log.pre_survey_responses:
             pre_survey = {

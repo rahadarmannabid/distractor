@@ -2569,6 +2569,7 @@ function logActivity(activityType, activityDetails = {}, sessionContext = {}) {
             session_id: String(currentSession.sessionId),
             user_id: String(currentSession.userId || 'unknown'),
             condition: Number(currentSession.condition) || 0,
+            problem_index: typeof currentSession.currentProblemIndex === 'number' ? currentSession.currentProblemIndex : 0,
             ...Object.fromEntries(
                 Object.entries(sessionContext).map(([key, value]) => [
                     String(key), 
@@ -5517,6 +5518,8 @@ async function submitToDatabase() {
         return;
     }
 
+    await uploadActivityBatch();
+
     const code = window.editor.getValue();
     if (!code.trim()) {
         addTerminalOutput('No code to submit. Please write some code first.', 'warning');
@@ -5722,12 +5725,13 @@ async function proceedWithActualSubmission() {
         addTerminalOutput(`Restored ${surveyData.surveyResponses.length} periodic surveys from storage`, 'info');
     }
     
+    await uploadActivityBatch();
     // FINAL AI ANALYSIS BEFORE SUBMISSION
     addTerminalOutput('Performing final AI analysis before submission...', 'info');
     await analyzeCurrentCode();
-    
-    // ✅ RETRIEVE CACHED DATA instead of reading from editor
-    const cachedData = retrieveCachedSubmissionData();
+    await uploadActivityBatch();
+    // Fresh capture so activity_logs include analysis + accept/reject up to submit
+    const cachedData = captureAllSubmissionData();
     if (!cachedData) {
         addTerminalOutput('❌ No cached submission data found!', 'error');
         alert('Submission data was lost. Please try submitting again.');

@@ -1,0 +1,1379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Quiz analytics{% if quiz_teaser %} — {{ quiz_teaser[:48] }}{% endif %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b1120;
+      --panel: #111827;
+      --panel2: #0f172a;
+      --border: #1f2937;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --radius: 10px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; min-height: 100vh; -webkit-font-smoothing: antialiased; font-size: 14px; }
+
+    .navbar {
+      background: rgba(17, 24, 39, 0.92);
+      backdrop-filter: blur(10px);
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      position: sticky;
+      top: 0;
+      z-index: 40;
+    }
+    .navbar h1 { font-size: 1rem; font-weight: 600; letter-spacing: -0.02em; }
+    .navbar .sub { font-size: 0.75rem; color: var(--muted); margin-top: 4px; max-width: 520px; line-height: 1.4; }
+    .nav-actions { display: flex; gap: 8px; align-items: center; }
+    .nav-actions a {
+      color: var(--muted); text-decoration: none; font-size: 0.8rem;
+      padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
+    }
+    .nav-actions a:hover { color: var(--text); border-color: #475569; }
+    .nav-actions a.nav-export {
+      color: #38bdf8;
+      border-color: rgba(56, 189, 248, 0.35);
+    }
+    .nav-actions a.nav-export:hover { color: #e0f2fe; border-color: #38bdf8; }
+
+    .wrap { max-width: 1320px; margin: 0 auto; padding: 20px 16px 48px; }
+
+    .banner {
+      background: linear-gradient(135deg, rgba(56,189,248,0.08), rgba(16,185,129,0.06));
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      margin-bottom: 16px;
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .banner strong { color: #cbd5e1; }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .kpi {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      border-left: 3px solid #3b82f6;
+    }
+    .kpi.live { border-left-color: #38bdf8; }
+    .kpi.success { border-left-color: #10b981; }
+    .kpi.warn { border-left-color: #f59e0b; }
+    .kpi .label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; }
+    .kpi .value { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1.2; }
+    .kpi .hint { font-size: 0.65rem; color: #64748b; margin-top: 4px; line-height: 1.3; }
+
+    .chart-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+    @media (min-width: 960px) {
+      .chart-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+      .chart-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+    }
+
+    .chart-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .chart-card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 12px 6px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel2);
+    }
+    .chart-card-head h3 { font-size: 0.8rem; font-weight: 600; color: #e2e8f0; letter-spacing: -0.01em; }
+    .chart-card-head p { font-size: 0.7rem; color: #64748b; margin-top: 4px; line-height: 1.35; max-width: 90%; }
+    .chart-overlay-stat {
+      font-size: 0.7rem;
+      color: #94a3b8;
+      text-align: right;
+      white-space: pre-line;
+      line-height: 1.35;
+      max-width: 42%;
+    }
+    .chart-overlay-stat strong { color: #cbd5e1; font-weight: 600; }
+    .chart-card-body { height: 240px; width: 100%; position: relative; }
+    .chart-card-body.tall { height: 300px; }
+
+    .loading, .empty {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--muted);
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+      background: rgba(17,24,39,0.6);
+      font-size: 0.875rem;
+    }
+    .empty h3 { color: var(--text); margin-bottom: 8px; font-size: 1rem; }
+
+    .hidden { display: none !important; }
+
+    .data-coverage {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 14px;
+      overflow: hidden;
+    }
+    .data-coverage-head {
+      padding: 10px 12px 6px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel2);
+    }
+    .data-coverage-head h3 { font-size: 0.8rem; font-weight: 600; color: #e2e8f0; }
+    .data-coverage-head p { font-size: 0.7rem; color: #64748b; margin-top: 4px; line-height: 1.4; max-width: 960px; }
+    .data-coverage-body { padding: 12px 14px 14px; font-size: 0.75rem; color: var(--muted); line-height: 1.5; }
+    .data-coverage-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 8px 16px;
+      margin-bottom: 12px;
+    }
+    .data-coverage-stats div { color: #cbd5e1; }
+    .data-coverage-stats strong { color: #e2e8f0; font-weight: 600; }
+    .data-table-wrap { overflow-x: auto; margin-top: 8px; }
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.72rem;
+    }
+    .data-table th, .data-table td {
+      border: 1px solid var(--border);
+      padding: 8px 10px;
+      text-align: left;
+    }
+    .data-table th { background: var(--panel2); color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.65rem; }
+    .data-table td { color: #e2e8f0; }
+
+    .table-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-top: 14px;
+      overflow: hidden;
+    }
+    .table-card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 12px 6px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel2);
+    }
+    .table-card-head h3 { font-size: 0.8rem; font-weight: 600; color: #e2e8f0; }
+    .table-card-head p { font-size: 0.7rem; color: #64748b; margin-top: 4px; }
+    .table-card-body { padding: 10px 12px 12px; }
+    .table-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 16px;
+      align-items: center;
+      margin-bottom: 10px;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .table-controls input[type="text"] {
+      background: rgba(2, 6, 23, 0.35);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 0.75rem;
+      min-width: 200px;
+    }
+    .table-controls input[type="checkbox"] { accent-color: #38bdf8; }
+    .student-table-wrap {
+      overflow: auto;
+      max-height: 460px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(2, 6, 23, 0.18);
+    }
+    table.student-table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: collapse;
+      border-spacing: 0;
+      font-size: 0.82rem;
+      table-layout: auto;
+    }
+    .student-table thead th {
+      position: sticky;
+      top: 0;
+      background: var(--panel2);
+      color: #94a3b8;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      z-index: 1;
+      border-bottom: 1px solid var(--border);
+      padding: 8px 10px;
+      vertical-align: middle;
+      font-size: 0.7rem;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .student-table tbody td {
+      border-bottom: 1px solid rgba(51, 65, 85, 0.55);
+      padding: 8px 10px;
+      vertical-align: middle;
+      color: #e2e8f0;
+      word-break: normal;
+      text-align: center;
+    }
+    .student-table td.col-actions { white-space: nowrap; }
+    .btn-delete-user {
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      border: 1px solid rgba(248, 113, 113, 0.45);
+      background: rgba(127, 29, 29, 0.35);
+      color: #fecaca;
+    }
+    .btn-delete-user:hover { background: rgba(153, 27, 27, 0.5); color: #fff; }
+    .student-table td.col-user,
+    .student-table td.col-time,
+    .student-table .col-num,
+    .student-table .col-ai,
+    .student-table .col-acc,
+    .student-table .col-rej {
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .student-table .col-ai { color: #fbbf24; }
+    .student-table .col-acc { color: #34d399; }
+    .student-table .col-rej { color: #f87171; }
+    .cell-muted { color: #64748b; }
+    .cell-multi { line-height: 1.35; }
+    .time-cell-main { font-variant-numeric: tabular-nums; }
+    .student-table .col-per-problem {
+      min-width: 520px;
+      word-break: normal;
+    }
+    .per-problem-mini-wrap {
+      display: block;
+      overflow-x: auto;
+      overflow-y: visible;
+      max-width: 100%;
+      margin: 0 auto;
+      padding: 0;
+      -webkit-overflow-scrolling: touch;
+      text-align: center;
+    }
+    table.per-problem-mini {
+      width: max-content;
+      margin: 0 auto;
+      border-collapse: collapse;
+      border-spacing: 0;
+      font-size: 0.88rem;
+      table-layout: auto;
+    }
+    .per-problem-mini thead th {
+      position: static;
+      background: rgba(15, 23, 42, 0.92);
+      color: #94a3b8;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      font-size: 0.75rem;
+      padding: 6px 10px;
+      border-bottom: 1px solid rgba(51, 65, 85, 0.85);
+      white-space: nowrap;
+      text-align: center;
+    }
+    .per-problem-mini tbody td {
+      padding: 6px 10px;
+      border-bottom: 1px solid rgba(30, 41, 59, 0.65);
+      color: #e2e8f0;
+      vertical-align: middle;
+      font-size: 0.86rem;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      word-break: normal;
+      text-align: center;
+    }
+    .per-problem-mini tbody tr:nth-child(even) td { background: rgba(15, 23, 42, 0.45); }
+    .per-problem-mini tbody tr:last-child td { border-bottom: none; }
+    .show-more { margin-top: 10px; display: flex; justify-content: center; }
+    .show-more button {
+      background: rgba(59, 130, 246, 0.12);
+      color: #60a5fa;
+      border: 1px solid rgba(59, 130, 246, 0.35);
+      border-radius: 10px;
+      padding: 8px 14px;
+      cursor: pointer;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .show-more button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .final-code-td {
+      min-width: 120px;
+      text-align: center;
+    }
+    .final-code-details { font-size: 0.78rem; text-align: center; }
+    .final-code-details > summary {
+      cursor: pointer;
+      color: #60a5fa;
+      font-weight: 600;
+      list-style: none;
+      white-space: nowrap;
+      display: inline-block;
+    }
+    .final-code-details > summary::-webkit-details-marker { display: none; }
+    .final-code-details > summary::before { content: '▸ '; color: #64748b; }
+    .final-code-details[open] > summary::before { content: '▾ '; }
+    .final-code-stack {
+      margin-top: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      text-align: left;
+    }
+    .final-code-block {
+      border: 1px solid rgba(51, 65, 85, 0.85);
+      border-radius: 8px;
+      overflow: hidden;
+      background: rgba(15, 23, 42, 0.88);
+    }
+    .final-code-block-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 4px 6px;
+      padding: 5px 8px;
+      background: rgba(30, 41, 59, 0.72);
+      border-bottom: 1px solid rgba(51, 65, 85, 0.55);
+      font-size: 0.7rem;
+    }
+    .final-code-problem-label { color: #e2e8f0; font-weight: 600; letter-spacing: -0.01em; }
+    .final-code-lang-badge {
+      color: #93c5fd;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      font-size: 0.62rem;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(59, 130, 246, 0.35);
+    }
+    .final-code-pre {
+      margin: 0;
+      padding: 8px 8px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.74rem;
+      line-height: 1.42;
+      max-height: 280px;
+      overflow: auto;
+      color: #f1f5f9;
+      background: rgba(2, 6, 23, 0.5);
+      text-align: left;
+    }
+    .final-code-pre code { font-family: inherit; font-size: inherit; color: inherit; }
+
+    .survey-td {
+      min-width: 120px;
+      text-align: center;
+    }
+    .survey-details-wrap { font-size: 0.8rem; text-align: center; }
+    .survey-details-wrap > summary {
+      cursor: pointer;
+      color: #a78bfa;
+      font-weight: 600;
+      list-style: none;
+      white-space: nowrap;
+      display: inline-block;
+    }
+    .survey-details-wrap > summary::-webkit-details-marker { display: none; }
+    .survey-details-wrap > summary::before { content: '▸ '; color: #64748b; }
+    .survey-details-wrap[open] > summary::before { content: '▾ '; }
+    .survey-blocks { margin-top: 8px; text-align: left; }
+    .survey-block {
+      margin-bottom: 8px;
+      padding: 6px 6px;
+      border: 1px solid rgba(51, 65, 85, 0.7);
+      border-radius: 8px;
+      background: rgba(2, 6, 23, 0.22);
+    }
+    .survey-block-title {
+      color: #94a3b8;
+      font-weight: 700;
+      font-size: 0.72rem;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+    table.survey-qa-table {
+      width: 100%;
+      border-collapse: collapse;
+      border-spacing: 0;
+      font-size: 0.76rem;
+    }
+    .survey-qa-table thead th {
+      background: rgba(30, 41, 59, 0.65);
+      color: #94a3b8;
+      font-weight: 600;
+      text-align: left;
+      padding: 3px 3px;
+      border-bottom: 1px solid rgba(51, 65, 85, 0.75);
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+    .survey-qa-table tbody td {
+      padding: 3px 3px;
+      border-bottom: 1px solid rgba(30, 41, 59, 0.55);
+      vertical-align: top;
+    }
+    .survey-qa-table tbody tr:nth-child(odd) td { background: rgba(2, 6, 23, 0.18); }
+    .survey-qa-table .survey-q { color: #cbd5e1; width: 42%; }
+    .survey-qa-table .survey-a { color: #e2e8f0; }
+    .survey-occ-label {
+      font-size: 0.62rem;
+      color: #64748b;
+      margin-top: 8px;
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="navbar">
+    <div>
+      <h1>Quiz analytics</h1>
+      {% if quiz_teaser %}<p class="sub">{{ quiz_teaser }}</p>{% endif %}
+    </div>
+    <div class="nav-actions">
+      <span style="font-size:0.75rem;color:var(--muted);">{{ instructor_email }}</span>
+      {% if firebase_available %}
+      <a class="nav-export" href="/instructor/quiz/{{ quiz_id }}/analytics-export?fmt=csv">Download sessions (CSV)</a>
+      <a class="nav-export" href="/instructor/quiz/{{ quiz_id }}/analytics-export?fmt=json">Download full (JSON)</a>
+      {% endif %}
+      <a href="/instructor/dashboard">Dashboard</a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    {% if not firebase_available %}
+    <div class="empty">
+      <h3>Database unavailable</h3>
+      <p>Analytics require Firebase. Check configuration and try again.</p>
+    </div>
+    {% else %}
+    <div id="loading" class="loading">Loading submission data…</div>
+    <div id="main-content" class="hidden">
+      <div id="legacy-banner" class="banner hidden"></div>
+      <div id="live-scope-banner" class="banner hidden"></div>
+
+      <div class="kpi-grid" id="kpi-strip"></div>
+
+      <div class="chart-grid cols-2" style="margin-bottom:14px;">
+        <div class="chart-card">
+          <div class="chart-card-head">
+            <div>
+              <h3>Active now (by problem)</h3>
+              <p>Live users (this server only).</p>
+            </div>
+            <div class="chart-overlay-stat" id="overlay-live"></div>
+          </div>
+          <div class="chart-card-body" id="chart-live-by-problem"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-head">
+            <div>
+              <h3>Submissions reached (by problem)</h3>
+              <p>Sessions with saved code for each problem (Firebase).</p>
+            </div>
+            <div class="chart-overlay-stat" id="overlay-completion"></div>
+          </div>
+          <div class="chart-card-body" id="chart-completion"></div>
+        </div>
+      </div>
+
+      <div class="chart-grid cols-3" style="margin-bottom:14px;">
+        <div class="chart-card">
+          <div class="chart-card-head">
+            <div>
+              <h3>Time on task (seconds)</h3>
+              <p>Total session time vs per-problem time.</p>
+            </div>
+            <div class="chart-overlay-stat" id="overlay-time"></div>
+          </div>
+          <div class="chart-card-body tall" id="chart-time-combined"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-head">
+            <div>
+              <h3>AI suggestions generated</h3>
+              <p>Per session distribution — Total and per problem.</p>
+            </div>
+            <div class="chart-overlay-stat" id="overlay-ai"></div>
+          </div>
+          <div class="chart-card-body tall" id="chart-ai-combined"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-head">
+            <div>
+              <h3>Accepted suggestions</h3>
+              <p>Per session distribution — Total and per problem.</p>
+            </div>
+            <div class="chart-overlay-stat" id="overlay-accept"></div>
+          </div>
+          <div class="chart-card-body tall" id="chart-accept"></div>
+        </div>
+      </div>
+
+      <div class="chart-grid cols-2" style="margin-bottom:14px;">
+        <div class="chart-card">
+          <div class="chart-card-head">
+            <div>
+              <h3>Rejected suggestions</h3>
+              <p>Per session distribution — Total and per problem.</p>
+            </div>
+            <div class="chart-overlay-stat" id="overlay-reject"></div>
+          </div>
+          <div class="chart-card-body" id="chart-reject"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-head">
+            <div>
+              <h3>Code runs (compile)</h3>
+              <p>Per session distribution — Total and per problem.</p>
+            </div>
+            <div class="chart-overlay-stat" id="overlay-runs"></div>
+          </div>
+          <div class="chart-card-body" id="chart-runs"></div>
+        </div>
+      </div>
+
+      <div class="table-card" id="student-sessions-card" style="display:none;">
+        <div class="table-card-head">
+          <div>
+            <h3>Individual student sessions</h3>
+            <p>Per-session metrics, final code, and pre/post/periodic survey Q&amp;A (expandable).</p>
+          </div>
+          <div>
+            <span class="cell-muted" id="student-sessions-count"></span>
+          </div>
+        </div>
+        <div class="table-card-body">
+          <div class="table-controls">
+            <label>Search
+              <input type="text" id="sessionSearch" placeholder="user id or session id"/>
+            </label>
+            <label>
+              <input type="checkbox" id="onlyCompletedSessions"/>
+              Only completed
+            </label>
+          </div>
+          <div class="student-table-wrap">
+            <table class="student-table" id="student-sessions-table">
+              <thead>
+                <tr>
+                  <th class="col-user">User</th>
+                  <th class="col-time">Time</th>
+                  <th class="col-per-problem">Per problem</th>
+                  <th>AI gen</th>
+                  <th>Accept</th>
+                  <th>Reject</th>
+                  <th>Avg sug</th>
+                  <th>Runs</th>
+                  <th>Tabs</th>
+                  <th>Paste</th>
+                  <th>Final code</th>
+                  <th>Surveys</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="student-sessions-tbody"></tbody>
+            </table>
+          </div>
+          <div class="show-more">
+            <button type="button" id="studentShowMoreBtn">Show more</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="empty-state" class="empty hidden">
+      <h3>No submissions yet</h3>
+      <p>When students finish and submit, their aggregated statistics will appear here.</p>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if firebase_available %}
+  <script type="application/json" id="analytics-bootstrap">{{ {"quiz_id": quiz_id, "problem_labels": problem_labels } | tojson | safe }}</script>
+  <script>
+  (function() {
+    const boot = JSON.parse(document.getElementById('analytics-bootstrap').textContent);
+    const quizId = boot.quiz_id;
+    const defaultLabels = boot.problem_labels || ['Problem 1'];
+
+    const THEME = {
+      bg: 'transparent',
+      text: '#94a3b8',
+      textStrong: '#e2e8f0',
+      border: '#334155',
+      grid: '#1e293b',
+    };
+
+    const chartInstances = [];
+
+    function fmtNum(v) {
+      if (v === null || v === undefined || Number.isNaN(v)) return '—';
+      if (typeof v === 'number' && !Number.isInteger(v)) return v.toFixed(2);
+      return String(v);
+    }
+
+    function escHtml(s) {
+      if (s === null || s === undefined) return '';
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function sum(arr) {
+      if (!arr || !arr.length) return 0;
+      return arr.reduce(function(a, b) { return a + (Number(b) || 0); }, 0);
+    }
+
+    function median(arr) {
+      var a = (arr || []).filter(function(x) { return x != null && !isNaN(x); }).map(Number).sort(function(x, y) { return x - y; });
+      var n = a.length;
+      if (!n) return null;
+      var m = Math.floor(n / 2);
+      return n % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+    }
+
+    /** Five-number summary for ECharts boxplot [min, Q1, median, Q3, max] */
+    function boxRow(arr) {
+      var a = (arr || []).filter(function(x) { return x != null && !isNaN(x); }).map(Number).sort(function(x, y) { return x - y; });
+      var n = a.length;
+      if (!n) return [0, 0, 0, 0, 0];
+      if (n === 1) return [a[0], a[0], a[0], a[0], a[0]];
+      function q(p) {
+        var pos = (n - 1) * p;
+        var lo = Math.floor(pos);
+        var hi = Math.ceil(pos);
+        if (lo === hi) return a[lo];
+        return a[lo] + (a[hi] - a[lo]) * (pos - lo);
+      }
+      return [a[0], q(0.25), q(0.5), q(0.75), a[n - 1]];
+    }
+
+    function baseOption() {
+      return {
+        backgroundColor: THEME.bg,
+        textStyle: { fontFamily: 'Inter, system-ui, sans-serif', fontSize: 11, color: THEME.text },
+        tooltip: {
+          trigger: 'item',
+          confine: true,
+          backgroundColor: 'rgba(15,23,42,0.95)',
+          borderColor: THEME.border,
+          textStyle: { color: '#e2e8f0', fontSize: 11 },
+        },
+        grid: { left: 48, right: 16, top: 28, bottom: 44, containLabel: false },
+      };
+    }
+
+    function initChart(domId, option) {
+      var el = document.getElementById(domId);
+      if (!el || typeof echarts === 'undefined') {
+        if (el) el.innerHTML = '<p style="color:#64748b;padding:16px;font-size:12px;text-align:center;">Chart unavailable</p>';
+        return null;
+      }
+      var c = echarts.init(el, null, { renderer: 'canvas' });
+      c.setOption(option);
+      chartInstances.push(c);
+      return c;
+    }
+
+    function resizeAll() {
+      chartInstances.forEach(function(c) { try { c.resize(); } catch (e) {} });
+    }
+    window.addEventListener('resize', resizeAll);
+
+    fetch('/instructor/quiz/' + encodeURIComponent(quizId) + '/analytics-data', {
+      credentials: 'same-origin',
+      cache: 'no-store',
+    })
+      .then(function(r) {
+        return r.text().then(function(text) {
+          var ct = (r.headers.get('content-type') || '');
+          if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + text.slice(0, 400));
+          if (ct.indexOf('application/json') === -1) throw new Error('Expected JSON');
+          return JSON.parse(text);
+        });
+      })
+      .then(function(data) {
+        document.getElementById('loading').classList.add('hidden');
+        if (data.error) {
+          document.getElementById('empty-state').classList.remove('hidden');
+          document.getElementById('empty-state').querySelector('h3').textContent = 'Analytics unavailable';
+          document.getElementById('empty-state').querySelector('p').textContent = data.error;
+          return;
+        }
+        var n = data.sessions_considered || 0;
+        var live = data.live_now || {};
+        var liveTotal = typeof live.total_active === 'number' ? live.total_active : 0;
+        var liveBy = live.by_problem || [];
+        var hasLive = liveTotal > 0 || (liveBy.some && liveBy.some(function(v) { return (Number(v) || 0) > 0; }));
+        if (n === 0 && !hasLive) {
+          document.getElementById('empty-state').classList.remove('hidden');
+          return;
+        }
+        document.getElementById('main-content').classList.remove('hidden');
+
+        if (live.scope_note) {
+          var lb = document.getElementById('live-scope-banner');
+          lb.classList.remove('hidden');
+          lb.innerHTML = '<strong>Live activity:</strong> ' + String(live.scope_note);
+        }
+        if (!data.per_problem_activity_breakdown) {
+          var b = document.getElementById('legacy-banner');
+          b.classList.remove('hidden');
+          b.innerHTML = '<strong>Note:</strong> Older sessions may lack per-problem activity tags; some per-problem charts can look empty.';
+        }
+
+        var labels = data.problem_labels && data.problem_labels.length ? data.problem_labels : defaultLabels;
+        var dh = data.data_health || {};
+        if (n > 0 && dh.total_activity_log_entries === 0) {
+          var b2 = document.getElementById('legacy-banner');
+          b2.classList.remove('hidden');
+          b2.innerHTML = (b2.innerHTML ? b2.innerHTML + ' ' : '') + '<strong>Activity log:</strong> No <code>activity_log.entries</code> in merged Firebase payloads — accept/reject charts may stay at zero.';
+        }
+        var sumBox = data.boxplot || {};
+        var summary = data.summary || {};
+
+        var kpi = document.getElementById('kpi-strip');
+        var totalAccepts = sum(sumBox.accepts_total);
+        var totalRejects = sum(sumBox.rejects_total);
+        var medAccept = median(sumBox.accepts_total || []);
+        var medReject = median(sumBox.rejects_total || []);
+        kpi.innerHTML = [
+          '<div class="kpi live"><div class="label">Active now</div><div class="value">' + liveTotal + '</div><div class="hint">This server</div></div>',
+          '<div class="kpi"><div class="label">Sessions</div><div class="value">' + n + '</div><div class="hint">In Firebase merge</div></div>',
+          '<div class="kpi success"><div class="label">Completed</div><div class="value">' + (data.completed_assignments || 0) + '</div><div class="hint">Final submit</div></div>',
+          '<div class="kpi"><div class="label">Med. session time</div><div class="value">' + fmtNum(summary.median_session_time_seconds) + '</div><div class="hint">sec · completed (focus if logged)</div></div>',
+          '<div class="kpi warn"><div class="label">Med. AI gen</div><div class="value">' + fmtNum(summary.median_ai_generations) + '</div><div class="hint">per session</div></div>',
+          '<div class="kpi"><div class="label">Accepted</div><div class="value">' + totalAccepts + '</div><div class="hint">Σ all · med ' + fmtNum(medAccept) + '/session</div></div>',
+          '<div class="kpi"><div class="label">Rejected</div><div class="value">' + totalRejects + '</div><div class="hint">Σ all · med ' + fmtNum(medReject) + '/session</div></div>',
+        ].join('');
+
+        var catLive = ['Total'].concat(labels.map(function(_, i) { return 'P' + (i + 1); }));
+        var liveY = liveBy.length ? liveBy : labels.map(function() { return 0; });
+        var liveData = [liveTotal].concat(liveY);
+        document.getElementById('overlay-live').innerHTML = '<strong>' + liveTotal + '</strong> active\nΣ problems = ' + sum(liveY);
+
+        initChart('chart-live-by-problem', Object.assign(baseOption(), {
+          grid: { left: 40, right: 12, top: 20, bottom: 36 },
+          xAxis: { type: 'category', data: catLive, axisLine: { lineStyle: { color: THEME.border } }, axisLabel: { color: THEME.text, fontSize: 10, interval: 0 } },
+          yAxis: { type: 'value', minInterval: 1, scale: true, splitLine: { lineStyle: { color: THEME.grid } }, axisLabel: { color: THEME.text, fontSize: 10 } },
+          series: [{
+            type: 'bar',
+            data: liveData,
+            barMaxWidth: 36,
+            itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: '#38bdf8' },
+              { offset: 1, color: '#0284c7' },
+            ]), borderRadius: [4, 4, 0, 0] },
+          }],
+        }));
+
+        var comp = data.completion_by_problem || [];
+        var compCats = ['Total'].concat(labels.map(function(_, i) { return 'P' + (i + 1); }));
+        var compData = [data.completed_assignments || 0].concat(comp);
+        document.getElementById('overlay-completion').innerHTML = '<strong>' + (data.completed_assignments || 0) + '</strong> completed\n' + n + ' sessions';
+        initChart('chart-completion', Object.assign(baseOption(), {
+          grid: { left: 40, right: 12, top: 20, bottom: 36 },
+          xAxis: { type: 'category', data: compCats, axisLine: { lineStyle: { color: THEME.border } }, axisLabel: { color: THEME.text, fontSize: 10, interval: 0 } },
+          // Force baseline at 0 so bars are visually comparable (ECharts auto-min can hide small differences).
+          yAxis: { type: 'value', min: 0, minInterval: 1, scale: false, splitLine: { lineStyle: { color: THEME.grid } }, axisLabel: { color: THEME.text, fontSize: 10 } },
+          series: [{
+            type: 'bar',
+            data: compData,
+            barMaxWidth: 40,
+            itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: '#60a5fa' },
+              { offset: 1, color: '#2563eb' },
+            ]), borderRadius: [4, 4, 0, 0] },
+          }],
+        }));
+
+        var tt = sumBox.total_time_seconds || [];
+        var tpm = sumBox.time_per_problem_seconds || [];
+        var timeCats = ['Total'].concat(labels.map(function(_, i) { return 'P' + (i + 1); }));
+        var timeBox = [boxRow(tt)].concat((tpm || []).map(function(col) { return boxRow(col); }));
+        var medT = median(tt);
+        document.getElementById('overlay-time').innerHTML = 'Median session time: <strong>' + fmtNum(medT) + '</strong> sec\n(focus if logged; box: min–Q1–med–Q3–max)';
+
+        initChart('chart-time-combined', Object.assign(baseOption(), {
+          grid: { left: 52, right: 18, top: 22, bottom: labels.length > 3 ? 52 : 40 },
+          xAxis: {
+            type: 'category',
+            data: timeCats,
+            boundaryGap: true,
+            axisLine: { lineStyle: { color: THEME.border } },
+            axisLabel: { color: THEME.text, fontSize: 10, interval: 0, rotate: timeCats.length > 4 ? 22 : 0 },
+          },
+          yAxis: {
+            type: 'value',
+            name: 'Seconds',
+            nameTextStyle: { color: '#64748b', fontSize: 10 },
+            scale: true,
+            splitLine: { lineStyle: { color: THEME.grid } },
+            axisLabel: { color: THEME.text, fontSize: 10, formatter: function(v) { return Number(v).toFixed(v >= 100 ? 0 : 1); } },
+          },
+          series: [{
+            type: 'boxplot',
+            data: timeBox,
+            itemStyle: { color: '#10b981', borderColor: '#34d399' },
+            emphasis: { itemStyle: { borderWidth: 2 } },
+          }],
+          tooltip: {
+            trigger: 'item',
+            formatter: function(p) {
+              var d = p.data;
+              if (!d || d.length < 5) return '';
+              function s(x) { return fmtNum(x) + ' s'; }
+              return p.name + '<br/>min: ' + s(d[0]) + ' · Q1: ' + s(d[1]) + '<br/>median: <strong>' + s(d[2]) + '</strong> · Q3: ' + s(d[3]) + '<br/>max: ' + s(d[4]);
+            },
+          },
+        }));
+
+        var aiTot = sumBox.ai_generations_total || [];
+        var apm = sumBox.ai_generations_per_problem || [];
+        var aiCats = ['Total'].concat(labels.map(function(_, i) { return 'P' + (i + 1); }));
+        var aiBox = [boxRow(aiTot)].concat((apm || []).map(function(col) { return boxRow(col); }));
+        document.getElementById('overlay-ai').innerHTML =
+          'Σ <strong>' + sum(aiTot) + '</strong> · median <strong>' + fmtNum(median(aiTot)) + '</strong>\nper session';
+
+        initChart('chart-ai-combined', Object.assign(baseOption(), {
+          grid: { left: 44, right: 18, top: 22, bottom: labels.length > 3 ? 52 : 40 },
+          xAxis: {
+            type: 'category',
+            data: aiCats,
+            boundaryGap: true,
+            axisLine: { lineStyle: { color: THEME.border } },
+            axisLabel: { color: THEME.text, fontSize: 10, interval: 0, rotate: aiCats.length > 4 ? 22 : 0 },
+          },
+          yAxis: {
+            type: 'value',
+            name: 'Count',
+            min: 0,
+            scale: false,
+            splitLine: { lineStyle: { color: THEME.grid } },
+            axisLabel: { color: THEME.text, fontSize: 10 },
+          },
+          series: [{
+            type: 'boxplot',
+            data: aiBox,
+            itemStyle: { color: '#f59e0b', borderColor: '#fbbf24' },
+          }],
+          tooltip: {
+            trigger: 'item',
+            formatter: function(p) {
+              var d = p.data;
+              if (!d || d.length < 5) return '';
+              return p.name + '<br/>min: ' + fmtNum(d[0]) + ' · median: <strong>' + fmtNum(d[2]) + '</strong> · max: ' + fmtNum(d[4]);
+            },
+          },
+        }));
+
+        // Accepted / rejected suggestions are often sparse (many sessions have 0),
+        // so showing only the median can look like "always 0". Use boxplots (distribution).
+        var accT = sumBox.accepts_total || [];
+        var rejT = sumBox.rejects_total || [];
+        var accPm = sumBox.accepts_per_problem || [];
+        var rejPm = sumBox.rejects_per_problem || [];
+
+        var srCats = ['Total'].concat(labels.map(function(_, i) { return 'P' + (i + 1); }));
+        var accBox = [boxRow(accT)].concat((accPm || []).map(function(col) { return boxRow(col); }));
+        var rejBox = [boxRow(rejT)].concat((rejPm || []).map(function(col) { return boxRow(col); }));
+
+        document.getElementById('overlay-accept').innerHTML =
+          'Σ <strong>' + sum(accT) + '</strong> · median <strong>' + fmtNum(median(accT)) + '</strong> · max <strong>' + fmtNum((accT || []).reduce(function(m, x){ x = Number(x)||0; return x>m?x:m; }, 0)) + '</strong>';
+        document.getElementById('overlay-reject').innerHTML =
+          'Σ <strong>' + sum(rejT) + '</strong> · median <strong>' + fmtNum(median(rejT)) + '</strong> · max <strong>' + fmtNum((rejT || []).reduce(function(m, x){ x = Number(x)||0; return x>m?x:m; }, 0)) + '</strong>';
+
+        initChart('chart-accept', Object.assign(baseOption(), {
+          grid: { left: 44, right: 18, top: 22, bottom: labels.length > 3 ? 52 : 40 },
+          xAxis: {
+            type: 'category',
+            data: srCats,
+            boundaryGap: true,
+            axisLine: { lineStyle: { color: THEME.border } },
+            axisLabel: { color: THEME.text, fontSize: 10, interval: 0, rotate: srCats.length > 4 ? 22 : 0 },
+          },
+          yAxis: {
+            type: 'value',
+            name: 'Count',
+            min: 0,
+            scale: false,
+            splitLine: { lineStyle: { color: THEME.grid } },
+            axisLabel: { color: THEME.text, fontSize: 10 },
+          },
+          series: [{
+            type: 'boxplot',
+            data: accBox,
+            itemStyle: { color: '#10b981', borderColor: '#34d399' },
+          }],
+          tooltip: {
+            trigger: 'item',
+            formatter: function(p) {
+              var d = p.data;
+              if (!d || d.length < 5) return '';
+              return p.name + '<br/>min: ' + fmtNum(d[0]) + ' · Q1: ' + fmtNum(d[1]) +
+                '<br/>median: <strong>' + fmtNum(d[2]) + '</strong> · Q3: ' + fmtNum(d[3]) +
+                '<br/>max: ' + fmtNum(d[4]);
+            },
+          },
+        }));
+
+        initChart('chart-reject', Object.assign(baseOption(), {
+          grid: { left: 44, right: 18, top: 22, bottom: labels.length > 3 ? 52 : 40 },
+          xAxis: {
+            type: 'category',
+            data: srCats,
+            boundaryGap: true,
+            axisLine: { lineStyle: { color: THEME.border } },
+            axisLabel: { color: THEME.text, fontSize: 10, interval: 0, rotate: srCats.length > 4 ? 22 : 0 },
+          },
+          yAxis: {
+            type: 'value',
+            name: 'Count',
+            min: 0,
+            scale: false,
+            splitLine: { lineStyle: { color: THEME.grid } },
+            axisLabel: { color: THEME.text, fontSize: 10 },
+          },
+          series: [{
+            type: 'boxplot',
+            data: rejBox,
+            itemStyle: { color: '#f87171', borderColor: '#fca5a5' },
+          }],
+          tooltip: {
+            trigger: 'item',
+            formatter: function(p) {
+              var d = p.data;
+              if (!d || d.length < 5) return '';
+              return p.name + '<br/>min: ' + fmtNum(d[0]) + ' · Q1: ' + fmtNum(d[1]) +
+                '<br/>median: <strong>' + fmtNum(d[2]) + '</strong> · Q3: ' + fmtNum(d[3]) +
+                '<br/>max: ' + fmtNum(d[4]);
+            },
+          },
+        }));
+
+        // Code runs / compiles (distribution)
+        var runT = sumBox.runs_total || [];
+        var runPm = sumBox.runs_per_problem || [];
+        var runBox = [boxRow(runT)].concat((runPm || []).map(function(col) { return boxRow(col); }));
+        document.getElementById('overlay-runs').innerHTML =
+          'Σ <strong>' + sum(runT) + '</strong> · median <strong>' + fmtNum(median(runT)) + '</strong>';
+
+        initChart('chart-runs', Object.assign(baseOption(), {
+          grid: { left: 44, right: 18, top: 22, bottom: labels.length > 3 ? 52 : 40 },
+          xAxis: {
+            type: 'category',
+            data: srCats,
+            boundaryGap: true,
+            axisLine: { lineStyle: { color: THEME.border } },
+            axisLabel: { color: THEME.text, fontSize: 10, interval: 0, rotate: srCats.length > 4 ? 22 : 0 },
+          },
+          yAxis: {
+            type: 'value',
+            name: 'Count',
+            min: 0,
+            scale: false,
+            splitLine: { lineStyle: { color: THEME.grid } },
+            axisLabel: { color: THEME.text, fontSize: 10 },
+          },
+          series: [{
+            type: 'boxplot',
+            data: runBox,
+            itemStyle: { color: '#a78bfa', borderColor: '#c4b5fd' },
+          }],
+          tooltip: {
+            trigger: 'item',
+            formatter: function(p) {
+              var d = p.data;
+              if (!d || d.length < 5) return '';
+              return p.name + '<br/>min: ' + fmtNum(d[0]) + ' · Q1: ' + fmtNum(d[1]) +
+                '<br/>median: <strong>' + fmtNum(d[2]) + '</strong> · Q3: ' + fmtNum(d[3]) +
+                '<br/>max: ' + fmtNum(d[4]);
+            },
+          },
+        }));
+
+        (function renderStudentSessionsTable() {
+          var card = document.getElementById('student-sessions-card');
+          var tbody = document.getElementById('student-sessions-tbody');
+          var countEl = document.getElementById('student-sessions-count');
+          var searchEl = document.getElementById('sessionSearch');
+          var completedEl = document.getElementById('onlyCompletedSessions');
+          var showMoreBtn = document.getElementById('studentShowMoreBtn');
+          if (!card || !tbody || !searchEl || !showMoreBtn) return;
+
+          var sessionRows = (data.per_session || []).slice();
+          if (!sessionRows.length) {
+            card.style.display = 'none';
+            return;
+          }
+
+          function formatNum(v, digits) {
+            if (v === null || v === undefined || Number.isNaN(v)) return '—';
+            var n = Number(v);
+            if (!isFinite(n)) return '—';
+            if (digits === 0) return String(Math.round(n));
+            return n.toFixed(digits == null ? 2 : digits);
+          }
+
+          function sortTimeSeconds(row) {
+            var f = row.focus_time_seconds;
+            if (f !== null && f !== undefined && !Number.isNaN(Number(f))) return Number(f);
+            return Number(row.total_time_seconds || 0);
+          }
+
+          sessionRows.sort(function(a, b) {
+            var ta = sortTimeSeconds(a);
+            var tb = sortTimeSeconds(b);
+            if (tb !== ta) return tb - ta;
+            return String(a.user_id || '').localeCompare(String(b.user_id || ''));
+          });
+
+          var pageSize = 10;
+          var shownCount = pageSize;
+          var q = '';
+          var onlyCompleted = false;
+
+          function allProblemsCompleted(row) {
+            var cp = row.completed_problem || [];
+            if (!cp.length) return false;
+            for (var i = 0; i < cp.length; i++) {
+              if (!cp[i]) return false;
+            }
+            return true;
+          }
+
+          function formatTimeCell(row) {
+            var wall = row.total_time_seconds;
+            var focus = row.focus_time_seconds;
+            var hasFocus = focus !== null && focus !== undefined && !Number.isNaN(Number(focus));
+            if (hasFocus) {
+              return (
+                '<div><span class="time-cell-main">' + formatNum(focus, 0) + 's</span></div>'
+              );
+            }
+            if (wall !== null && wall !== undefined && !Number.isNaN(Number(wall))) {
+              return (
+                '<div><span class="time-cell-main">' + formatNum(wall, 0) + 's</span></div>'
+              );
+            }
+            return '—';
+          }
+
+          function normalizeLangLabel(lang) {
+            var s = String(lang || '').trim().toLowerCase();
+            if (!s) return 'text';
+            if (s.indexOf('python') !== -1) return 'python';
+            if (s.indexOf('javascript') !== -1 || s === 'js') return 'javascript';
+            if (s.indexOf('typescript') !== -1) return 'typescript';
+            if (s.indexOf('java') !== -1 && s.indexOf('javascript') === -1) return 'java';
+            if (s.indexOf('c++') !== -1 || s === 'cpp') return 'cpp';
+            if (s.indexOf('rust') !== -1) return 'rust';
+            if (s === 'go' || s.indexOf('golang') !== -1) return 'go';
+            var cleaned = s.replace(/[^a-z0-9+#.-]/g, '');
+            return cleaned || 'text';
+          }
+
+          function renderFinalCodeCell(row) {
+            var codes = row.final_code_per_problem;
+            var lang = normalizeLangLabel(row.programming_language);
+            if (!codes || !codes.length) return '—';
+            var blocks = [];
+            for (var i = 0; i < codes.length; i++) {
+              if (codes[i] == null || String(codes[i]).trim() === '') continue;
+              var title = 'P' + (i + 1);
+              if (labels && labels[i]) title += ' — ' + String(labels[i]);
+              blocks.push(
+                '<div class="final-code-block">' +
+                  '<div class="final-code-block-meta">' +
+                  '<span class="final-code-problem-label">' + escHtml(title) + '</span>' +
+                  '<span class="final-code-lang-badge">' + escHtml(lang) + '</span>' +
+                  '</div>' +
+                  '<pre class="final-code-pre"><code>' + escHtml(String(codes[i])) + '</code></pre>' +
+                '</div>'
+              );
+            }
+            if (!blocks.length) return '—';
+            return (
+              '<details class="final-code-details">' +
+              '<summary>Final code</summary>' +
+              '<div class="final-code-stack">' + blocks.join('') + '</div>' +
+              '</details>'
+            );
+          }
+
+          function surveyQaTableHtml(qaList) {
+            if (!qaList || !qaList.length) {
+              return '<div class="cell-muted">No answers</div>';
+            }
+            var rows = [];
+            for (var i = 0; i < qaList.length; i++) {
+              rows.push(
+                '<tr><td class="survey-q">' + escHtml(qaList[i].q) + '</td><td class="survey-a">' + escHtml(qaList[i].a) + '</td></tr>'
+              );
+            }
+            return (
+              '<table class="survey-qa-table"><thead><tr><th>Question</th><th>Answer</th></tr></thead><tbody>' +
+              rows.join('') +
+              '</tbody></table>'
+            );
+          }
+
+          function renderSurveyCell(row) {
+            var survey = row.survey_summary;
+            if (!survey || (!survey.pre && !survey.post && !survey.periodic)) return '—';
+            var out =
+              '<details class="survey-details-wrap"><summary>Surveys</summary><div class="survey-blocks">';
+            if (survey.pre) {
+              out +=
+                '<div class="survey-block"><div class="survey-block-title">Pre</div>' +
+                surveyQaTableHtml(survey.pre.qa || []) +
+                '</div>';
+            }
+            if (survey.post) {
+              out +=
+                '<div class="survey-block"><div class="survey-block-title">Post</div>' +
+                surveyQaTableHtml(survey.post.qa || []) +
+                '</div>';
+            }
+            if (survey.periodic) {
+              out += '<div class="survey-block"><div class="survey-block-title">Periodic</div>';
+              var occs = survey.periodic.occurrences || [];
+              if (!occs.length) {
+                out += '<div class="cell-muted">No periodic responses</div>';
+              } else {
+                for (var k = 0; k < occs.length; k++) {
+                  var occ = occs[k];
+                  out +=
+                    '<div class="survey-occ-label">Occurrence ' + escHtml(String(occ.occurrence_number)) + '</div>';
+                  out += surveyQaTableHtml(occ.qa || []);
+                }
+              }
+              out += '</div>';
+            }
+            out += '</div></details>';
+            return out;
+          }
+
+          function renderRow(row) {
+            var nProblems = labels.length;
+            var bodyRows = [];
+            for (var i = 0; i < nProblems; i++) {
+              var done = (row.completed_problem && row.completed_problem[i]) ? 'Y' : 'N';
+              var t = row.per_problem_time_seconds ? row.per_problem_time_seconds[i] : 0;
+              var gen = row.per_problem_ai_generated ? row.per_problem_ai_generated[i] : 0;
+              var acc = row.per_problem_accepted ? row.per_problem_accepted[i] : 0;
+              var rej = row.per_problem_rejected ? row.per_problem_rejected[i] : 0;
+              var avgSug = row.per_problem_avg_suggestion_time_seconds ? row.per_problem_avg_suggestion_time_seconds[i] : 0;
+              var comp = row.per_problem_compiles ? row.per_problem_compiles[i] : 0;
+              var tabs = row.per_problem_tab_switches ? row.per_problem_tab_switches[i] : 0;
+              var pst = row.per_problem_paste_attempts ? row.per_problem_paste_attempts[i] : 0;
+              bodyRows.push(
+                '<tr>' +
+                  '<td>P' + (i + 1) + '</td>' +
+                  '<td>' + done + '</td>' +
+                  '<td>' + formatNum(t, 0) + '</td>' +
+                  '<td>' + formatNum(gen, 0) + '</td>' +
+                  '<td>' + formatNum(acc, 0) + '</td>' +
+                  '<td>' + formatNum(rej, 0) + '</td>' +
+                  '<td>' + formatNum(avgSug, 1) + '</td>' +
+                  '<td>' + formatNum(comp, 0) + '</td>' +
+                  '<td>' + formatNum(tabs, 0) + '</td>' +
+                  '<td>' + formatNum(pst, 0) + '</td>' +
+                '</tr>'
+              );
+            }
+            var perProblemHtml =
+              '<table class="per-problem-mini"><thead><tr>' +
+              '<th>#</th><th>Done</th><th>Time</th><th>AI</th><th>Acc</th><th>Rej</th><th>Avg</th><th>Run</th><th>Tab</th><th>Pst</th>' +
+              '</tr></thead><tbody>' +
+              bodyRows.join('') +
+              '</tbody></table>';
+
+            var uidEnc = encodeURIComponent(String(row.user_id || ''));
+            return {
+              user: escHtml(row.user_id),
+              time: formatTimeCell(row),
+              perProblem: '<div class="cell-multi per-problem-mini-wrap">' + perProblemHtml + '</div>',
+              aiGen: formatNum(row.ai_generated_total, 0),
+              acc: formatNum(row.accepted_total, 0),
+              rej: formatNum(row.rejected_total, 0),
+              avgSug: formatNum(row.avg_suggestion_time_seconds_total, 1) + 's',
+              runs: formatNum(row.compiles_total, 0),
+              tabs: formatNum(row.tab_switch_total, 0),
+              pasteTries: formatNum(row.paste_attempt_total, 0),
+              finalCode: renderFinalCodeCell(row),
+              surveys: renderSurveyCell(row),
+              actions:
+                '<button type="button" class="btn-delete-user" data-user-id="' +
+                uidEnc +
+                '" title="Remove this user\'s stored data for this quiz">Delete</button>',
+            };
+          }
+
+          function getFiltered() {
+            return sessionRows.filter(function(r) {
+              var s = String(r.user_id || '');
+              var match =
+                !q ||
+                s.toLowerCase().indexOf(q.toLowerCase()) !== -1 ||
+                String(r.session_id || '').toLowerCase().indexOf(q.toLowerCase()) !== -1;
+              if (!match) return false;
+              if (onlyCompleted) return allProblemsCompleted(r);
+              return true;
+            });
+          }
+
+          var filtered = getFiltered();
+          countEl.textContent = filtered.length + ' sessions';
+          card.style.display = 'block';
+
+          function render() {
+            filtered = getFiltered();
+            countEl.textContent = filtered.length + ' sessions';
+            var slice = filtered.slice(0, shownCount);
+            tbody.innerHTML = '';
+            for (var i = 0; i < slice.length; i++) {
+              var cols = renderRow(slice[i]);
+              var tr = document.createElement('tr');
+              tr.innerHTML =
+                '<td class="col-user">' + cols.user + '</td>' +
+                '<td class="col-time">' + cols.time + '</td>' +
+                '<td class="col-per-problem">' + cols.perProblem + '</td>' +
+                '<td class="col-ai">' + escHtml(cols.aiGen) + '</td>' +
+                '<td class="col-acc">' + escHtml(cols.acc) + '</td>' +
+                '<td class="col-rej">' + escHtml(cols.rej) + '</td>' +
+                '<td class="col-num">' + escHtml(cols.avgSug) + '</td>' +
+                '<td class="col-num">' + escHtml(cols.runs) + '</td>' +
+                '<td class="col-num">' + escHtml(cols.tabs) + '</td>' +
+                '<td class="col-num">' + escHtml(cols.pasteTries) + '</td>' +
+                '<td class="final-code-td">' + cols.finalCode + '</td>' +
+                '<td class="survey-td">' + cols.surveys + '</td>' +
+                '<td class="col-actions">' + cols.actions + '</td>';
+              tbody.appendChild(tr);
+            }
+            var remaining = filtered.length - shownCount;
+            showMoreBtn.disabled = remaining <= 0;
+            showMoreBtn.textContent = remaining <= 0 ? 'All shown' : 'Show more (' + Math.min(pageSize, remaining) + ')';
+          }
+
+          searchEl.addEventListener('input', function() {
+            q = this.value || '';
+            shownCount = pageSize;
+            render();
+          });
+          if (completedEl) {
+            completedEl.addEventListener('change', function() {
+              onlyCompleted = !!this.checked;
+              shownCount = pageSize;
+              render();
+            });
+          }
+          showMoreBtn.addEventListener('click', function() {
+            shownCount = Math.min(filtered.length, shownCount + pageSize);
+            render();
+          });
+
+          if (!tbody._analyticsDeleteBound) {
+            tbody._analyticsDeleteBound = true;
+            tbody.addEventListener('click', function(ev) {
+              var t = ev.target;
+              if (!t || !t.classList || !t.classList.contains('btn-delete-user')) return;
+              ev.preventDefault();
+              var enc = t.getAttribute('data-user-id');
+              var uid = enc ? decodeURIComponent(enc) : '';
+              if (!uid) return;
+              if (!confirm('Delete all stored Firebase data for user "' + uid + '" in this quiz? This cannot be undone.')) return;
+              fetch('/instructor/quiz/' + encodeURIComponent(quizId) + '/analytics-delete-user', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: uid }),
+              })
+                .then(function(r) {
+                  return r.json().then(function(j) {
+                    return { ok: r.ok, j: j };
+                  });
+                })
+                .then(function(x) {
+                  if (!x.ok || !x.j.success) {
+                    alert(x.j && x.j.error ? x.j.error : 'Delete failed');
+                    return;
+                  }
+                  location.reload();
+                })
+                .catch(function() {
+                  alert('Delete failed');
+                });
+            });
+          }
+
+          render();
+        })();
+
+        setTimeout(resizeAll, 50);
+      })
+      .catch(function(err) {
+        console.error('Analytics load failed', err);
+        document.getElementById('loading').classList.add('hidden');
+        var es = document.getElementById('empty-state');
+        es.classList.remove('hidden');
+        es.querySelector('h3').textContent = 'Could not load analytics';
+        es.querySelector('p').textContent = (err && err.message) ? err.message : 'Try again later or check that you are logged in.';
+      });
+  })();
+  </script>
+  {% endif %}
+</body>
+</html>

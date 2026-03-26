@@ -7,10 +7,10 @@ import shutil
 import copy
 
 from fastapi import APIRouter, Request, HTTPException, Body, File, UploadFile, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import List, Optional
 import json
 import logging
 import os
@@ -21,6 +21,12 @@ from pathlib import Path
 
 from firebase_utils import fb_dict
 from models import QuizCreate, QuizUpdate, QuizJoinRequest
+from quiz_analytics import (
+    aggregate_quiz_analytics,
+    collect_quiz_sessions_from_firebase,
+    delete_user_data_for_quiz,
+    export_per_session_csv,
+)
 
 from otp import (
     generate_otp,
@@ -40,6 +46,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/instructor", tags=["instructor"])
 templates = Jinja2Templates(directory="templates")
+
+# Analytics responses must stay fresh after Firebase deletes (avoid stale chart data in the browser).
+_ANALYTICS_JSON_NO_CACHE = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+}
 
 # Instructor quiz builder: default survey question banks (editable JSON on disk)
 _DEFAULT_SURVEY_TEMPLATE_FILES = {
@@ -338,6 +350,15 @@ async def dashboard(request: Request):
                     quizzes.append(qdata)
         quizzes.sort(key=lambda q: q.get("created_at", ""), reverse=True)
 
+        from main import get_active_quiz_session_counts
+
+        for q in quizzes:
+            qid = q.get("id")
+            if qid:
+                q["active_now"] = int(get_active_quiz_session_counts(qid).get("total_active") or 0)
+            else:
+                q["active_now"] = 0
+
     return templates.TemplateResponse("instructor_dashboard.html", {
         "request": request,
         "instructor_email": email,
@@ -580,3 +601,215 @@ async def toggle_publish(request: Request, quiz_id: str):
     new_status = not existing.get("published", False)
     db.reference(f"quizzes/{quiz_id}/published").set(new_status)
     return JSONResponse({"success": True, "published": new_status})
+
+
+def _safe_quiz_export_slug(quiz_id: str) -> str:
+    s = re.sub(r"[^a-zA-Z0-9._-]", "_", (quiz_id or "").strip())[:100]
+    return s or "quiz"
+
+
+def _quiz_problem_labels(quiz: dict) -> List[str]:
+    probs = quiz.get("problems") or []
+    labels: List[str] = []
+    for i, p in enumerate(probs):
+        t = (p.get("title") or "").strip() if isinstance(p, dict) else ""
+        labels.append(t or f"Problem {i + 1}")
+    return labels or ["Problem 1"]
+
+
+@router.get("/quiz/{quiz_id}/analytics", response_class=HTMLResponse)
+async def quiz_analytics_page(request: Request, quiz_id: str):
+    email = _require_instructor(request)
+    if not email:
+        return RedirectResponse(url="/instructor/login", status_code=303)
+
+    fb = _get_firebase()
+    if not fb:
+        return templates.TemplateResponse(
+            "instructor_quiz_analytics.html",
+            {
+                "request": request,
+                "instructor_email": email,
+                "quiz_id": quiz_id,
+                "quiz_teaser": "",
+                "problem_labels": [],
+                "firebase_available": False,
+            },
+        )
+
+    from firebase_admin import db
+
+    quiz = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
+    if not quiz:
+        raise HTTPException(status_code=404, detail="Quiz not found")
+    if quiz.get("created_by") != email:
+        raise HTTPException(status_code=403, detail="Not authorised to view this quiz")
+
+    quiz = _normalize_quiz_data(quiz)
+    labels = _quiz_problem_labels(quiz)
+    return templates.TemplateResponse(
+        "instructor_quiz_analytics.html",
+        {
+            "request": request,
+            "instructor_email": email,
+            "quiz_id": quiz_id,
+            "quiz_teaser": (quiz.get("teaser") or quiz.get("title") or "").strip(),
+            "problem_labels": labels,
+            "firebase_available": True,
+        },
+    )
+
+
+@router.get("/quiz/{quiz_id}/analytics-data")
+async def quiz_analytics_data(request: Request, quiz_id: str):
+    email = _require_instructor(request)
+    if not email:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    fb = _get_firebase()
+    if not fb:
+        return JSONResponse({"error": "Database unavailable"}, status_code=503)
+
+    from firebase_admin import db
+
+    try:
+        quiz = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
+        if not quiz:
+            return JSONResponse({"error": "Quiz not found"}, status_code=404)
+        if quiz.get("created_by") != email:
+            return JSONResponse({"error": "Not authorised"}, status_code=403)
+
+        quiz = _normalize_quiz_data(quiz)
+        labels = _quiz_problem_labels(quiz)
+        sessions = collect_quiz_sessions_from_firebase(db, quiz_id)
+        data = aggregate_quiz_analytics(sessions, quiz_id, labels)
+
+        from main import get_active_quiz_session_counts
+
+        live = get_active_quiz_session_counts(quiz_id)
+        live_by_problem = [0] * len(labels)
+        for idx, c in (live.get("by_problem_index") or {}).items():
+            try:
+                i = int(idx)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= i < len(live_by_problem):
+                live_by_problem[i] = int(c)
+        data["live_now"] = {
+            "total_active": int(live.get("total_active") or 0),
+            "by_problem": live_by_problem,
+            "scope_note": "Live counts are from this server only (in-memory). Reload to refresh.",
+        }
+        return JSONResponse(content=data, headers=_ANALYTICS_JSON_NO_CACHE)
+    except Exception as e:
+        logger.exception("quiz_analytics_data failed for quiz_id=%s", quiz_id)
+        return JSONResponse({"error": f"Server error: {e!s}"}, status_code=500)
+
+
+@router.post("/quiz/{quiz_id}/analytics-delete-user")
+async def quiz_analytics_delete_user(
+    request: Request, quiz_id: str, body: Optional[dict] = Body(default=None)
+):
+    """Remove stored Firebase session data for one user on this quiz (and clear matching in-memory sessions)."""
+    email = _require_instructor(request)
+    if not email:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    fb = _get_firebase()
+    if not fb:
+        return JSONResponse({"success": False, "error": "Database unavailable"}, status_code=503)
+
+    from firebase_admin import db
+
+    user_id = (body or {}).get("user_id")
+    if not user_id or not isinstance(user_id, str):
+        return JSONResponse({"success": False, "error": "user_id required"}, status_code=400)
+
+    try:
+        quiz = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
+        if not quiz:
+            return JSONResponse({"success": False, "error": "Quiz not found"}, status_code=404)
+        if quiz.get("created_by") != email:
+            return JSONResponse({"success": False, "error": "Not authorised"}, status_code=403)
+
+        result = delete_user_data_for_quiz(db, quiz_id, user_id)
+        from main import forget_active_sessions_for_quiz_user
+
+        result["cleared_active_sessions"] = forget_active_sessions_for_quiz_user(quiz_id, user_id)
+        return JSONResponse(content={"success": True, **result}, headers=_ANALYTICS_JSON_NO_CACHE)
+    except ValueError as ve:
+        return JSONResponse({"success": False, "error": str(ve)}, status_code=400)
+    except Exception as e:
+        logger.exception("quiz_analytics_delete_user failed")
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@router.get("/quiz/{quiz_id}/analytics-export")
+async def quiz_analytics_export(request: Request, quiz_id: str, fmt: str = "csv"):
+    """Download per-session CSV (flattened) or full aggregate JSON for this quiz."""
+    email = _require_instructor(request)
+    if not email:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    fb = _get_firebase()
+    if not fb:
+        return JSONResponse({"error": "Database unavailable"}, status_code=503)
+
+    from firebase_admin import db
+
+    kind = (fmt or "csv").strip().lower()
+    if kind not in ("csv", "json"):
+        return JSONResponse({"error": "fmt must be csv or json"}, status_code=400)
+
+    try:
+        quiz = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
+        if not quiz:
+            return JSONResponse({"error": "Quiz not found"}, status_code=404)
+        if quiz.get("created_by") != email:
+            return JSONResponse({"error": "Not authorised"}, status_code=403)
+
+        quiz = _normalize_quiz_data(quiz)
+        labels = _quiz_problem_labels(quiz)
+        sessions = collect_quiz_sessions_from_firebase(db, quiz_id)
+        data = aggregate_quiz_analytics(sessions, quiz_id, labels)
+
+        from main import get_active_quiz_session_counts
+
+        live = get_active_quiz_session_counts(quiz_id)
+        live_by_problem = [0] * len(labels)
+        for idx, c in (live.get("by_problem_index") or {}).items():
+            try:
+                i = int(idx)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= i < len(live_by_problem):
+                live_by_problem[i] = int(c)
+        data["live_now"] = {
+            "total_active": int(live.get("total_active") or 0),
+            "by_problem": live_by_problem,
+            "scope_note": "Live counts are from this server only (in-memory). Reload to refresh.",
+        }
+
+        slug = _safe_quiz_export_slug(quiz_id)
+        if kind == "json":
+            blob = json.dumps(data, ensure_ascii=False, indent=2)
+            h = dict(_ANALYTICS_JSON_NO_CACHE)
+            h["Content-Disposition"] = f'attachment; filename="{slug}-analytics.json"'
+            return Response(
+                content=blob.encode("utf-8"),
+                media_type="application/json; charset=utf-8",
+                headers=h,
+            )
+
+        csv_text = export_per_session_csv(labels, data.get("per_session") or [])
+        bom = "\ufeff"
+        h = dict(_ANALYTICS_JSON_NO_CACHE)
+        h["Content-Disposition"] = f'attachment; filename="{slug}-analytics-sessions.csv"'
+        return Response(
+            content=(bom + csv_text).encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers=h,
+        )
+    except Exception as e:
+        logger.exception("quiz_analytics_export failed")
+        return JSONResponse({"error": f"Server error: {e!s}"}, status_code=500)
