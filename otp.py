@@ -15,6 +15,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional, Dict, Any
 
+from firebase_utils import fb_dict
+
 logger = logging.getLogger(__name__)
 
 # ─── Firebase key sanitiser (same helper used elsewhere) ────────────────────
@@ -52,13 +54,16 @@ def get_otp(firebase_db, email: str) -> Optional[Dict[str, Any]]:
         return None
     from firebase_admin import db
     sanitized = sanitize_key(email.lower().strip())
-    data = db.reference(f"otps/{sanitized}").get()
+    data = fb_dict(db.reference(f"otps/{sanitized}").get())
     if not data:
+        return None
+    expires_raw = data.get("expires")
+    if not isinstance(expires_raw, str):
         return None
     return {
         "otp_hash": data.get("otp_hash", ""),
         "salt": data.get("salt", ""),
-        "expires": datetime.fromisoformat(data["expires"]),
+        "expires": datetime.fromisoformat(expires_raw),
         "attempts": data.get("attempts", 0),
     }
 

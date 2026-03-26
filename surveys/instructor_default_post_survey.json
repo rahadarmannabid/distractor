@@ -1,0 +1,136 @@
+[
+  {
+    "id": "post_trust_q1",
+    "question": "Describe why you trust or distrust this system's AI coding assistant in your own words.",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Describe factors that influenced your trust/distrust...",
+    "min_length": 30,
+    "max_length": 1000
+  },
+  {
+    "id": "post_mental_q1",
+    "question": "Please describe in your own words, how you think this system's AI Coding Assistant generates code suggestions?",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Explain your understanding...",
+    "min_length": 30,
+    "max_length": 1000
+  },
+  {
+    "id": "post_accuracy_q1",
+    "question": "How accurate do you believe this system's AI-generated code suggestions are?",
+    "type": "slider",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 0,
+      "max": 100,
+      "step": 5,
+      "default": 50,
+      "unit": "%"
+    },
+    "help_text": "0% = completely inaccurate, 100% = perfectly accurate",
+    "image": {
+      "src": "guess_and_next_line.png"
+    }
+  },
+  {
+    "id": "post_accuracy_q2",
+    "question": "Why do you believe AI-generated code might be incorrect?",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Explain your reasoning...",
+    "min_length": 30,
+    "max_length": 1000
+  },
+  {
+    "id": "post_experience_q1",
+    "question": "Share your overall experience with how this system helped or hindered you in solving the programming assignment.",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Describe your experience...",
+    "min_length": 50,
+    "max_length": 1500
+  },
+  {
+    "id": "post_strategy_q1",
+    "question": "Seeing the AI's code suggestions was:",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Very unhelpful",
+      "maxLabel": "Very helpful"
+    },
+    "help_text": ""
+  },
+  {
+    "id": "post_strategy_q2",
+    "question": "Explain whether or how you used the AI during this activity.",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Describe how you used the AI...",
+    "min_length": 30,
+    "max_length": 1000
+  },
+  {
+    "id": "post_strategy_q3",
+    "question": "Would you continue to use this tool, why or why not?",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Explain your reasoning...",
+    "min_length": 30,
+    "max_length": 1000
+  },
+  {
+    "id": "post_difficulty_q1",
+    "question": "How difficult did you find this assignment?",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Very easy",
+      "maxLabel": "Very difficult"
+    },
+    "help_text": ""
+  },
+  {
+    "id": "post_reflection_q1",
+    "question": "Has using this system changed your view on how AI assistants work, and if so, why?",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Reflect on your understanding...",
+    "min_length": 30,
+    "max_length": 1000
+  },
+  {
+    "id": "post_suggestions_q1",
+    "question": "What suggestions do you have for improving this tool?",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Share your ideas...",
+    "min_length": 30,
+    "max_length": 1000
+  }
+]

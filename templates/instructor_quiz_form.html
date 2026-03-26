@@ -595,12 +595,39 @@
 
 <div class="toast" id="toast"></div>
 
+{% if quiz and quiz.problems %}
+<script type="application/json" id="quiz-form-bootstrap">{{ {
+  'edit_mode': edit_mode,
+  'quiz_id': quiz.id if quiz else '',
+  'draft_upload_id': draft_upload_id or '',
+  'selected_conditions': quiz.conditions if quiz and quiz.conditions else [1],
+  'problems_payload': {
+    'problems': quiz.problems,
+    'pre_survey': quiz.pre_survey or [],
+    'post_survey': quiz.post_survey or [],
+    'recurrent_survey': quiz.recurrent_survey or [],
+    'recurrent_survey_start': quiz.recurrent_survey_start if quiz and quiz.recurrent_survey_start else 5,
+    'recurrent_survey_interval': quiz.recurrent_survey_interval if quiz and quiz.recurrent_survey_interval else 4,
+  }
+} | tojson | safe }}</script>
+{% else %}
+<script type="application/json" id="quiz-form-bootstrap">{{ {
+  'edit_mode': edit_mode,
+  'quiz_id': quiz.id if quiz else '',
+  'draft_upload_id': draft_upload_id or '',
+  'selected_conditions': quiz.conditions if quiz and quiz.conditions else [1],
+  'problems_payload': None,
+} | tojson | safe }}</script>
+{% endif %}
+
 <script>
-const EDIT_MODE = {{ 'true' if edit_mode else 'false' }};
-const QUIZ_ID = '{{ quiz.id if quiz else "" }}';
+const bootstrap = JSON.parse(document.getElementById('quiz-form-bootstrap').textContent);
+const EDIT_MODE = bootstrap.edit_mode;
+const QUIZ_ID = bootstrap.quiz_id;
+const DRAFT_UPLOAD_ID = bootstrap.draft_upload_id;
 const TOTAL_STEPS = 4;
 let currentStep = 0;
-let selectedConditions = {{ quiz.conditions | tojson if quiz and quiz.conditions else '[1]' }};
+let selectedConditions = bootstrap.selected_conditions;
 
 // Per-problem data store
 let problemsData = [];
@@ -611,42 +638,91 @@ let problemRendered = false; // true after first switchProblem completes
 let starterCodeStore = {};
 let activeCodeLang = null;
 
-// ─── Default survey templates ───
-const DEFAULT_PRE_SURVEY = [
-  { id: "pre_demo_q1", question: "What is your current education level?", type: "multiple_choice", required: true, options: ["Freshman","Sophomore","Junior","Senior","Graduate Student","Other"], help_text: "" },
-  { id: "pre_demo_q2", question: "How much experience do you have in programming?", type: "multiple_choice", required: true, options: ["No experience","Beginner (< 6 months)","Intermediate (6-24 months)","Advanced (2-4 years)","Expert (4+ years or professional)"], help_text: "" },
-  { id: "pre_demo_q3", question: "How frequently do you use AI coding assistants like GitHub Copilot, Cursor, or other coding agents?", type: "multiple_choice", required: true, options: ["Never","Rarely (once a month or less)","Occasionally (a few times a month)","Frequently (a few times a week)","Very frequently (daily or almost daily)"], help_text: "" },
-  { id: "pre_trust_q1", question: "I can trust this AI assistant to solve programming problems.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
-  { id: "pre_trust_q5", question: "Please describe why you trust or distrust AI for use in coding in your own words.", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Describe the factors that influence your trust or distrust...", min_length: 30, max_length: 1000 },
-  { id: "pre_mental_q1", question: "Please describe in your own words, how you think AI Coding Assistants generate code suggestions?", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Explain your understanding...", min_length: 30, max_length: 1000 },
-  { id: "pre_accuracy_q1", question: "How accurate do you believe AI-generated code suggestions are?", type: "slider", required: true, options: [], scale: {min:0,max:100,step:5,default:50,unit:"%"}, help_text: "0% = completely inaccurate, 100% = perfectly accurate" },
-  { id: "pre_accuracy_q2", question: "Please describe what you believe might cause AI-generated code to be incorrect.", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Describe potential causes...", min_length: 30, max_length: 1000 },
-];
+// ─── Default survey templates: loaded from `surveys/instructor_default_*.json` via API ───
+let DEFAULT_PRE_SURVEY = [];
+let DEFAULT_POST_SURVEY = [];
+let DEFAULT_RECURRENT_SURVEY = [];
 
-const DEFAULT_POST_SURVEY = [
-  { id: "post_trust_q1", question: "Describe why you trust or distrust this system's AI coding assistant in your own words.", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Describe factors that influenced your trust/distrust...", min_length: 30, max_length: 1000 },
-  { id: "post_mental_q1", question: "Please describe in your own words, how you think this system's AI Coding Assistant generates code suggestions?", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Explain your understanding...", min_length: 30, max_length: 1000 },
-  { id: "post_accuracy_q1", question: "How accurate do you believe this system's AI-generated code suggestions are?", type: "slider", required: true, options: [], scale: {min:0,max:100,step:5,default:50,unit:"%"}, help_text: "0% = completely inaccurate, 100% = perfectly accurate" },
-  { id: "post_accuracy_q2", question: "Why do you believe AI-generated code might be incorrect?", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Explain your reasoning...", min_length: 30, max_length: 1000 },
-  { id: "post_experience_q1", question: "Share your overall experience with how this system helped or hindered you in solving the programming assignment.", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Describe your experience...", min_length: 50, max_length: 1500 },
-  { id: "post_strategy_q1", question: "Seeing the AI's code suggestions was:", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Very unhelpful",maxLabel:"Very helpful"}, help_text: "" },
-  { id: "post_strategy_q2", question: "Explain whether or how you used the AI during this activity.", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Describe how you used the AI...", min_length: 30, max_length: 1000 },
-  { id: "post_strategy_q3", question: "Would you continue to use this tool, why or why not?", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Explain your reasoning...", min_length: 30, max_length: 1000 },
-  { id: "post_difficulty_q1", question: "How difficult did you find this assignment?", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Very easy",maxLabel:"Very difficult"}, help_text: "" },
-  { id: "post_reflection_q1", question: "Has using this system changed your view on how AI assistants work, and if so, why?", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Reflect on your understanding...", min_length: 30, max_length: 1000 },
-  { id: "post_suggestions_q1", question: "What suggestions do you have for improving this tool?", type: "open_ended", required: true, options: [], help_text: "", placeholder: "Share your ideas...", min_length: 30, max_length: 1000 },
-];
+async function loadDefaultSurveyTemplates() {
+  const base = '/instructor/default-survey-templates';
+  const opts = { credentials: 'same-origin' };
+  const [pre, post, rec] = await Promise.all([
+    fetch(`${base}/pre`, opts).then(r => { if (!r.ok) throw new Error('pre template'); return r.json(); }),
+    fetch(`${base}/post`, opts).then(r => { if (!r.ok) throw new Error('post template'); return r.json(); }),
+    fetch(`${base}/recurrent`, opts).then(r => { if (!r.ok) throw new Error('recurrent template'); return r.json(); }),
+  ]);
+  DEFAULT_PRE_SURVEY = Array.isArray(pre) ? pre : [];
+  DEFAULT_POST_SURVEY = Array.isArray(post) ? post : [];
+  DEFAULT_RECURRENT_SURVEY = Array.isArray(rec) ? rec : [];
+}
 
-const DEFAULT_RECURRENT_SURVEY = [
-  { id: "rec_q1", question: "CodeOracle is very reliable. I can trust on it to be correct all the time.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
-  { id: "rec_q2", question: "I am confident in CodeOracle. I feel that it works well.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
-  { id: "rec_q3", question: "The outputs of CodeOracle are very predictable.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
-  { id: "rec_q4", question: "I feel safe that when I rely on CodeOracle I will get the right answers.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
-  { id: "rec_q5", question: "CodeOracle is efficient and works very quickly.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
-  { id: "rec_q6", question: "I am wary of CodeOracle.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
-  { id: "rec_q7", question: "CodeOracle can perform the task better than a novice human user.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
-  { id: "rec_q8", question: "I like using CodeOracle for decision making.", type: "likert", required: true, options: [], scale: {min:1,max:5,minLabel:"Strongly disagree",maxLabel:"Strongly agree"}, help_text: "" },
-];
+function surveyQuestionImageUrl(src) {
+  if (!src || typeof src !== 'string') return '';
+  const t = src.trim();
+  if (t.indexOf('/') !== -1) {
+    const i = t.indexOf('/');
+    return '/quiz-images/' + encodeURIComponent(t.slice(0, i)) + '/' + t.slice(i + 1).split('/').map(encodeURIComponent).join('/');
+  }
+  return '/survey-images/' + encodeURIComponent(t);
+}
+
+function refreshSqImagePreview(card) {
+  const txt = card.querySelector('.sq-image-src');
+  const row = txt && txt.closest('.sq-image-row');
+  if (!txt || !row) return;
+  const v = (txt.value || '').trim();
+  const prev = row.querySelector('.sq-image-preview');
+  if (prev) prev.remove();
+  if (!v) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'sq-image-preview';
+  wrap.style.marginTop = '6px';
+  const img = document.createElement('img');
+  img.src = surveyQuestionImageUrl(v);
+  img.alt = '';
+  img.style.cssText = 'max-width:100%;max-height:120px;border-radius:6px;border:1px solid var(--border);';
+  img.loading = 'lazy';
+  img.onerror = () => { wrap.style.display = 'none'; };
+  wrap.appendChild(img);
+  row.appendChild(wrap);
+}
+
+function wireSurveyImageUpload(card) {
+  const btn = card.querySelector('.sq-upload-img-btn');
+  const finp = card.querySelector('.sq-image-file');
+  const txt = card.querySelector('.sq-image-src');
+  if (!btn || !finp || !txt) return;
+  btn.onclick = () => finp.click();
+  finp.onchange = async () => {
+    const f = finp.files && finp.files[0];
+    finp.value = '';
+    if (!f) return;
+    if (!QUIZ_ID && !DRAFT_UPLOAD_ID) {
+      showToast('Cannot upload: reload the create-quiz page.', 'error');
+      return;
+    }
+    const fd = new FormData();
+    fd.append('file', f);
+    if (QUIZ_ID) fd.append('quiz_id', QUIZ_ID);
+    else fd.append('draft_upload_id', DRAFT_UPLOAD_ID);
+    btn.disabled = true;
+    try {
+      const res = await fetch('/instructor/upload-survey-image', { method: 'POST', body: fd, credentials: 'same-origin' });
+      const data = await res.json();
+      if (data.success && data.src) {
+        txt.value = data.src;
+        refreshSqImagePreview(card);
+        showToast('Image uploaded for this quiz', 'success');
+      } else {
+        showToast(data.error || 'Upload failed', 'error');
+      }
+    } catch (e) {
+      showToast('Upload failed', 'error');
+    }
+    btn.disabled = false;
+  };
+  txt.addEventListener('input', () => refreshSqImagePreview(card));
+}
 
 // Helper: build default survey fields for a new problem
 function defaultSurveyFields() {
@@ -663,16 +739,21 @@ function defaultSurveyFields() {
   };
 }
 
-// Init problems data
-{% if quiz and quiz.problems %}
-(function() {
-  const rawProblems = {{ quiz.problems | tojson }};
-  // Fallback: quiz-level surveys for legacy quizzes without per-problem surveys
-  const quizPre = {{ quiz.pre_survey | tojson if quiz and quiz.pre_survey else '[]' }};
-  const quizPost = {{ quiz.post_survey | tojson if quiz and quiz.post_survey else '[]' }};
-  const quizRec = {{ quiz.recurrent_survey | tojson if quiz and quiz.recurrent_survey else '[]' }};
-  const quizRecStart = {{ quiz.recurrent_survey_start if quiz and quiz.recurrent_survey_start else 5 }};
-  const quizRecInterval = {{ quiz.recurrent_survey_interval if quiz and quiz.recurrent_survey_interval else 4 }};
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    await loadDefaultSurveyTemplates();
+  } catch (e) {
+    console.error('Default survey templates failed to load:', e);
+    showToast('Could not load default survey templates from server. Check surveys/instructor_default_*.json', 'error');
+  }
+
+  if (bootstrap.problems_payload) {
+  const rawProblems = bootstrap.problems_payload.problems;
+  const quizPre = bootstrap.problems_payload.pre_survey;
+  const quizPost = bootstrap.problems_payload.post_survey;
+  const quizRec = bootstrap.problems_payload.recurrent_survey;
+  const quizRecStart = bootstrap.problems_payload.recurrent_survey_start;
+  const quizRecInterval = bootstrap.problems_payload.recurrent_survey_interval;
 
   rawProblems.forEach(prob => {
     const sc = prob.starter_code || {};
@@ -685,8 +766,6 @@ function defaultSurveyFields() {
         normalizedSC[lang] = val;
       }
     }
-    // Check if problem has per-problem surveys via sentinel field
-    // (Firebase drops empty arrays, so we use _has_surveys as a reliable marker)
     const hasSurveys = prob._has_surveys === true;
     const defaults = defaultSurveyFields();
     problemsData.push({
@@ -705,18 +784,16 @@ function defaultSurveyFields() {
       recurrent_survey_start: hasSurveys ? (prob.recurrent_survey_start || 5) : (quizRec.length ? quizRecStart : defaults.recurrent_survey_start),
     });
   });
-})();
-{% else %}
-problemsData.push(Object.assign({
-  title: '',
-  problem_statement: '',
-  constraints: '',
-  test_cases: '',
-  starter_code: {},
-}, defaultSurveyFields()));
-{% endif %}
+  } else {
+  problemsData.push(Object.assign({
+    title: '',
+    problem_statement: '',
+    constraints: '',
+    test_cases: '',
+    starter_code: {},
+  }, defaultSurveyFields()));
+  }
 
-document.addEventListener('DOMContentLoaded', () => {
   switchProblem(0);
   renderProblemTabs();
 });
@@ -1018,6 +1095,14 @@ function createSurveyCard(q, idx) {
       <div class="sq-row-inline">
         <input type="text" class="sq-question" placeholder="Enter question text" value="${escHtml(q.question || '')}">
         <select class="sq-type" onchange="onTypeChange(this)">${typeOptions}</select>
+      </div>
+      <div class="sq-image-row" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);">
+        <label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:6px;">Optional image — <strong>Upload</strong> (stored with this quiz) or type a shared file name from <code>surveys/images/</code></label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
+          <input type="text" class="sq-image-src" placeholder="quiz asset id/filename.png or shared image.png" value="${q.image && q.image.src ? escHtml(q.image.src) : ''}" style="flex:1;min-width:160px;padding:8px;">
+          <input type="file" class="sq-image-file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" style="display:none">
+          <button type="button" class="action-btn-sm sq-upload-img-btn">Upload image</button>
+        </div>
       </div>`;
 
   if (q.type === 'open_ended') {
@@ -1039,6 +1124,8 @@ function createSurveyCard(q, idx) {
 
   html += '</div>';
   card.innerHTML = html;
+  wireSurveyImageUpload(card);
+  refreshSqImagePreview(card);
   return card;
 }
 
@@ -1101,6 +1188,12 @@ function collectSurvey(containerId) {
     const result = Object.assign(base, { id: base.id || `q_${i}`, question: q, type: t, required: isRequired, options: opts });
     if (t === 'open_ended') {
       result.min_length = minLen;
+    }
+    const imgSrcInp = card.querySelector('.sq-image-src');
+    if (imgSrcInp && imgSrcInp.value.trim()) {
+      result.image = { src: imgSrcInp.value.trim() };
+    } else {
+      delete result.image;
     }
     return result;
   }).filter(sq => sq.question);
@@ -1220,6 +1313,9 @@ async function saveQuiz() {
     paste_allowed: document.getElementById('paste_allowed').checked,
     tab_tracking_enabled: document.getElementById('tab_tracking_enabled').checked,
   };
+  if (!EDIT_MODE && DRAFT_UPLOAD_ID) {
+    payload.draft_upload_id = DRAFT_UPLOAD_ID;
+  }
 
   const url = EDIT_MODE ? '/instructor/update-quiz/' + QUIZ_ID : '/instructor/save-quiz';
   try {

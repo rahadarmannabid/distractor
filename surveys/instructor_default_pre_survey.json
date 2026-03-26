@@ -1,0 +1,110 @@
+[
+  {
+    "id": "pre_demo_q1",
+    "question": "What is your current education level?",
+    "type": "multiple_choice",
+    "required": true,
+    "options": [
+      "Freshman",
+      "Sophomore",
+      "Junior",
+      "Senior",
+      "Graduate Student",
+      "Other"
+    ],
+    "help_text": ""
+  },
+  {
+    "id": "pre_demo_q2",
+    "question": "How much experience do you have in programming?",
+    "type": "multiple_choice",
+    "required": true,
+    "options": [
+      "No experience",
+      "Beginner (< 6 months)",
+      "Intermediate (6-24 months)",
+      "Advanced (2-4 years)",
+      "Expert (4+ years or professional)"
+    ],
+    "help_text": ""
+  },
+  {
+    "id": "pre_demo_q3",
+    "question": "How frequently do you use AI coding assistants like GitHub Copilot, Cursor, or other coding agents?",
+    "type": "multiple_choice",
+    "required": true,
+    "options": [
+      "Never",
+      "Rarely (once a month or less)",
+      "Occasionally (a few times a month)",
+      "Frequently (a few times a week)",
+      "Very frequently (daily or almost daily)"
+    ],
+    "help_text": "",
+    "image": {
+      "src": "github-copilot-animation.gif"
+    }
+  },
+  {
+    "id": "pre_trust_q1",
+    "question": "I can trust this AI assistant to solve programming problems.",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Strongly disagree",
+      "maxLabel": "Strongly agree"
+    },
+    "help_text": ""
+  },
+  {
+    "id": "pre_trust_q5",
+    "question": "Please describe why you trust or distrust AI for use in coding in your own words.",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Describe the factors that influence your trust or distrust...",
+    "min_length": 30,
+    "max_length": 1000
+  },
+  {
+    "id": "pre_mental_q1",
+    "question": "Please describe in your own words, how you think AI Coding Assistants generate code suggestions?",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Explain your understanding...",
+    "min_length": 30,
+    "max_length": 1000
+  },
+  {
+    "id": "pre_accuracy_q1",
+    "question": "How accurate do you believe AI-generated code suggestions are?",
+    "type": "slider",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 0,
+      "max": 100,
+      "step": 5,
+      "default": 50,
+      "unit": "%"
+    },
+    "help_text": "0% = completely inaccurate, 100% = perfectly accurate"
+  },
+  {
+    "id": "pre_accuracy_q2",
+    "question": "Please describe what you believe might cause AI-generated code to be incorrect.",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Describe potential causes...",
+    "min_length": 30,
+    "max_length": 1000
+  }
+]

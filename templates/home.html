@@ -1003,10 +1003,10 @@
                         hasPostSurvey: data.has_post_survey || false,
                         starterCode: data.starter_code || null,
                         starterFiles: data.starter_files || null,
-                        periodicSurveyEnabled: data.periodic_survey_enabled || false,
+                        periodicSurveyEnabled: data.periodic_survey_enabled === true,
                         periodicSurveyStart: data.periodic_survey_start || 5,
                         periodicSurveyInterval: data.periodic_survey_interval || 4,
-                        finalSurveyDisabled: data.final_survey_disabled || false,
+                        finalSurveyDisabled: data.final_survey_disabled === true,
                         quizId: data.quiz_id || null,
                         quizTeaser: data.quiz_teaser || '',
                         timeLimitMinutes: data.time_limit_minutes || 0,
@@ -1047,9 +1047,9 @@
                     hasPreSurvey: data.has_pre_survey || false,
                     hasPostSurvey: data.has_post_survey || false,
                     starterCode: data.starter_code || null,
-                    periodicSurveyEnabled: data.periodic_survey_enabled || false,
+                    periodicSurveyEnabled: data.periodic_survey_enabled === true,
                     periodicSurveyStart: data.periodic_survey_start || 5,
-                    finalSurveyDisabled: data.final_survey_disabled || false
+                    finalSurveyDisabled: data.final_survey_disabled === true
                 }));
 
                 // Download assignment PDF

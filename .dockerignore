@@ -178,12 +178,9 @@ yarn.lock
 # CRITICAL: THESE ARE INCLUDED (NOT in .dockerignore)
 # ============================================
 # ✅ .env (INCLUDED - will be baked into image)
-# ✅ surveys/
-# ✅ surveys/**/*.json
-# ✅ surveys/images/
+# ✅ surveys/ (at least surveys/images/ for /survey-images)
 # ✅ templates/
-# ✅ assignment/
-# ✅ starter_code/
+# (assignment/, starter_code/, surveys/*.json optional — Firebase quiz is primary)
 # ✅ main.py
 # ✅ admin.py
 # ✅ requirements.txt

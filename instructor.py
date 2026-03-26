@@ -3,17 +3,23 @@
 Mounted as a sub-router in main.py at prefix /instructor.
 """
 
-from fastapi import APIRouter, Request, HTTPException, Body
+import shutil
+import copy
+
+from fastapi import APIRouter, Request, HTTPException, Body, File, UploadFile, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from datetime import datetime, timedelta
 from typing import Optional
+import json
 import logging
 import os
 import re
 import secrets
 import uuid
+from pathlib import Path
 
+from firebase_utils import fb_dict
 from models import QuizCreate, QuizUpdate, QuizJoinRequest
 
 from otp import (
@@ -34,6 +40,107 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/instructor", tags=["instructor"])
 templates = Jinja2Templates(directory="templates")
+
+# Instructor quiz builder: default survey question banks (editable JSON on disk)
+_DEFAULT_SURVEY_TEMPLATE_FILES = {
+    "pre": Path("surveys/instructor_default_pre_survey.json"),
+    "post": Path("surveys/instructor_default_post_survey.json"),
+    "recurrent": Path("surveys/instructor_default_recurrent_survey.json"),
+}
+
+# Per-quiz survey question images (uploaded by instructor); served via GET /quiz-images/{asset_id}/{filename}
+QUIZ_ASSETS_DIR = Path("surveys") / "quiz_assets"
+ALLOWED_QUIZ_IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"}
+
+
+def _sanitize_quiz_asset_filename(name: str) -> str:
+    base = Path(name).name
+    stem = Path(base).stem
+    suf = Path(base).suffix.lower()
+    if suf not in ALLOWED_QUIZ_IMAGE_EXT:
+        suf = ".png"
+    clean = re.sub(r"[^a-zA-Z0-9._-]", "_", stem)[:160] or "image"
+    return clean + suf
+
+
+def _rewrite_quiz_image_ids(obj: object, old_id: str, new_id: str) -> None:
+    """Rewrite image.src from old_id/filename → new_id/filename everywhere in nested structures."""
+    prefix = old_id + "/"
+    if isinstance(obj, dict):
+        im = obj.get("image")
+        if isinstance(im, dict) and isinstance(im.get("src"), str):
+            s = im["src"]
+            if s.startswith(prefix):
+                im["src"] = new_id + "/" + s[len(prefix) :]
+        for v in obj.values():
+            _rewrite_quiz_image_ids(v, old_id, new_id)
+    elif isinstance(obj, list):
+        for x in obj:
+            _rewrite_quiz_image_ids(x, old_id, new_id)
+
+
+@router.get("/default-survey-templates/{which}")
+async def get_default_survey_templates(which: str):
+    """Return default pre/post/recurrent question arrays from `surveys/instructor_default_*.json`."""
+    path = _DEFAULT_SURVEY_TEMPLATE_FILES.get(which)
+    if not path or not path.is_file():
+        raise HTTPException(status_code=404, detail="Unknown or missing survey template")
+    with open(path, encoding="utf-8") as f:
+        return JSONResponse(json.load(f))
+
+
+@router.post("/upload-survey-image")
+async def upload_survey_image(
+    request: Request,
+    file: UploadFile = File(...),
+    draft_upload_id: Optional[str] = Form(None),
+    quiz_id: Optional[str] = Form(None),
+):
+    """Store image under surveys/quiz_assets/{draft_id|quiz_id}/. Returns image.src like \"uuid/filename.png\" for question JSON."""
+    email = _require_instructor(request)
+    if not email:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    did = (draft_upload_id or "").strip()
+    qid = (quiz_id or "").strip()
+    if bool(did) == bool(qid):
+        return JSONResponse(
+            {"success": False, "error": "Send exactly one of draft_upload_id or quiz_id"},
+            status_code=400,
+        )
+
+    asset_id = qid if qid else did
+    if qid:
+        fb = _get_firebase()
+        if fb:
+            from firebase_admin import db
+            quiz = fb_dict(db.reference(f"quizzes/{qid}").get())
+            if not quiz or quiz.get("created_by") != email:
+                return JSONResponse({"success": False, "error": "Not authorised"}, status_code=403)
+
+    raw_name = file.filename or "image.png"
+    safe_name = _sanitize_quiz_asset_filename(raw_name)
+    ext = Path(safe_name).suffix.lower()
+    if ext not in ALLOWED_QUIZ_IMAGE_EXT:
+        return JSONResponse({"success": False, "error": f"File type not allowed ({ext})"}, status_code=400)
+
+    dest_dir = QUIZ_ASSETS_DIR / asset_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = dest_dir / safe_name
+    if dest_path.exists():
+        stem = Path(safe_name).stem
+        safe_name = f"{stem}_{secrets.token_hex(4)}{ext}"
+        dest_path = dest_dir / safe_name
+
+    contents = await file.read()
+    if len(contents) > 5 * 1024 * 1024:
+        return JSONResponse({"success": False, "error": "File too large (max 5 MB)"}, status_code=400)
+    dest_path.write_bytes(contents)
+
+    src = f"{asset_id}/{safe_name}"
+    logger.info("Instructor uploaded survey image %s -> %s", email, src)
+    return JSONResponse({"success": True, "src": src})
+
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -109,7 +216,7 @@ async def login_page(request: Request):
 @router.post("/send-otp", response_class=HTMLResponse)
 async def send_otp(request: Request):
     form = await request.form()
-    email = (form.get("email") or "").lower().strip()
+    email = str(form.get("email") or "").lower().strip()
 
     if "@" not in email:
         return templates.TemplateResponse("instructor_login.html", {
@@ -148,8 +255,8 @@ async def send_otp(request: Request):
 @router.post("/verify-otp", response_class=HTMLResponse)
 async def verify_otp(request: Request):
     form = await request.form()
-    email = (form.get("email") or "").lower().strip()
-    otp_input = (form.get("otp") or "").strip()
+    email = str(form.get("email") or "").lower().strip()
+    otp_input = str(form.get("otp") or "").strip()
 
     stored = get_otp_record(_get_firebase(), email)
 
@@ -221,9 +328,9 @@ async def dashboard(request: Request):
     if fb:
         from firebase_admin import db
         sanitized = sanitize_key(email)
-        quiz_ids = db.reference(f"instructors/{sanitized}/quizzes").get() or {}
+        quiz_ids = fb_dict(db.reference(f"instructors/{sanitized}/quizzes").get()) or {}
         if quiz_ids:
-            all_quizzes = db.reference("quizzes").get() or {}
+            all_quizzes = fb_dict(db.reference("quizzes").get()) or {}
             for qid in quiz_ids:
                 qdata = all_quizzes.get(qid)
                 if qdata:
@@ -250,6 +357,7 @@ async def create_quiz_page(request: Request):
         "instructor_email": email,
         "quiz": None,
         "edit_mode": False,
+        "draft_upload_id": str(uuid.uuid4()),
     })
 
 
@@ -268,6 +376,7 @@ async def save_quiz(request: Request, payload: dict = Body(...)):
     # Validate problems list (at least one required)
     if not problems or not isinstance(problems, list):
         return JSONResponse({"success": False, "error": "At least one problem is required."}, status_code=400)
+    problems = copy.deepcopy(problems)
     for i, prob in enumerate(problems):
         if not (prob.get("title") or "").strip():
             return JSONResponse({"success": False, "error": f"Problem {i+1} requires a title."}, status_code=400)
@@ -285,6 +394,16 @@ async def save_quiz(request: Request, payload: dict = Body(...)):
 
     quiz_id = str(uuid.uuid4())
     access_code = _generate_access_code()
+
+    draft_id = (payload.get("draft_upload_id") or "").strip()
+    if draft_id:
+        src_dir = QUIZ_ASSETS_DIR / draft_id
+        dst_dir = QUIZ_ASSETS_DIR / quiz_id
+        if src_dir.exists() and src_dir.is_dir():
+            if dst_dir.exists():
+                shutil.rmtree(dst_dir, ignore_errors=True)
+            shutil.move(str(src_dir), str(dst_dir))
+        _rewrite_quiz_image_ids(problems, draft_id, quiz_id)
 
     quiz_data = {
         "id": quiz_id,
@@ -334,7 +453,7 @@ async def edit_quiz_page(request: Request, quiz_id: str):
     quiz = None
     if fb:
         from firebase_admin import db
-        quiz = db.reference(f"quizzes/{quiz_id}").get()
+        quiz = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
     if not quiz:
         raise HTTPException(status_code=404, detail="Quiz not found")
     if quiz.get("created_by") != email:
@@ -348,6 +467,7 @@ async def edit_quiz_page(request: Request, quiz_id: str):
         "instructor_email": email,
         "quiz": quiz,
         "edit_mode": True,
+        "draft_upload_id": None,
     })
 
 
@@ -362,7 +482,7 @@ async def update_quiz(request: Request, quiz_id: str, payload: dict = Body(...))
         return JSONResponse({"success": False, "error": "Database unavailable"}, status_code=503)
 
     from firebase_admin import db
-    existing = db.reference(f"quizzes/{quiz_id}").get()
+    existing = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
     if not existing:
         return JSONResponse({"success": False, "error": "Quiz not found"}, status_code=404)
     if existing.get("created_by") != email:
@@ -421,7 +541,7 @@ async def delete_quiz(request: Request, quiz_id: str):
         return JSONResponse({"success": False, "error": "Database unavailable"}, status_code=503)
 
     from firebase_admin import db
-    existing = db.reference(f"quizzes/{quiz_id}").get()
+    existing = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
     if not existing:
         return JSONResponse({"success": False, "error": "Quiz not found"}, status_code=404)
     if existing.get("created_by") != email:
@@ -432,6 +552,10 @@ async def delete_quiz(request: Request, quiz_id: str):
     if access_code:
         db.reference(f"quiz_access/{access_code}").delete()
     db.reference(f"instructors/{sanitize_key(email)}/quizzes/{quiz_id}").delete()
+
+    qdir = QUIZ_ASSETS_DIR / quiz_id
+    if qdir.exists() and qdir.is_dir():
+        shutil.rmtree(qdir, ignore_errors=True)
 
     return JSONResponse({"success": True})
 
@@ -447,7 +571,7 @@ async def toggle_publish(request: Request, quiz_id: str):
         return JSONResponse({"success": False, "error": "Database unavailable"}, status_code=503)
 
     from firebase_admin import db
-    existing = db.reference(f"quizzes/{quiz_id}").get()
+    existing = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
     if not existing:
         return JSONResponse({"success": False, "error": "Quiz not found"}, status_code=404)
     if existing.get("created_by") != email:

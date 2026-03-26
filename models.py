@@ -34,6 +34,8 @@ class SurveyQuestionCreate(BaseModel):
     min_length: Optional[int] = None
     help_text: str = ""
     content: str = ""  # for info_block
+    # Optional image (filename under surveys/images/, served at /survey-images/{src})
+    image: Optional[Dict[str, Any]] = None  # e.g. {"src": "x.png"}
 
 
 # ─── Problem (per-problem data within a quiz) ──────────────────────────────

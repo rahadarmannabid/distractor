@@ -36,6 +36,7 @@ import json
 from fastapi.responses import FileResponse
 from admin import router as admin_router
 from instructor import router as instructor_router
+from firebase_utils import fb_dict
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -2571,10 +2572,10 @@ async def get_survey_config(assignment_key: str, problem_index: int = 0):
         if assignment_key.startswith("quiz_") and firebase_db:
             access_code = assignment_key[5:]  # strip "quiz_"
             # Look up access code to get actual quiz UUID
-            access_ref = db.reference(f"quiz_access/{access_code}").get()
+            access_ref = fb_dict(db.reference(f"quiz_access/{access_code}").get())
             quiz_data = None
             if access_ref and access_ref.get("quiz_id"):
-                quiz_data = db.reference(f"quizzes/{access_ref['quiz_id']}").get()
+                quiz_data = fb_dict(db.reference(f"quizzes/{access_ref['quiz_id']}").get())
             if quiz_data:
                 quiz_data = normalize_quiz_data(quiz_data)
                 problems = quiz_data.get("problems", [])
@@ -3395,9 +3396,9 @@ async def get_assignment_text(assignment_key: str, problem_index: int = 0):
         if assignment_key.startswith("quiz_") and firebase_db:
             access_code = assignment_key[5:]  # strip "quiz_"
             # Look up access code to get actual quiz UUID
-            access_ref = db.reference(f"quiz_access/{access_code}").get()
+            access_ref = fb_dict(db.reference(f"quiz_access/{access_code}").get())
             if access_ref and access_ref.get("quiz_id"):
-                qval = db.reference(f"quizzes/{access_ref['quiz_id']}").get()
+                qval = fb_dict(db.reference(f"quizzes/{access_ref['quiz_id']}").get())
                 if qval:
                     qval = normalize_quiz_data(qval)
                     import html as html_mod
@@ -3485,6 +3486,42 @@ async def get_survey_image(image_filename: str):
         raise
     except Exception as e:
         logger.error(f"Error serving survey image {image_filename}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to serve image")
+
+
+@app.get("/quiz-images/{asset_id}/{filename}")
+async def get_quiz_image(asset_id: str, filename: str):
+    """
+    Serve per-quiz survey images uploaded by instructors (surveys/quiz_assets/{asset_id}/{filename}).
+    asset_id is the quiz UUID (or draft upload id before first save).
+    """
+    try:
+        if ".." in filename or "/" in filename or "\\" in filename:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        if not re.match(r"^[a-zA-Z0-9_-]{8,128}$", asset_id):
+            raise HTTPException(status_code=400, detail="Invalid asset id")
+        allowed_extensions = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"}
+        file_ext = Path(filename).suffix.lower()
+        if file_ext not in allowed_extensions:
+            raise HTTPException(status_code=400, detail="File type not allowed")
+        base = Path("surveys") / "quiz_assets" / asset_id
+        image_path = (base / filename).resolve()
+        base_resolved = base.resolve()
+        if not str(image_path).startswith(str(base_resolved)) or not image_path.is_file():
+            raise HTTPException(status_code=404, detail="Image not found")
+        mime_type, _ = mimetypes.guess_type(str(image_path))
+        if not mime_type:
+            mime_type = "application/octet-stream"
+        return FileResponse(
+            path=image_path,
+            media_type=mime_type,
+            filename=filename,
+            headers={"Cache-Control": "public, max-age=3600", "Content-Disposition": f"inline; filename={filename}"},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error serving quiz image %s/%s: %s", asset_id, filename, e)
         raise HTTPException(status_code=500, detail="Failed to serve image")
 
 
@@ -3616,10 +3653,10 @@ async def student_quiz_entry(request: Request, access_code: str):
     """Landing page for students accessing an instructor-created quiz via share link."""
     quiz_data = None
     if firebase_db:
-        mapping = db.reference(f"quiz_access/{access_code}").get()
+        mapping = fb_dict(db.reference(f"quiz_access/{access_code}").get())
         if mapping:
             quiz_id = mapping.get("quiz_id")
-            quiz_data = db.reference(f"quizzes/{quiz_id}").get()
+            quiz_data = fb_dict(db.reference(f"quizzes/{quiz_id}").get()) if quiz_id else None
 
     if not quiz_data:
         return HTMLResponse("<h2>Quiz not found or link is invalid.</h2>", status_code=404)
@@ -3669,12 +3706,15 @@ async def student_quiz_join(request: Request):
     if not firebase_db:
         raise HTTPException(status_code=503, detail="Database unavailable")
 
-    mapping = db.reference(f"quiz_access/{access_code}").get()
+    mapping = fb_dict(db.reference(f"quiz_access/{access_code}").get())
     if not mapping:
         raise HTTPException(status_code=404, detail="Invalid quiz code")
 
-    quiz_id = mapping["quiz_id"]
-    quiz_data = db.reference(f"quizzes/{quiz_id}").get()
+    quiz_id = mapping.get("quiz_id")
+    if not quiz_id:
+        raise HTTPException(status_code=404, detail="Invalid quiz code")
+
+    quiz_data = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
     if not quiz_data:
         raise HTTPException(status_code=404, detail="Quiz not found")
     if not quiz_data.get("published", False):
@@ -3829,7 +3869,7 @@ async def quiz_next_problem(request: Request):
     if not session_log.quiz_id:
         raise HTTPException(status_code=400, detail="No quiz ID in session")
 
-    quiz_data = db.reference(f"quizzes/{session_log.quiz_id}").get()
+    quiz_data = fb_dict(db.reference(f"quizzes/{session_log.quiz_id}").get())
     if not quiz_data:
         raise HTTPException(status_code=404, detail="Quiz not found")
     quiz_data = normalize_quiz_data(quiz_data)

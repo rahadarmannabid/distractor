@@ -1,0 +1,117 @@
+[
+  {
+    "id": "rec_q1",
+    "question": "CodeOracle is very reliable. I can trust on it to be correct all the time.",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Strongly disagree",
+      "maxLabel": "Strongly agree"
+    },
+    "help_text": "",
+    "image": {
+      "src": "only_next_line.png"
+    }
+  },
+  {
+    "id": "rec_q2",
+    "question": "I am confident in CodeOracle. I feel that it works well.",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Strongly disagree",
+      "maxLabel": "Strongly agree"
+    },
+    "help_text": ""
+  },
+  {
+    "id": "rec_q3",
+    "question": "The outputs of CodeOracle are very predictable.",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Strongly disagree",
+      "maxLabel": "Strongly agree"
+    },
+    "help_text": ""
+  },
+  {
+    "id": "rec_q4",
+    "question": "I feel safe that when I rely on CodeOracle I will get the right answers.",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Strongly disagree",
+      "maxLabel": "Strongly agree"
+    },
+    "help_text": ""
+  },
+  {
+    "id": "rec_q5",
+    "question": "CodeOracle is efficient and works very quickly.",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Strongly disagree",
+      "maxLabel": "Strongly agree"
+    },
+    "help_text": ""
+  },
+  {
+    "id": "rec_q6",
+    "question": "I am wary of CodeOracle.",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Strongly disagree",
+      "maxLabel": "Strongly agree"
+    },
+    "help_text": ""
+  },
+  {
+    "id": "rec_q7",
+    "question": "CodeOracle can perform the task better than a novice human user.",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Strongly disagree",
+      "maxLabel": "Strongly agree"
+    },
+    "help_text": ""
+  },
+  {
+    "id": "rec_q8",
+    "question": "I like using CodeOracle for decision making.",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Strongly disagree",
+      "maxLabel": "Strongly agree"
+    },
+    "help_text": ""
+  }
+]

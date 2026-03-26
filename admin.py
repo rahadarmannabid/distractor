@@ -57,13 +57,13 @@ async def upload_assignment(
             raise HTTPException(status_code=400, detail="Assignment key contains invalid characters")
         
         # Validate file types
-        if not pdf_file.filename.endswith('.pdf'):
+        if not (pdf_file.filename or "").endswith('.pdf'):
             raise HTTPException(status_code=400, detail="PDF file must have .pdf extension")
         
-        if not txt_file.filename.endswith('.txt'):
+        if not (txt_file.filename or "").endswith('.txt'):
             raise HTTPException(status_code=400, detail="TXT file must have .txt extension")
         
-        if not survey_file.filename.endswith('.json'):
+        if not (survey_file.filename or "").endswith('.json'):
             raise HTTPException(status_code=400, detail="Survey file must have .json extension")
         
         # Create directories if they don't exist

@@ -45,35 +45,19 @@ RUN echo "=== VERIFYING CRITICAL FILES AND DIRECTORIES ===" && \
     test -f /app/templates/index.html && echo "✅ index.html exists" || (echo "❌ index.html MISSING" && exit 1) && \
     test -f /app/templates/survey.html && echo "✅ survey.html exists" || (echo "❌ survey.html MISSING" && exit 1) && \
     echo "" && \
-    echo "=== Checking surveys/ ===" && \
+    echo "=== Checking surveys/ (images for /survey-images; JSON optional) ===" && \
     test -d /app/surveys && echo "✅ surveys/ directory exists" || (echo "❌ surveys/ MISSING" && exit 1) && \
     ls -lh /app/surveys/ && \
-    echo "" && \
-    echo "=== Checking survey JSON files ===" && \
-    test -f /app/surveys/pattern.json && echo "✅ pattern.json exists" || echo "⚠️  pattern.json missing" && \
-    test -f /app/surveys/warmup.json && echo "✅ warmup.json exists" || echo "⚠️  warmup.json missing" && \
-    echo "" && \
-    echo "=== Checking surveys/images/ ===" && \
-    test -d /app/surveys/images && echo "✅ surveys/images/ directory exists" || echo "⚠️  surveys/images/ missing" && \
-    if [ -d /app/surveys/images ]; then ls -lh /app/surveys/images/; fi && \
-    echo "" && \
-    echo "=== Checking assignment/ ===" && \
-    test -d /app/assignment && echo "✅ assignment/ directory exists" || echo "⚠️  assignment/ missing" && \
-    if [ -d /app/assignment ]; then ls -lh /app/assignment/; fi && \
-    echo "" && \
-    echo "=== Checking assignment PDFs ===" && \
-    test -f /app/assignment/pattern.pdf && echo "✅ pattern.pdf exists" || echo "⚠️  pattern.pdf missing" && \
-    test -f /app/assignment/warmup.pdf && echo "✅ warmup.pdf exists" || echo "⚠️  warmup.pdf missing" && \
-    echo "" && \
-    echo "=== Checking starter_code/ ===" && \
-    test -d /app/starter_code && echo "✅ starter_code/ directory exists" || echo "⚠️  starter_code/ missing" && \
-    if [ -d /app/starter_code ]; then ls -lh /app/starter_code/; fi && \
+    test -d /app/surveys/images && echo "✅ surveys/images/ exists" || (echo "❌ surveys/images/ MISSING" && exit 1) && \
+    ls -lh /app/surveys/images/ && \
     echo "" && \
     echo "=== File count summary ===" && \
-    echo "Survey JSONs: $(find /app/surveys -name '*.json' 2>/dev/null | wc -l)" && \
+    echo "Instructor default survey JSONs:" && \
+    test -f /app/surveys/instructor_default_pre_survey.json && echo "  ✅ instructor_default_pre_survey.json" || echo "  ⚠️  pre missing" && \
+    test -f /app/surveys/instructor_default_post_survey.json && echo "  ✅ instructor_default_post_survey.json" || echo "  ⚠️  post missing" && \
+    test -f /app/surveys/instructor_default_recurrent_survey.json && echo "  ✅ instructor_default_recurrent_survey.json" || echo "  ⚠️  recurrent missing" && \
+    echo "Other survey JSONs (optional): $(find /app/surveys -maxdepth 1 -name '*.json' 2>/dev/null | wc -l)" && \
     echo "Survey images: $(find /app/surveys/images -type f 2>/dev/null | wc -l)" && \
-    echo "Assignment PDFs: $(find /app/assignment -name '*.pdf' 2>/dev/null | wc -l)" && \
-    echo "Starter code files: $(find /app/starter_code -type f 2>/dev/null | wc -l)" && \
     echo "Templates: $(find /app/templates -name '*.html' 2>/dev/null | wc -l)" && \
     echo "" && \
     echo "✅ Verification complete!"
@@ -83,6 +67,7 @@ RUN mkdir -p \
     submissions \
     session_logs \
     logs \
+    surveys/quiz_assets \
     && chown -R appuser:appuser /app
 
 # Switch to non-root user

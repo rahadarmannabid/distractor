@@ -834,6 +834,17 @@
             return languageExtensions[language] || '.txt';
         }
 
+        /** image.src: shared file name → /survey-images/… ; quiz upload → quiz_id/filename → /quiz-images/… */
+        function surveyImageUrlFromSrc(src) {
+            if (!src || typeof src !== 'string') return '';
+            const t = src.trim();
+            if (t.indexOf('/') !== -1) {
+                const i = t.indexOf('/');
+                return '/quiz-images/' + encodeURIComponent(t.slice(0, i)) + '/' + t.slice(i + 1).split('/').map(encodeURIComponent).join('/');
+            }
+            return '/survey-images/' + encodeURIComponent(t);
+        }
+
         function surveySanitizeIdPart(s) {
             const t = String(s || 'unknown').replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80);
             return t || 'unknown';
@@ -936,7 +947,7 @@
                 if (this.surveyConfig.header_image) {
                     const headerImg = document.createElement('img');
                     headerImg.className = 'survey-header-image';
-                    headerImg.src = `/survey-images/${this.surveyConfig.header_image.src}`;
+                    headerImg.src = surveyImageUrlFromSrc(this.surveyConfig.header_image.src);
                     headerImg.alt = this.surveyConfig.header_image.alt || 'Survey header';
                     headerImg.onerror = () => {
                         console.error('Header image failed to load');
@@ -1279,7 +1290,7 @@
                     img.style.padding = imageConfig.padding;
                 }
                 
-                const imageSrc = `/survey-images/${imageConfig.src}`;
+                const imageSrc = surveyImageUrlFromSrc(imageConfig.src);
                 console.log(`🖼️ Loading: ${imageSrc}`);
                 
                 const loadingDiv = document.createElement('div');
@@ -1328,7 +1339,7 @@
                     const img = document.createElement('img');
                     img.className = 'question-image';
                     img.alt = imageConfig.alt || `Image ${index + 1}`;
-                    img.src = `/survey-images/${imageConfig.src}`;
+                    img.src = surveyImageUrlFromSrc(imageConfig.src);
                     img.loading = 'lazy';
                     
                     if (imageConfig.width) img.style.width = imageConfig.width;
@@ -1615,7 +1626,7 @@
                                 // Update per-problem survey flags
                                 authData.hasPreSurvey = nextData.has_pre_survey || false;
                                 authData.hasPostSurvey = nextData.has_post_survey || false;
-                                authData.periodicSurveyEnabled = nextData.periodic_survey_enabled || false;
+                                authData.periodicSurveyEnabled = nextData.periodic_survey_enabled === true;
                                 authData.periodicSurveyStart = nextData.periodic_survey_start || 5;
                                 authData.periodicSurveyInterval = nextData.periodic_survey_interval || 4;
                                 sessionStorage.setItem('authData', JSON.stringify(authData));

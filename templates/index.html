@@ -2998,12 +2998,12 @@ async function initializeFromURL() {
             startTime: authData.timestamp,
             pasteAllowed: authData.pasteAllowed !== undefined ? authData.pasteAllowed : 1,
             tabTrackingEnabled: authData.tabTrackingEnabled !== false,
-            periodicSurveyEnabled: authData.periodicSurveyEnabled || false,
+            periodicSurveyEnabled: authData.periodicSurveyEnabled === true,
             periodicSurveyStart: authData.periodicSurveyStart ?? null,
             periodicSurveyInterval: authData.periodicSurveyInterval ?? null,
             nextPeriodicSurveyAt: authData.periodicSurveyStart ?? null,
             periodicSurveysCompleted: 0,
-            finalSurveyDisabled: authData.finalSurveyDisabled || false,
+            finalSurveyDisabled: authData.finalSurveyDisabled === true,
             guessLogCount: 0,
             descLogCount: 0,
             suggestionsLogCount: 0,
@@ -3027,6 +3027,7 @@ async function initializeFromURL() {
             surveyData.surveyResponses = [];
             surveyData.periodicSurveyOccurrenceCount = 0;
             surveyData.analysisCount = 0;
+            surveyData.finalSurveyResponse = null;
             // Clear periodic survey storage to prevent restorePeriodicSurveysFromStorage from overwriting
             sessionStorage.removeItem(`periodicSurveys_${currentSession.sessionId}`);
         }
@@ -3266,11 +3267,13 @@ async function initializeFromURL() {
             addTerminalOutput(`Session ID: ${authData.sessionId}`, 'info');
             addTerminalOutput(`Database: Ready for logging`, 'info');
             
-            // ✅ Show final survey status
-            if (authData.finalSurveyDisabled) {
-                addTerminalOutput(`📋 Final Survey: DISABLED for this assignment`, 'warning');
+            // ✅ Show final survey status (match currentSession: strict booleans from auth JSON)
+            if (authData.finalSurveyDisabled === true) {
+                addTerminalOutput(`📋 Final Likert at submit: DISABLED for this assignment`, 'warning');
+            } else if (authData.periodicSurveyEnabled !== true) {
+                addTerminalOutput(`📋 In-IDE periodic / final Likert: OFF (recurrent surveys not enabled)`, 'info');
             } else {
-                addTerminalOutput(`📋 Final Survey: ENABLED (will appear at submission)`, 'info');
+                addTerminalOutput(`📋 Final Likert at submit: ON (when you have periodic survey questions)`, 'info');
             }
             
             if (authData.pasteAllowed === 0 || authData.pasteAllowed === "0") {
@@ -4371,6 +4374,16 @@ function showFinalSurvey() {
     
     addTerminalOutput('Please complete the final survey before submitting your code', 'info');
 }
+function surveyImageUrlFromSrc(src) {
+    if (!src || typeof src !== 'string') return '';
+    const t = src.trim();
+    if (t.indexOf('/') !== -1) {
+        const i = t.indexOf('/');
+        return '/quiz-images/' + encodeURIComponent(t.slice(0, i)) + '/' + t.slice(i + 1).split('/').map(encodeURIComponent).join('/');
+    }
+    return '/survey-images/' + encodeURIComponent(t);
+}
+
 function generateSurveyHTML(questions) {
     return questions.map((question, index) => {
         // Support both simple string questions and rich question objects
@@ -4420,9 +4433,15 @@ function generateSurveyHTML(questions) {
             inputHTML += '</div>';
         }
 
+        let imageHTML = '';
+        if (q.image && q.image.src) {
+            const url = surveyImageUrlFromSrc(String(q.image.src).trim());
+            imageHTML = `<div class="survey-question-image" style="margin:8px 0;"><img src="${url}" alt="" style="max-width:100%;max-height:280px;border-radius:6px;border:1px solid #444;" loading="lazy"/></div>`;
+        }
+        const qLine = `<div class="survey-question-text">Q${index + 1}: ${q.question}${reqMark}</div>`;
+
         return `<div class="survey-question" data-required="${isRequired}" data-question-id="${q.id || 'q_'+index}">
-            <div class="survey-question-text">Q${index + 1}: ${q.question}${reqMark}</div>
-            ${inputHTML}
+            ${qLine}${imageHTML}${inputHTML}
         </div>`;
     }).join('');
 }
@@ -5114,7 +5133,11 @@ async function loadSurveyQuestions() {
     }
 
     function applyDefaults() {
-        surveyData.questions = defaultQuestions;
+        if (currentSession && !currentSession.periodicSurveyEnabled) {
+            surveyData.questions = [];
+        } else {
+            surveyData.questions = defaultQuestions;
+        }
         applyInterval(fallbackInterval);
     }
 
@@ -5137,15 +5160,15 @@ async function loadSurveyQuestions() {
             const config = await response.json();
 
             if (isQuiz && config.periodic_survey) {
-                // Quiz-based: use rich question objects from periodic_survey
+                // Quiz-based: only when instructor enabled recurrent AND provided questions (no default Likert fallback)
                 const ps = config.periodic_survey;
                 const questions = ps.questions || [];
-                if (questions.length > 0) {
-                    // Store as rich objects; generateSurveyHTML handles both strings and objects
+                const recurrentOn = ps.enabled === true;
+                if (recurrentOn && questions.length > 0) {
                     surveyData.questions = questions;
                     surveyData.questionsAreRich = true;
                 } else {
-                    surveyData.questions = defaultQuestions;
+                    surveyData.questions = [];
                 }
                 const interval = Number(ps.interval);
                 applyInterval(!Number.isNaN(interval) && interval > 0 ? interval : fallbackInterval);
@@ -5157,9 +5180,16 @@ async function loadSurveyQuestions() {
                         currentSession.nextPeriodicSurveyAt = startVal;
                     }
                 }
+            } else if (isQuiz) {
+                surveyData.questions = [];
+                applyInterval(fallbackInterval);
             } else {
-                // Global config: simple string questions
-                surveyData.questions = Array.isArray(config.questions) && config.questions.length ? config.questions : defaultQuestions;
+                // Global (non-quiz): env-driven periodic — only load Likert list when periodic surveys are enabled
+                if (!currentSession || !currentSession.periodicSurveyEnabled) {
+                    surveyData.questions = [];
+                } else {
+                    surveyData.questions = Array.isArray(config.questions) && config.questions.length ? config.questions : defaultQuestions;
+                }
                 const interval = Number(config.feedback_interval);
                 applyInterval(!Number.isNaN(interval) && interval > 0 ? interval : fallbackInterval);
             }
@@ -5527,15 +5557,18 @@ async function submitToDatabase() {
     // Set submission flag to prevent any periodic surveys during submission process
     isSubmissionInProgress = true;
 
-    // Check if final periodic survey is needed
-    if (surveyData.questions.length > 0 && 
-        !surveyData.finalSurveyResponse && 
-        !currentSession.finalSurveyDisabled) {
+    // Check if final periodic survey is needed (same gate as mid-task periodic: must be enabled)
+    if (surveyData.questions.length > 0 &&
+        !surveyData.finalSurveyResponse &&
+        !currentSession.finalSurveyDisabled &&
+        currentSession.periodicSurveyEnabled) {
         addTerminalOutput('📋 Final periodic survey required before submission...', 'info');
         showFinalSurvey();
         return; // Will continue after final survey
     } else if (currentSession.finalSurveyDisabled) {
         addTerminalOutput('✅ Final periodic survey skipped (disabled for this assignment)', 'success');
+    } else if (!currentSession.periodicSurveyEnabled) {
+        addTerminalOutput('✅ Final Likert skipped (recurrent surveys not enabled for this problem)', 'info');
     }
     
     // If no final periodic survey was shown, check if we need to download now
@@ -5649,7 +5682,7 @@ async function checkAndShowPostSurvey() {
                 authData.starterFiles = nextData.starter_files;
                 authData.hasPreSurvey = nextData.has_pre_survey || false;
                 authData.hasPostSurvey = nextData.has_post_survey || false;
-                authData.periodicSurveyEnabled = nextData.periodic_survey_enabled || false;
+                authData.periodicSurveyEnabled = nextData.periodic_survey_enabled === true;
                 authData.periodicSurveyStart = nextData.periodic_survey_start || 5;
                 authData.periodicSurveyInterval = nextData.periodic_survey_interval || 4;
                 sessionStorage.setItem('authData', JSON.stringify(authData));
