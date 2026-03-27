@@ -1,8 +1,10 @@
 services:
   guessing_ide:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: guessing_ide
-    image: guessing_ide:latest
+    image: rahadarmannabid/codeoracle:latest
     ports:
       - "8000:8000"
     

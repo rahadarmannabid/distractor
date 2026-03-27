@@ -79,11 +79,17 @@ python main.py
 - Admin area: `/admin` (configure as deployed)
 - Instructor area: `/instructor`
 
+### Docker Hub
+
+Container image **`rahadarmannabid/codeoracle`** (`build-and-push.sh` publishes **amd64 + arm64** for hosts like Koyeb). Details: **[DOCKER.md](./DOCKER.md)**.
+
 ---
 
 ## Project layout
 
 ```
+├── Dockerfile           # Container build (Hub-safe: no .env in image)
+├── DOCKER.md            # Push to Docker Hub, run on server
 ├── main.py              # FastAPI app, AI routes, editor API, surveys
 ├── admin.py             # Router: /admin
 ├── instructor.py        # Router: /instructor

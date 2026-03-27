@@ -71,7 +71,6 @@ desktop.ini
 # ============================================
 # DOCKER
 # ============================================
-Dockerfile
 docker-compose*.yml
 .dockerignore
 
@@ -138,8 +137,8 @@ credentials/
 # ============================================
 # ENVIRONMENT FILES
 # ============================================
-# NOTE: .env is NOT excluded - it will be included in the image
-# Only exclude backup and environment-specific files
+# Never bake secrets into images (Docker Hub / CI). Pass env at runtime.
+.env
 .env.local
 .env.*.local
 .env.backup
@@ -177,7 +176,6 @@ yarn.lock
 # ============================================
 # CRITICAL: THESE ARE INCLUDED (NOT in .dockerignore)
 # ============================================
-# ✅ .env (INCLUDED - will be baked into image)
 # ✅ surveys/ (at least surveys/images/ for /survey-images)
 # ✅ templates/
 # (assignment/, starter_code/, surveys/*.json optional — Firebase quiz is primary)

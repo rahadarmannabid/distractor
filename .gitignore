@@ -70,11 +70,8 @@ desktop.ini
 .gitmodules
 
 # ============================================
-# DOCKER
+# DOCKER (Dockerfile / compose are tracked for Hub & deploy)
 # ============================================
-Dockerfile
-docker-compose*.yml
-.dockerignore
 
 # ============================================
 # DOCUMENTATION
@@ -83,6 +80,7 @@ docker-compose*.yml
 *.md
 !README.md
 !readme.md
+!DOCKER.md
 frontend.txt
 docs/
 documentation/

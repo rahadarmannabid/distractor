@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -757,6 +757,8 @@ class AuthResponse(BaseModel):
     periodic_survey_enabled: bool = False
     periodic_survey_start: int = 5
     final_survey_disabled: bool = False
+    current_problem_index: int = 0
+    total_problems: int = 1
 
 class ActivityEntry(BaseModel):
     timestamp: str
@@ -953,6 +955,92 @@ def firebase_rtdb_set_with_retry(ref, value, *, max_attempts: int = 3) -> bool:
                 time.sleep(0.35 * (2**attempt))
     logger.error("Firebase set failed after %s attempts: %s", max_attempts, last_err)
     return False
+
+
+def _sanitize_firebase_key_segment(s: str) -> str:
+    """RTDB keys: avoid . # $ [ ] / and long paths."""
+    t = "".join(c if (c.isalnum() or c in "-_") else "_" for c in (s or ""))
+    return (t or "user")[:96]
+
+
+def append_periodic_survey_to_firebase(session_id: str, survey_data: Dict[str, Any]) -> bool:
+    """Append one periodic/final survey record under sessions/{id}/periodic_surveys."""
+    if not firebase_db:
+        return False
+    try:
+        session_ref = firebase_db.child("sessions").child(session_id)
+        existing = session_ref.child("periodic_surveys").get() or []
+        if not isinstance(existing, list):
+            existing = []
+        existing.append(survey_data)
+        per_ref = session_ref.child("periodic_surveys")
+        return firebase_rtdb_set_with_retry(per_ref, existing, max_attempts=3)
+    except Exception as e:
+        logger.error("append_periodic_survey_to_firebase failed: %s", e)
+        return False
+
+
+def load_session_log_from_disk(session_id: str) -> Optional[SessionLog]:
+    """Load SessionLog JSON written by save_session_to_local."""
+    try:
+        logs_dir = Path(os.getenv("SUBMISSIONS_DIR", "session_logs"))
+        log_file = logs_dir / f"{session_id}.json"
+        if not log_file.is_file():
+            return None
+        raw = json.loads(log_file.read_text(encoding="utf-8"))
+        return SessionLog.model_validate(raw)
+    except ValidationError as e:
+        logger.warning("SessionLog validation failed for %s: %s", session_id, e)
+        return None
+    except Exception as e:
+        logger.warning("load_session_log_from_disk failed for %s: %s", session_id, e)
+        return None
+
+
+def find_latest_quiz_session_log_path(user_id: str, quiz_id: str) -> Optional[Path]:
+    """Most recent session file for this user+quiz (disk resume when Firebase unavailable)."""
+    logs_dir = Path(os.getenv("SUBMISSIONS_DIR", "session_logs"))
+    if not logs_dir.is_dir():
+        return None
+    prefix = f"{user_id}_quiz_{quiz_id[:8]}_"
+    candidates = [p for p in logs_dir.iterdir() if p.is_file() and p.suffix == ".json" and p.name.startswith(prefix)]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def quiz_resume_ref(quiz_id: str, user_id: str):
+    if not firebase_db:
+        return None
+    return firebase_db.child("quiz_resume").child(quiz_id[:48]).child(_sanitize_firebase_key_segment(user_id))
+
+
+def quiz_resume_write(
+    quiz_id: str,
+    user_id: str,
+    session_id: str,
+    current_problem_index: int,
+    total_problems: int,
+    *,
+    completed: bool = False,
+) -> None:
+    if not firebase_db:
+        return
+    try:
+        ref = quiz_resume_ref(quiz_id, user_id)
+        if ref is None:
+            return
+        payload = {
+            "session_id": session_id,
+            "current_problem_index": current_problem_index,
+            "total_problems": total_problems,
+            "completed": completed,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "user_id": user_id,
+        }
+        firebase_rtdb_set_with_retry(ref, payload, max_attempts=3)
+    except Exception as e:
+        logger.warning("quiz_resume_write failed: %s", e)
 
 
 def firebase_rtdb_update_with_retry(ref, value: Dict[str, Any], *, max_attempts: int = 3) -> bool:
@@ -1790,8 +1878,11 @@ async def analyze_code(request: CodeRequest):
                 suggestion_kind="next_line",
             )
 
-        # Step 1: Analyze what problem the code is trying to solve
-        problem_description = analyze_problem_statement(code, language=language)
+        # Step 1: Analyze what problem the code is trying to solve (thread pool — do not block event loop)
+        loop = asyncio.get_event_loop()
+        problem_description = await loop.run_in_executor(
+            None, lambda: analyze_problem_statement(code, language=language)
+        )
         
         # Clean problem description
         problem_description = re.sub(r'^\*\*.*?\*\*:\s*', '', problem_description)
@@ -2716,6 +2807,33 @@ async def submit_survey(request: SurveySubmission):
             json.dump(request.dict(), f, indent=2, default=str)
         
         logger.info(f"Survey with AI history saved: {request.user_id} - {request.survey_type} survey at analysis {request.analysis_count}")
+
+        # Firebase: same path as /log-periodic-survey (incremental, not only at final submit)
+        if request.survey_type in ("periodic", "final"):
+            fb_payload: Dict[str, Any] = {
+                "survey_type": request.survey_type,
+                "analysis_count": request.analysis_count,
+                "timestamp": request.timestamp,
+                "user_id": request.user_id,
+                "assignment_key": request.assignment_key,
+                "responses": [r.dict() for r in request.responses],
+            }
+            if request.ai_history_context:
+                fb_payload["ai_history_context"] = request.ai_history_context
+            if append_periodic_survey_to_firebase(request.session_id, fb_payload):
+                logger.info("Periodic/final survey appended to Firebase for session %s", request.session_id)
+            if request.session_id in active_sessions:
+                session_log = active_sessions[request.session_id]
+                session_log.periodic_surveys.append(fb_payload)
+                save_session_to_local(session_log)
+                try:
+                    await asyncio.to_thread(
+                        lambda: checkpoint_session_to_firebase(
+                            session_log, "periodic_survey_submit", force=True
+                        )
+                    )
+                except Exception as fb_e:
+                    logger.warning("Firebase checkpoint after submit-survey failed: %s", fb_e)
         
         return {
             "status": "success",
@@ -3308,7 +3426,9 @@ async def authenticate_user(request: AuthRequest):
             starter_code=starter_code,
             periodic_survey_enabled=periodic_enabled,
             periodic_survey_start=periodic_config["start_after_suggestions"],
-            final_survey_disabled=final_survey_disabled
+            final_survey_disabled=final_survey_disabled,
+            current_problem_index=0,
+            total_problems=1,
         )
         
     except HTTPException:
@@ -3332,19 +3452,14 @@ async def log_periodic_survey(request: Request):
         # Log to Firebase if available
         if firebase_db:
             try:
-                session_ref = firebase_db.child('sessions').child(session_id)
-                
-                # Get existing periodic surveys or create new array
-                existing = session_ref.child('periodic_surveys').get() or []
-                if not isinstance(existing, list):
-                    existing = []
-                
-                existing.append(survey_data)
-                per_ref = session_ref.child("periodic_surveys")
-                if not firebase_rtdb_set_with_retry(per_ref, existing, max_attempts=3):
+                if append_periodic_survey_to_firebase(session_id, survey_data):
+                    logger.info(
+                        "Periodic survey #%s logged for session %s",
+                        survey_data.get("survey_number"),
+                        session_id,
+                    )
+                else:
                     logger.error("Firebase periodic_surveys write failed for session %s", session_id)
-                
-                logger.info(f"Periodic survey #{survey_data.get('survey_number')} logged for session {session_id}")
             except Exception as e:
                 logger.error(f"Error logging to Firebase: {e}")
         
@@ -3982,6 +4097,112 @@ async def student_quiz_entry(request: Request, access_code: str):
     })
 
 
+def build_quiz_join_response(
+    session_log: SessionLog,
+    quiz_data: Dict[str, Any],
+    programming_language: str,
+    problem_idx: int,
+    message: str,
+) -> Dict[str, Any]:
+    """Shared JSON shape for /quiz/join and resume."""
+    problems = quiz_data.get("problems", []) or []
+    prob = problems[problem_idx] if problem_idx < len(problems) else {}
+    problem_description = prob.get("problem_statement", "")
+    quiz_starter = prob.get("starter_code", {})
+    lang_starter = quiz_starter.get(programming_language) if quiz_starter else None
+
+    starter_files = None
+    starter_code = None
+    if isinstance(lang_starter, list) and lang_starter:
+        starter_files = lang_starter
+        starter_code = lang_starter[0].get("content", "") if lang_starter else ""
+    elif isinstance(lang_starter, str) and lang_starter:
+        starter_code = lang_starter
+    else:
+        starter_code = get_starter_code(quiz_data.get("title", ""), programming_language)
+
+    has_pre = prob.get("pre_survey_enabled", False) and bool(prob.get("pre_survey"))
+    has_post = prob.get("post_survey_enabled", False) and bool(prob.get("post_survey"))
+    periodic_enabled = prob.get("recurrent_survey_enabled", False) and bool(prob.get("recurrent_survey"))
+
+    return {
+        "status": "success",
+        "message": message,
+        "condition": session_log.condition,
+        "session_id": session_log.session_id,
+        "problem_description": problem_description if session_log.condition == 1 else None,
+        "programming_language": programming_language,
+        "starter_code": starter_code,
+        "starter_files": starter_files,
+        "paste_allowed": 1 if quiz_data.get("paste_allowed", True) else 0,
+        "tab_tracking_enabled": quiz_data.get("tab_tracking_enabled", True),
+        "has_pre_survey": has_pre,
+        "has_post_survey": has_post,
+        "periodic_survey_enabled": periodic_enabled,
+        "periodic_survey_start": int(prob.get("recurrent_survey_start", 5)),
+        "periodic_survey_interval": int(prob.get("recurrent_survey_interval", 4)),
+        "final_survey_disabled": False,
+        "quiz_id": session_log.quiz_id,
+        "quiz_teaser": quiz_data.get("teaser", ""),
+        "time_limit_minutes": quiz_data.get("time_limit_minutes", 0),
+        "total_problems": len(problems),
+        "current_problem_index": problem_idx,
+    }
+
+
+def try_resume_quiz_session(
+    user_id: str,
+    quiz_id: str,
+    quiz_data: Dict[str, Any],
+    programming_language: str,
+) -> Optional[Dict[str, Any]]:
+    """Restore in-progress quiz from Firebase pointer or latest disk session log."""
+    problems = quiz_data.get("problems", []) or []
+    if not problems:
+        return None
+
+    sl: Optional[SessionLog] = None
+    if firebase_db:
+        ref = quiz_resume_ref(quiz_id, user_id)
+        if ref:
+            rdata = ref.get()
+            if isinstance(rdata, dict) and not rdata.get("completed"):
+                sid = (rdata.get("session_id") or "").strip()
+                if sid:
+                    sl = load_session_log_from_disk(sid)
+
+    if sl is None:
+        p = find_latest_quiz_session_log_path(user_id, quiz_id)
+        if p:
+            sl = load_session_log_from_disk(p.stem)
+
+    if sl is None:
+        return None
+    if sl.quiz_id != quiz_id or sl.user_id != user_id:
+        return None
+    if sl.total_problems != len(problems):
+        logger.info("Quiz problem count changed; skipping resume for %s", user_id)
+        return None
+
+    idx = int(sl.current_problem_index or 0)
+    if idx >= len(problems):
+        return None
+
+    idx = max(0, min(idx, len(problems) - 1))
+    sl.current_problem_index = idx
+    prob = problems[idx]
+    if sl.condition == 1:
+        sl.problem_description = prob.get("problem_statement", "")
+
+    active_sessions[sl.session_id] = sl
+    save_session_to_local(sl)
+    quiz_resume_write(quiz_id, user_id, sl.session_id, idx, len(problems), completed=False)
+
+    return build_quiz_join_response(
+        sl, quiz_data, programming_language, idx, "Resumed quiz session"
+    )
+
+
 @app.post("/quiz/join")
 async def student_quiz_join(request: Request):
     """Authenticate a student into an instructor-created quiz."""
@@ -4035,39 +4256,20 @@ async def student_quiz_join(request: Request):
     # Normalize legacy quiz data to new format
     quiz_data = normalize_quiz_data(quiz_data)
 
-    # Randomly pick one condition from the list
+    resumed = try_resume_quiz_session(user_id, quiz_id, quiz_data, programming_language)
+    if resumed:
+        return resumed
+
     import random
+
     conditions = quiz_data.get("conditions", [1])
     condition = random.choice(conditions)
 
-    # Create session
     session_id = f"{user_id}_quiz_{quiz_id[:8]}_{uuid.uuid4().hex[:8]}"
-
-    # Load first problem
     problems = quiz_data.get("problems", [])
     first_problem = problems[0] if problems else {}
     problem_description = first_problem.get("problem_statement", "")
 
-    # Get starter code from first problem
-    quiz_starter = first_problem.get("starter_code", {})
-    lang_starter = quiz_starter.get(programming_language) if quiz_starter else None
-
-    starter_files = None
-    starter_code = None
-    if isinstance(lang_starter, list) and lang_starter:
-        starter_files = lang_starter
-        starter_code = lang_starter[0].get("content", "") if lang_starter else ""
-    elif isinstance(lang_starter, str) and lang_starter:
-        starter_code = lang_starter
-    else:
-        starter_code = get_starter_code(quiz_data.get("title", ""), programming_language)
-
-    # Check for surveys (per-problem)
-    has_pre = first_problem.get("pre_survey_enabled", False) and bool(first_problem.get("pre_survey"))
-    has_post = first_problem.get("post_survey_enabled", False) and bool(first_problem.get("post_survey"))
-    periodic_enabled = first_problem.get("recurrent_survey_enabled", False) and bool(first_problem.get("recurrent_survey"))
-
-    # Create in-memory session
     session_log = SessionLog(
         user_id=user_id,
         assignment_id=f"quiz_{quiz_id[:8]}",
@@ -4094,30 +4296,11 @@ async def student_quiz_join(request: Request):
 
     active_sessions[session_id] = session_log
     save_session_to_local(session_log)
+    quiz_resume_write(quiz_id, user_id, session_id, 0, len(problems), completed=False)
 
-    return {
-        "status": "success",
-        "message": "Joined quiz successfully",
-        "condition": condition,
-        "session_id": session_id,
-        "problem_description": problem_description if condition == 1 else None,
-        "programming_language": programming_language,
-        "starter_code": starter_code,
-        "starter_files": starter_files,
-        "paste_allowed": 1 if quiz_data.get("paste_allowed", True) else 0,
-        "tab_tracking_enabled": quiz_data.get("tab_tracking_enabled", True),
-        "has_pre_survey": has_pre,
-        "has_post_survey": has_post,
-        "periodic_survey_enabled": periodic_enabled,
-        "periodic_survey_start": int(first_problem.get("recurrent_survey_start", 5)),
-        "periodic_survey_interval": int(first_problem.get("recurrent_survey_interval", 4)),
-        "final_survey_disabled": False,
-        "quiz_id": quiz_id,
-        "quiz_teaser": quiz_data.get("teaser", ""),
-        "time_limit_minutes": quiz_data.get("time_limit_minutes", 0),
-        "total_problems": len(problems),
-        "current_problem_index": 0,
-    }
+    return build_quiz_join_response(
+        session_log, quiz_data, programming_language, 0, "Joined quiz successfully"
+    )
 
 
 @app.post("/quiz/next-problem")
@@ -4145,6 +4328,15 @@ async def quiz_next_problem(request: Request):
     idx = session_log.current_problem_index
 
     if idx >= session_log.total_problems:
+        if session_log.quiz_id:
+            quiz_resume_write(
+                session_log.quiz_id,
+                session_log.user_id,
+                session_id,
+                session_log.total_problems,
+                session_log.total_problems,
+                completed=True,
+            )
         return {"status": "complete", "message": "All problems completed"}
 
     # Reset recurrent survey counter for the new problem
@@ -4166,6 +4358,15 @@ async def quiz_next_problem(request: Request):
 
     problems = quiz_data.get("problems", [])
     if idx >= len(problems):
+        if session_log.quiz_id:
+            quiz_resume_write(
+                session_log.quiz_id,
+                session_log.user_id,
+                session_id,
+                session_log.total_problems,
+                session_log.total_problems,
+                completed=True,
+            )
         return {"status": "complete", "message": "All problems completed"}
 
     problem = problems[idx]
@@ -4192,6 +4393,15 @@ async def quiz_next_problem(request: Request):
         session_log.problem_description = problem_description
 
     save_session_to_local(session_log)
+    if session_log.quiz_id:
+        quiz_resume_write(
+            session_log.quiz_id,
+            session_log.user_id,
+            session_id,
+            idx,
+            session_log.total_problems,
+            completed=False,
+        )
 
     return {
         "status": "next",

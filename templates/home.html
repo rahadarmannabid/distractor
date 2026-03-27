@@ -1049,7 +1049,9 @@
                     starterCode: data.starter_code || null,
                     periodicSurveyEnabled: data.periodic_survey_enabled === true,
                     periodicSurveyStart: data.periodic_survey_start || 5,
-                    finalSurveyDisabled: data.final_survey_disabled === true
+                    finalSurveyDisabled: data.final_survey_disabled === true,
+                    currentProblemIndex: typeof data.current_problem_index === 'number' ? data.current_problem_index : 0,
+                    totalProblems: typeof data.total_problems === 'number' ? data.total_problems : 1
                 }));
 
                 // Download assignment PDF
