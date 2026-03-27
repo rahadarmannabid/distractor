@@ -137,6 +137,13 @@
 
     .hidden { display: none !important; }
 
+    .user-log-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .user-log-link:hover { text-decoration: underline; color: #7dd3fc; }
+
     .data-coverage {
       background: var(--panel);
       border: 1px solid var(--border);
@@ -586,7 +593,7 @@
         <div class="table-card-head">
           <div>
             <h3>Individual student sessions</h3>
-            <p>Per-session metrics, final code, and pre/post/periodic survey Q&amp;A (expandable).</p>
+            <p>Per-session metrics, final code, and pre/post/periodic survey Q&amp;A (expandable). Click a <strong>user id</strong> to open the <strong>AI activity log</strong> (suggestions, accept/reject, snapshots).</p>
           </div>
           <div>
             <span class="cell-muted" id="student-sessions-count"></span>
@@ -789,9 +796,11 @@
         var totalRejects = sum(sumBox.rejects_total);
         var medAccept = median(sumBox.accepts_total || []);
         var medReject = median(sumBox.rejects_total || []);
+        var runsArr = sumBox.runs_total || [];
+        var avgCompilation = runsArr.length ? sum(runsArr) / runsArr.length : 0;
         kpi.innerHTML = [
           '<div class="kpi live"><div class="label">Active now</div><div class="value">' + liveTotal + '</div><div class="hint">This server</div></div>',
-          '<div class="kpi"><div class="label">Sessions</div><div class="value">' + n + '</div><div class="hint">In Firebase merge</div></div>',
+          '<div class="kpi"><div class="label">Avg. compilation</div><div class="value">' + fmtNum(avgCompilation) + '</div><div class="hint">Mean code runs per session</div></div>',
           '<div class="kpi success"><div class="label">Completed</div><div class="value">' + (data.completed_assignments || 0) + '</div><div class="hint">Final submit</div></div>',
           '<div class="kpi"><div class="label">Med. session time</div><div class="value">' + fmtNum(summary.median_session_time_seconds) + '</div><div class="hint">sec · completed (focus if logged)</div></div>',
           '<div class="kpi warn"><div class="label">Med. AI gen</div><div class="value">' + fmtNum(summary.median_ai_generations) + '</div><div class="hint">per session</div></div>',
@@ -1242,8 +1251,16 @@
               '</tbody></table>';
 
             var uidEnc = encodeURIComponent(String(row.user_id || ''));
+            var uidRaw = String(row.user_id || '');
             return {
-              user: escHtml(row.user_id),
+              user:
+                '<a class="user-log-link" href="/instructor/quiz/' +
+                encodeURIComponent(quizId) +
+                '/activity-log?user_id=' +
+                uidEnc +
+                '" title="Open AI activity log for this user">' +
+                escHtml(uidRaw) +
+                '</a>',
               time: formatTimeCell(row),
               perProblem: '<div class="cell-multi per-problem-mini-wrap">' + perProblemHtml + '</div>',
               aiGen: formatNum(row.ai_generated_total, 0),

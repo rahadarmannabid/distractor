@@ -2664,7 +2664,9 @@ async def log_activities(request: ActivityLogRequest):
                     session_log.activity_summary.total_suggestion_clicks += 1
                 elif activity_type == "history_interaction":
                     session_log.activity_summary.total_history_views += 1
-                
+                elif activity_type == "history_check":
+                    session_log.activity_summary.total_history_views += 1
+
                 # AI analysis activities
                 elif activity_type == "ai_analysis_trigger":
                     session_log.activity_summary.total_ai_analyses += 1

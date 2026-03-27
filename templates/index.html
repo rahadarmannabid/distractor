@@ -2357,12 +2357,6 @@ function saveProgress() {
         updateAutosaveIndicator('saved');
         scheduleServerEditorCheckpoint();
         
-        logActivity('autosave', {
-            data_size: compressed.length,
-            code_length: progressData.editor.code.length,
-            timestamp: progressData.timestamp
-        });
-        
     } catch (error) {
         console.error('Auto-save failed:', error);
         updateAutosaveIndicator('error', 'Save failed');
@@ -2481,11 +2475,6 @@ function applyRestoredProgress(progressData) {
         }
         
         const savedTime = new Date(progressData.timestamp);
-        logActivity('progress_restored', {
-            saved_timestamp: progressData.timestamp,
-            code_length: progressData.editor.code.length,
-            age_minutes: Math.round((Date.now() - progressData.timestamp) / (1000 * 60))
-        });
         
         updateAutosaveIndicator('saved');
         refreshProblemPanelAiHistory();
@@ -2844,10 +2833,31 @@ let idleTimer = null;
 let userTypingTimer = null;
 let currentEditingActivity = null;
 
+// Only these activity types are recorded (research / instrumentation scope).
+var ALLOWED_ACTIVITY_TYPES = {
+    session_start: true,
+    code_editing_insert: true,
+    code_editing_delete: true,
+    code_editing_modify: true,
+    paste_attempt: true,
+    ai_analysis_trigger: true,
+    ai_analysis_complete: true,
+    copilot_popup_cleared_for_analysis: true,
+    copilot_popup_accept: true,
+    copilot_popup_reject: true,
+    code_execution: true,
+    terminal_clear: true,
+    history_check: true
+};
+
 // Core Activity Logging Function
 function logActivity(activityType, activityDetails = {}, sessionContext = {}) {
     if (!currentSession.sessionId) {
         console.warn('No session ID available for activity logging');
+        return;
+    }
+    var t = String(activityType || '');
+    if (!ALLOWED_ACTIVITY_TYPES[t]) {
         return;
     }
     
@@ -2916,14 +2926,8 @@ function updateUserInteraction() {
 function resetIdleTimer() {
     if (idleTimer) {
         clearTimeout(idleTimer);
+        idleTimer = null;
     }
-    
-    idleTimer = setTimeout(() => {
-        logActivity('idle', {
-            start_time: new Date().toISOString(),
-            idle_duration: 30000
-        });
-    }, 30000); // 30 seconds
 }
 
 function savePeriodicSurveysToStorage() {
@@ -4458,11 +4462,20 @@ function _copilotHandleAccept() {
         window.editor.setPosition({ lineNumber: newLine, column: newCol });
         window.editor.focus();
 
+        // Full buffer after insertion — this is the post-decision snapshot for analytics / exports.
+        var codeAfterAccept = '';
+        try {
+            codeAfterAccept = window.editor.getValue();
+        } catch (snapErr) {
+            console.warn('copilot accept snapshot:', snapErr);
+        }
+
         logActivity('copilot_popup_accept', {
             suggestion_type: _copilotPopupType,
             suggestion_kind: _copilotSuggestionKind,
             suggestion_text: _copilotPopupText.substring(0, 80),
-            insertion_line: insertLine
+            insertion_line: insertLine,
+            user_code_snapshot: codeAfterAccept
         });
         currentSession.suggestionClickCount++;
         checkSuggestionBasedPeriodicSurvey();
@@ -4478,9 +4491,16 @@ function _copilotHandleAccept() {
 function _copilotHandleReject() {
     try {
         recordSuggestionResponse(false);
+        var codeAtReject = '';
+        try {
+            codeAtReject = window.editor && window.editor.getValue ? window.editor.getValue() : '';
+        } catch (snapErr) {
+            console.warn('copilot reject snapshot:', snapErr);
+        }
         logActivity('copilot_popup_reject', {
             suggestion_type: _copilotPopupType,
-            suggestion_text: _copilotPopupText.substring(0, 80)
+            suggestion_text: _copilotPopupText.substring(0, 80),
+            user_code_snapshot: codeAtReject
         });
         currentSession.suggestionClickCount++;
         checkSuggestionBasedPeriodicSurvey();
@@ -4616,14 +4636,6 @@ function showPeriodicSurvey() {
     // CAPTURE AI HISTORY NOW (not later)
     const aiHistorySnapshot = collectAIHistoryContext();
     
-    // ACTIVITY LOG: Survey start
-    logActivity('survey_interaction', {
-        survey_type: 'periodic',
-        action: 'survey_started',
-        analysis_count_trigger: surveyData.analysisCount,
-        occurrence_number: surveyData.periodicSurveyOccurrenceCount
-    });
-    
     surveyData.pendingSurvey = true;
     blockEditor(true);
     
@@ -4669,13 +4681,6 @@ function showFinalSurvey() {
     
     // CAPTURE AI HISTORY NOW (not at submission time)
     const aiHistorySnapshot = collectAIHistoryContext();
-    
-    // ACTIVITY LOG: Final survey start
-    logActivity('survey_interaction', {
-        survey_type: 'final_periodic',
-        action: 'survey_started',
-        occurrence_number: surveyData.periodicSurveyOccurrenceCount
-    });
     
     blockEditor(true);
     
@@ -5012,16 +5017,6 @@ async function submitPeriodicSurvey() {
         blockEditor(false);
         surveyData.pendingSurvey = false;
         
-        // ACTIVITY LOG: Survey completed with AI history
-        logActivity('survey_interaction', {
-            survey_type: 'periodic',
-            action: 'survey_completed',
-            responses_count: responses.length,
-            ai_history_included: true,
-            ai_analyses_at_survey: surveyData.analysisCount,
-            occurrence_number: surveyData.periodicSurveyOccurrenceCount
-        });
-        
         const aiHistoryCount = currentSession.guessHistory.length;
         addTerminalOutput('Survey completed successfully - you can continue coding!', 'success');
         addTerminalOutput(`AI History: ${aiHistoryCount} analyses captured with survey`, 'info');
@@ -5070,15 +5065,6 @@ async function submitFinalSurvey() {
         
         // Hide the modal
         document.getElementById('surveyModal').classList.add('hidden');
-        
-        // ACTIVITY LOG: Final survey completed with AI history
-        logActivity('survey_interaction', {
-            survey_type: 'final_periodic',
-            action: 'survey_completed',
-            responses_count: responses.length,
-            ai_history_included: true,
-            total_session_analyses: surveyData.analysisCount
-        });
         
         const aiHistoryCount = currentSession.guessHistory.length;
         addTerminalOutput('Final periodic survey completed!', 'success');
@@ -5246,12 +5232,6 @@ async function downloadCodeFile() {
             var blob = new Blob([e.content], { type: 'text/plain;charset=utf-8' });
             triggerBlobDownload(blob, e.filename);
             addTerminalOutput('✅ Code downloaded as: ' + e.filename, 'success');
-            logActivity('code_download', {
-                file_name: e.filename,
-                language: language,
-                code_length: e.content.length,
-                download_trigger: 'final_survey_completion'
-            });
             return true;
         }
 
@@ -5268,13 +5248,6 @@ async function downloadCodeFile() {
         var zipName = zipStem + '.zip';
         triggerBlobDownload(zipBlob, zipName);
         addTerminalOutput('✅ Downloaded ' + entries.length + ' files in ' + zipName + ' (extract for separate sources)', 'success');
-        logActivity('code_download', {
-            file_name: zipName,
-            language: language,
-            code_length: totalChars,
-            download_trigger: 'final_survey_completion',
-            file_count: entries.length
-        });
 
         return true;
     } catch (error) {
@@ -5560,6 +5533,12 @@ function initProblemPanelTabs() {
         tabAi.tabIndex = isProblem ? -1 : 0;
         panelProblem.hidden = !isProblem;
         panelAi.hidden = isProblem;
+        if (!isProblem) {
+            logActivity('history_check', {
+                panel: 'ai_history_tab',
+                problem_index: typeof currentSession.currentProblemIndex === 'number' ? currentSession.currentProblemIndex : 0
+            });
+        }
     }
 
     tabProblem.addEventListener('click', function () { selectTab('problem'); });
@@ -5604,12 +5583,6 @@ async function saveSurveyResponses(responses, surveyType) {
         }
 
         const result = await response.json();
-        logActivity('survey_ai_history_captured', {
-            survey_type: surveyType,
-            ai_entries_captured: aiHistoryContext.ai_guess_history.length,
-            condition_specific_entries: aiHistoryContext.correct_description_history?.length || 
-                                       aiHistoryContext.suggestions_only_history?.length || 0
-        });
         
     } catch (error) {
         console.error('Error saving survey with AI history:', error);
@@ -5783,32 +5756,12 @@ async function loadSurveyQuestions() {
    }
 
 function increaseFontSize() {
-    const oldSize = currentFontSize;
     updateFontSize(currentFontSize + 1);
-    
-    // ACTIVITY LOG: Font size change
-    logActivity('font_size_change', {
-        action: 'increase',
-        from_size: oldSize,
-        to_size: currentFontSize,
-        trigger: 'button_click'
-    });
-    
     addTerminalOutput(`Font size increased to ${currentFontSize}px`, 'info');
 }
 
 function decreaseFontSize() {
-    const oldSize = currentFontSize;
     updateFontSize(currentFontSize - 1);
-    
-    // ACTIVITY LOG: Font size change
-    logActivity('font_size_change', {
-        action: 'decrease',
-        from_size: oldSize,
-        to_size: currentFontSize,
-        trigger: 'button_click'
-    });
-    
     addTerminalOutput(`Font size decreased to ${currentFontSize}px`, 'info');
 }
 
@@ -6678,12 +6631,6 @@ window.addEventListener('beforeunload', (e) => {
         // Save progress before leaving
         saveProgress();
         
-        // ACTIVITY LOG: Page unload attempt
-        logActivity('page_unload_attempt', {
-            unload_reason: 'beforeunload_triggered',
-            session_duration_seconds: (Date.now() - sessionStartTime) / 1000
-        });
-        
         // Upload any remaining activities synchronously
         if (activityBuffer.length > 0) {
             var actPayload = JSON.stringify({
@@ -6790,25 +6737,9 @@ document.addEventListener('visibilitychange', function() {
     if (newVisibilityState === 'hidden' && isTabVisible) {
         // User switched away from tab
         lastFocusTime = currentTime;
-        if (tabTrackingEnabled) {
-            logActivity('tab_switching', {
-                start_time: new Date(currentTime).toISOString(),
-                switch_type: 'tab_away',
-                visibility_state: 'hidden'
-            });
-        }
     } else if (newVisibilityState === 'visible' && !isTabVisible) {
         // User returned to tab
-        const awayDuration = lastFocusTime ? currentTime - lastFocusTime : 0;
         if (tabTrackingEnabled) {
-            logActivity('tab_switching', {
-                start_time: new Date(lastFocusTime).toISOString(),
-                end_time: new Date(currentTime).toISOString(),
-                duration: awayDuration,
-                switch_type: 'tab_return',
-                away_duration_ms: awayDuration,
-                visibility_state: 'visible'
-            });
             // Show popup like paste notification (center popup + top banner)
             showTabReturnNotification();
         }

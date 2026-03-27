@@ -6,7 +6,7 @@ Mounted as a sub-router in main.py at prefix /instructor.
 import shutil
 import copy
 
-from fastapi import APIRouter, Request, HTTPException, Body, File, UploadFile, Form
+from fastapi import APIRouter, Request, HTTPException, Body, File, UploadFile, Form, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from datetime import datetime, timedelta
@@ -17,15 +17,20 @@ import os
 import re
 import secrets
 import uuid
+from urllib.parse import quote
 from pathlib import Path
 
 from firebase_utils import fb_dict
 from models import QuizCreate, QuizUpdate, QuizJoinRequest
 from quiz_analytics import (
     aggregate_quiz_analytics,
+    build_user_ai_activity_log,
     collect_quiz_sessions_from_firebase,
     delete_user_data_for_quiz,
+    export_activity_log_csv,
     export_per_session_csv,
+    find_user_session_payload_for_quiz,
+    validate_analytics_user_id,
 )
 
 from otp import (
@@ -658,6 +663,224 @@ async def quiz_analytics_page(request: Request, quiz_id: str):
             "firebase_available": True,
         },
     )
+
+
+@router.get("/quiz/{quiz_id}/activity-log", response_class=HTMLResponse)
+async def quiz_activity_log_page(
+    request: Request,
+    quiz_id: str,
+    user_id: str = Query(..., description="Student user id (Firebase)"),
+):
+    """Per-user AI suggestion log: timestamps, suggestions, accept/reject, code snapshots."""
+    email = _require_instructor(request)
+    if not email:
+        return RedirectResponse(url="/instructor/login", status_code=303)
+
+    try:
+        uid = validate_analytics_user_id(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user id")
+
+    uid_q = quote(uid, safe="")
+
+    fb = _get_firebase()
+    if not fb:
+        return templates.TemplateResponse(
+            "instructor_activity_log.html",
+            {
+                "request": request,
+                "instructor_email": email,
+                "quiz_id": quiz_id,
+                "quiz_teaser": "",
+                "user_id": uid,
+                "user_id_query": uid_q,
+                "programming_language": "",
+                "log_rows": [],
+                "problem_tables": [],
+                "session_id": None,
+                "error": "Database unavailable",
+                "firebase_available": False,
+            },
+        )
+
+    from firebase_admin import db
+
+    quiz = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
+    if not quiz:
+        raise HTTPException(status_code=404, detail="Quiz not found")
+    if quiz.get("created_by") != email:
+        raise HTTPException(status_code=403, detail="Not authorised")
+
+    quiz = _normalize_quiz_data(quiz)
+    labels = _quiz_problem_labels(quiz)
+    n_prob = max(1, len(labels))
+
+    sessions = collect_quiz_sessions_from_firebase(db, quiz_id)
+    payload = find_user_session_payload_for_quiz(sessions, quiz_id, uid, n_prob)
+    if not payload:
+        return templates.TemplateResponse(
+            "instructor_activity_log.html",
+            {
+                "request": request,
+                "instructor_email": email,
+                "quiz_id": quiz_id,
+                "quiz_teaser": (quiz.get("teaser") or quiz.get("title") or "").strip(),
+                "user_id": uid,
+                "user_id_query": uid_q,
+                "programming_language": "",
+                "log_rows": [],
+                "problem_tables": [],
+                "session_id": None,
+                "error": "No session found for this user on this quiz.",
+                "firebase_available": True,
+            },
+        )
+
+    sm = payload.get("session_metadata")
+    prog_lang = ""
+    if isinstance(sm, dict):
+        prog_lang = str(sm.get("programming_language") or "").strip()
+
+    log = build_user_ai_activity_log(payload, labels)
+    rows = log.get("rows") or []
+    problem_tables = log.get("problem_tables") or []
+    return templates.TemplateResponse(
+        "instructor_activity_log.html",
+        {
+            "request": request,
+            "instructor_email": email,
+            "quiz_id": quiz_id,
+            "quiz_teaser": (quiz.get("teaser") or quiz.get("title") or "").strip(),
+            "user_id": log.get("user_id") or uid,
+            "user_id_query": uid_q,
+            "programming_language": prog_lang,
+            "log_rows": rows,
+            "problem_tables": problem_tables,
+            "session_id": log.get("session_id"),
+            "error": None
+            if rows
+            else "No AI suggestion rows in Firebase logs for this session (older submissions may lack `logs.ai_guesses`).",
+            "firebase_available": True,
+        },
+    )
+
+
+@router.get("/quiz/{quiz_id}/activity-log-data")
+async def quiz_activity_log_data(
+    request: Request,
+    quiz_id: str,
+    user_id: str = Query(..., description="Student user id (Firebase)"),
+):
+    """JSON for the same table as the activity-log page (export / tooling)."""
+    email = _require_instructor(request)
+    if not email:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    try:
+        uid = validate_analytics_user_id(user_id)
+    except ValueError:
+        return JSONResponse({"error": "Invalid user id"}, status_code=400)
+
+    fb = _get_firebase()
+    if not fb:
+        return JSONResponse({"error": "Database unavailable"}, status_code=503)
+
+    from firebase_admin import db
+
+    try:
+        quiz = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
+        if not quiz:
+            return JSONResponse({"error": "Quiz not found"}, status_code=404)
+        if quiz.get("created_by") != email:
+            return JSONResponse({"error": "Not authorised"}, status_code=403)
+
+        quiz = _normalize_quiz_data(quiz)
+        labels = _quiz_problem_labels(quiz)
+        n_prob = max(1, len(labels))
+
+        sessions = collect_quiz_sessions_from_firebase(db, quiz_id)
+        payload = find_user_session_payload_for_quiz(sessions, quiz_id, uid, n_prob)
+        if not payload:
+            return JSONResponse({"error": "No session for this user"}, status_code=404)
+
+        data = build_user_ai_activity_log(payload, labels)
+        return JSONResponse(content=data, headers=_ANALYTICS_JSON_NO_CACHE)
+    except Exception as e:
+        logger.exception("quiz_activity_log_data failed for quiz_id=%s", quiz_id)
+        return JSONResponse({"error": f"Server error: {e!s}"}, status_code=500)
+
+
+@router.get("/quiz/{quiz_id}/activity-log-export")
+async def quiz_activity_log_export(
+    request: Request,
+    quiz_id: str,
+    user_id: str = Query(..., description="Student user id (Firebase)"),
+    problem_index: Optional[int] = Query(
+        None,
+        description="If set, CSV for this problem only; omit for all problems in one file.",
+    ),
+):
+    """Download activity log as CSV (per problem or combined)."""
+    email = _require_instructor(request)
+    if not email:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    try:
+        uid = validate_analytics_user_id(user_id)
+    except ValueError:
+        return JSONResponse({"error": "Invalid user id"}, status_code=400)
+
+    fb = _get_firebase()
+    if not fb:
+        return JSONResponse({"error": "Database unavailable"}, status_code=503)
+
+    from firebase_admin import db
+
+    try:
+        quiz = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
+        if not quiz:
+            return JSONResponse({"error": "Quiz not found"}, status_code=404)
+        if quiz.get("created_by") != email:
+            return JSONResponse({"error": "Not authorised"}, status_code=403)
+
+        quiz = _normalize_quiz_data(quiz)
+        labels = _quiz_problem_labels(quiz)
+        n_prob = max(1, len(labels))
+
+        sessions = collect_quiz_sessions_from_firebase(db, quiz_id)
+        payload = find_user_session_payload_for_quiz(sessions, quiz_id, uid, n_prob)
+        if not payload:
+            return JSONResponse({"error": "No session for this user"}, status_code=404)
+
+        log = build_user_ai_activity_log(payload, labels)
+        problem_tables = log.get("problem_tables") or []
+        csv_text = export_activity_log_csv(
+            problem_tables,
+            str(log.get("user_id") or uid),
+            str(log.get("session_id") or "") or None,
+            only_problem_index=problem_index,
+        )
+        if problem_index is not None and not csv_text.strip():
+            return JSONResponse({"error": "No rows for this problem"}, status_code=404)
+
+        qslug = _safe_quiz_export_slug(quiz_id)
+        uslug = re.sub(r"[^a-zA-Z0-9._-]", "_", uid)[:80] or "user"
+        if problem_index is not None:
+            fname = f"{qslug}-activity-log-{uslug}-p{int(problem_index)}.csv"
+        else:
+            fname = f"{qslug}-activity-log-{uslug}-all.csv"
+
+        bom = "\ufeff"
+        h = dict(_ANALYTICS_JSON_NO_CACHE)
+        h["Content-Disposition"] = f'attachment; filename="{fname}"'
+        return Response(
+            content=(bom + csv_text).encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers=h,
+        )
+    except Exception as e:
+        logger.exception("quiz_activity_log_export failed for quiz_id=%s", quiz_id)
+        return JSONResponse({"error": f"Server error: {e!s}"}, status_code=500)
 
 
 @router.get("/quiz/{quiz_id}/analytics-data")

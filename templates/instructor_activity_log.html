@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Activity log{% if quiz_teaser %} — {{ quiz_teaser[:48] }}{% endif %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b1120;
+      --panel: #111827;
+      --panel2: #0f172a;
+      --border: #1f2937;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --radius: 10px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; min-height: 100vh; -webkit-font-smoothing: antialiased; font-size: 14px; }
+
+    .navbar {
+      background: rgba(17, 24, 39, 0.92);
+      backdrop-filter: blur(10px);
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      position: sticky;
+      top: 0;
+      z-index: 40;
+    }
+    .navbar h1 { font-size: 1rem; font-weight: 600; letter-spacing: -0.02em; }
+    .navbar .sub { font-size: 0.75rem; color: var(--muted); margin-top: 4px; max-width: 640px; line-height: 1.4; }
+    .nav-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .nav-actions a {
+      color: var(--muted); text-decoration: none; font-size: 0.8rem;
+      padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
+    }
+    .nav-actions a:hover { color: var(--text); border-color: #475569; }
+    .nav-actions .json-link {
+      color: #38bdf8;
+      border-color: rgba(56, 189, 248, 0.35);
+    }
+
+    .wrap { max-width: 1480px; margin: 0 auto; padding: 20px 16px 48px; }
+
+    .meta-bar {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      margin-bottom: 14px;
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .meta-bar strong { color: #e2e8f0; font-weight: 600; }
+
+    .banner {
+      background: linear-gradient(135deg, rgba(56,189,248,0.08), rgba(16,185,129,0.06));
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      margin-bottom: 14px;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .banner.warn { border-color: rgba(251, 191, 36, 0.35); }
+
+    .log-table-wrap {
+      overflow: auto;
+      max-height: min(78vh, 900px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
+    }
+    .log-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.72rem;
+    }
+    .log-table th, .log-table td {
+      border-bottom: 1px solid var(--border);
+      padding: 8px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+    .log-table th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: var(--panel2);
+      color: #94a3b8;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-size: 0.65rem;
+      white-space: nowrap;
+    }
+    .log-table tr:hover td { background: rgba(2, 6, 23, 0.35); }
+    .col-idx { width: 44px; text-align: center; color: #64748b; font-variant-numeric: tabular-nums; }
+    .col-ts { white-space: nowrap; color: #cbd5e1; font-size: 0.7rem; }
+    .col-lat {
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+      color: #cbd5e1;
+      font-size: 0.72rem;
+      text-align: right;
+    }
+    .verdict { font-weight: 600; }
+    .verdict.accepted { color: #34d399; }
+    .verdict.rejected { color: #f87171; }
+    .verdict.unknown { color: #64748b; }
+    .cell-empty { color: #64748b; font-size: 0.75rem; }
+
+    /* Match instructor quiz analytics “Final code” presentation */
+    .col-snapshot { min-width: 140px; max-width: 320px; text-align: center; vertical-align: middle; }
+    .final-code-details { font-size: 0.78rem; text-align: center; }
+    .final-code-details > summary {
+      cursor: pointer;
+      color: #60a5fa;
+      font-weight: 600;
+      list-style: none;
+      white-space: nowrap;
+      display: inline-block;
+    }
+    .final-code-details > summary::-webkit-details-marker { display: none; }
+    .final-code-details > summary::before { content: '▸ '; color: #64748b; }
+    .final-code-details[open] > summary::before { content: '▾ '; }
+    .final-code-stack {
+      margin-top: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      text-align: left;
+    }
+    .final-code-block {
+      border: 1px solid rgba(51, 65, 85, 0.85);
+      border-radius: 8px;
+      overflow: hidden;
+      background: rgba(15, 23, 42, 0.88);
+    }
+    .final-code-block-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 4px 6px;
+      padding: 5px 8px;
+      background: rgba(30, 41, 59, 0.72);
+      border-bottom: 1px solid rgba(51, 65, 85, 0.55);
+      font-size: 0.7rem;
+    }
+    .final-code-problem-label { color: #e2e8f0; font-weight: 600; letter-spacing: -0.01em; }
+    .final-code-lang-badge {
+      color: #93c5fd;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      font-size: 0.62rem;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(59, 130, 246, 0.35);
+    }
+    .final-code-pre {
+      margin: 0;
+      padding: 8px 8px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.74rem;
+      line-height: 1.42;
+      max-height: 280px;
+      overflow: auto;
+      color: #f1f5f9;
+      background: rgba(2, 6, 23, 0.5);
+      text-align: left;
+    }
+    .final-code-pre code { font-family: inherit; font-size: inherit; color: inherit; }
+
+    .log-pre {
+      margin: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.68rem;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 200px;
+      overflow: auto;
+      color: #e2e8f0;
+      background: rgba(2, 6, 23, 0.45);
+      border-radius: 6px;
+      padding: 8px;
+    }
+    .empty-box {
+      text-align: center;
+      padding: 36px 20px;
+      color: var(--muted);
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+      background: rgba(17,24,39,0.6);
+      font-size: 0.875rem;
+    }
+
+    .problem-log-section {
+      margin-bottom: 24px;
+    }
+    .problem-log-section:last-of-type {
+      margin-bottom: 0;
+    }
+    .problem-log-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .problem-log-heading {
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: #e2e8f0;
+      margin: 0;
+      letter-spacing: -0.02em;
+    }
+    .csv-link {
+      font-size: 0.75rem;
+      color: #34d399;
+      text-decoration: none;
+      padding: 5px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(52, 211, 153, 0.35);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .csv-link:hover { color: #a7f3d0; border-color: #34d399; }
+
+    .interaction-timeline-block {
+      margin-bottom: 14px;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: rgba(15, 23, 42, 0.65);
+    }
+    .interaction-timeline-block h3 {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #cbd5e1;
+      margin: 0 0 8px 0;
+      letter-spacing: -0.02em;
+    }
+    .interaction-timeline-chart {
+      width: 100%;
+      height: 280px;
+    }
+    .interaction-timeline-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      margin-top: 10px;
+      font-size: 0.68rem;
+      color: #94a3b8;
+    }
+    .interaction-timeline-legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .interaction-timeline-legend i {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      display: inline-block;
+    }
+    .timeline-empty {
+      color: #64748b;
+      font-size: 0.78rem;
+      padding: 20px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="navbar">
+    <div>
+      <h1>AI activity log</h1>
+      {% if quiz_teaser %}<p class="sub">{{ quiz_teaser }}</p>{% endif %}
+    </div>
+    <div class="nav-actions">
+      <span style="font-size:0.75rem;color:var(--muted);">{{ instructor_email }}</span>
+      {% if firebase_available %}
+      <a class="csv-link" href="/instructor/quiz/{{ quiz_id }}/activity-log-export?user_id={{ user_id_query }}">CSV (all problems)</a>
+      <a class="json-link" href="/instructor/quiz/{{ quiz_id }}/activity-log-data?user_id={{ user_id_query }}">JSON</a>
+      {% endif %}
+      <a href="/instructor/quiz/{{ quiz_id }}/analytics">Back to analytics</a>
+      <a href="/instructor/dashboard">Dashboard</a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="meta-bar">
+      <strong>User:</strong> {{ user_id }}
+      {% if session_id %} · <strong>Session:</strong> {{ session_id }}{% endif %}
+      <div style="margin-top:8px;font-size:0.75rem;color:#64748b;line-height:1.45;">
+        <strong>Suggestion time</strong> is the <code>ai_analysis_trigger</code> time from the activity log when available (same clock as accept/reject).
+        <strong>Time to accept or reject</strong> is that trigger → first copilot accept/reject for that suggestion.
+      </div>
+    </div>
+
+    {% if error %}
+    <div class="banner warn">{{ error }}</div>
+    {% endif %}
+
+    {% if problem_tables and problem_tables|length > 0 %}
+    {% for table in problem_tables %}
+    <section class="problem-log-section" aria-labelledby="problem-log-{{ table.problem_index }}">
+      <div class="problem-log-head">
+        <h2 class="problem-log-heading" id="problem-log-{{ table.problem_index }}">{{ table.label }}</h2>
+        {% if firebase_available %}
+        <a class="csv-link" href="/instructor/quiz/{{ quiz_id }}/activity-log-export?user_id={{ user_id_query }}&amp;problem_index={{ table.problem_index }}">Download CSV</a>
+        {% endif %}
+      </div>
+      {% set tl = table.timeline %}
+      <div class="interaction-timeline-block" aria-label="Interaction timeline">
+        <h3>Interaction timeline</h3>
+        <p style="font-size:0.72rem;color:#64748b;margin:0 0 8px 0;line-height:1.45;">
+          Each point is one logged event for this problem. <strong>X</strong> = time elapsed since the first interaction on this problem (e.g. 2s, 30s), <strong>Y</strong> = interaction number (1…N). Hover for event type.
+        </p>
+        <div class="interaction-timeline-chart" id="interaction-timeline-{{ table.problem_index }}" role="img" aria-label="Interaction timeline chart"></div>
+        <div class="interaction-timeline-legend" id="interaction-legend-{{ table.problem_index }}"></div>
+      </div>
+      <div class="log-table-wrap">
+        <table class="log-table">
+          <thead>
+            <tr>
+              <th class="col-idx">#</th>
+              <th class="col-ts">Suggestion time</th>
+              <th>Code suggestion</th>
+              <th>Accept / reject</th>
+              <th class="col-lat">Time to accept or reject</th>
+              <th>AI interpretation</th>
+              <th>Code snapshot</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in table.rows %}
+            <tr>
+              <td class="col-idx">{{ row.index_in_problem or row.index }}</td>
+              <td class="col-ts">{{ row.timestamp or "—" }}</td>
+              <td><pre class="log-pre">{{ row.suggestion or "" }}</pre></td>
+              <td>
+                {% if row.accept_reject == "accepted" %}
+                <span class="verdict accepted">Accepted</span>
+                {% elif row.accept_reject == "rejected" %}
+                <span class="verdict rejected">Rejected</span>
+                {% else %}
+                <span class="verdict unknown">—</span>
+                {% endif %}
+              </td>
+              <td class="col-lat">
+                {% if row.reaction_latency_seconds is not none %}
+                {{ (row.reaction_latency_seconds|float)|round(2) }} s
+                {% else %}
+                <span class="cell-empty">—</span>
+                {% endif %}
+              </td>
+              <td><pre class="log-pre">{{ row.interpretation or "—" }}</pre></td>
+              <td class="col-snapshot">
+                {% set snap = row.code_snapshot|default('') %}
+                {% if snap|trim %}
+                <details class="final-code-details">
+                  <summary>Snapshot</summary>
+                  <div class="final-code-stack">
+                    <div class="final-code-block">
+                      <div class="final-code-block-meta">
+                        <span class="final-code-problem-label">Editor snapshot</span>
+                        {% if programming_language %}<span class="final-code-lang-badge">{{ programming_language }}</span>{% endif %}
+                      </div>
+                      <pre class="final-code-pre"><code>{{ snap }}</code></pre>
+                    </div>
+                  </div>
+                </details>
+                {% else %}
+                <span class="cell-empty">—</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endfor %}
+    {% elif not error %}
+    <div class="empty-box">No rows to display.</div>
+    {% endif %}
+  </div>
+  <script type="application/json" id="problem-tables-json">{{ problem_tables | tojson | safe }}</script>
+  <script>
+(function () {
+  var CAT_COLORS = {
+    editing: '#a78bfa',
+    ai: '#38bdf8',
+    suggestion: '#34d399',
+    run: '#fbbf24',
+    paste: '#f472b6',
+    tab: '#94a3b8',
+    session: '#64748b',
+    submit: '#22c55e',
+    other: '#cbd5e1'
+  };
+  var CAT_LABELS = {
+    editing: 'Code edit',
+    ai: 'AI analysis / suggestion',
+    suggestion: 'Accept / reject',
+    run: 'Run code',
+    paste: 'Paste',
+    tab: 'Tab switch',
+    session: 'Session',
+    submit: 'Submit',
+    other: 'Other'
+  };
+
+  var boot = document.getElementById('problem-tables-json');
+  if (!boot || typeof echarts === 'undefined') return;
+  var tables;
+  try {
+    tables = JSON.parse(boot.textContent || '[]');
+  } catch (e) {
+    return;
+  }
+  if (!Array.isArray(tables)) return;
+
+  /** Format milliseconds duration as 2s, 30s, 1m 5s, etc. */
+  function formatElapsedMs(ms) {
+    if (ms == null || isNaN(ms)) return '—';
+    var s = Number(ms) / 1000;
+    if (s < 0) s = 0;
+    if (s < 60) {
+      var rounded = s >= 10 ? Math.round(s) : Math.round(s * 10) / 10;
+      return rounded + 's';
+    }
+    if (s < 3600) {
+      var m = Math.floor(s / 60);
+      var sec = Math.round(s - m * 60);
+      return m + 'm ' + sec + 's';
+    }
+    var h = Math.floor(s / 3600);
+    var m = Math.floor((s - h * 3600) / 60);
+    return h + 'h ' + m + 'm';
+  }
+
+  function renderLegend(containerId, categoriesPresent) {
+    var el = document.getElementById(containerId);
+    if (!el) return;
+    el.innerHTML = '';
+    categoriesPresent.forEach(function (cat) {
+      var lab = CAT_LABELS[cat] || cat;
+      var sp = document.createElement('span');
+      var sw = document.createElement('i');
+      sw.style.background = CAT_COLORS[cat] || CAT_COLORS.other;
+      sp.appendChild(sw);
+      sp.appendChild(document.createTextNode(lab));
+      el.appendChild(sp);
+    });
+  }
+
+  tables.forEach(function (table) {
+    var pi = table.problem_index;
+    var domId = 'interaction-timeline-' + String(pi);
+    var el = document.getElementById(domId);
+    if (!el) return;
+    var timeline = table.timeline || {};
+    var points = timeline.points || [];
+    if (!points.length) {
+      el.innerHTML = '<p class="timeline-empty">No matching interaction events for this problem in <code>activity_log</code> (types: edits, AI, suggestions, run, paste, tab, submit).</p>';
+      return;
+    }
+
+    var t0 = points[0].timestamp_ms;
+    var lineData = points.map(function (p) {
+      var elapsed = (p.timestamp_ms != null ? p.timestamp_ms : 0) - t0;
+      return [elapsed, p.interaction_index];
+    });
+    var scatterData = points.map(function (p) {
+      var cat = p.chart_category || 'other';
+      var elapsed = (p.timestamp_ms != null ? p.timestamp_ms : 0) - t0;
+      return {
+        value: [elapsed, p.interaction_index],
+        name: p.activity_type,
+        itemStyle: { color: CAT_COLORS[cat] || CAT_COLORS.other }
+      };
+    });
+
+    var catsSeen = {};
+    points.forEach(function (p) {
+      var c = p.chart_category || 'other';
+      if (CAT_COLORS[c]) catsSeen[c] = true;
+    });
+    var legendOrder = ['session', 'editing', 'ai', 'suggestion', 'run', 'paste', 'tab', 'submit', 'other'];
+    var categoriesPresent = legendOrder.filter(function (c) { return catsSeen[c]; });
+
+    renderLegend('interaction-legend-' + String(pi), categoriesPresent);
+
+    var chart = echarts.init(el, null, { renderer: 'canvas' });
+    chart.setOption({
+      backgroundColor: 'transparent',
+      textStyle: { fontFamily: 'Inter, system-ui, sans-serif', fontSize: 11, color: '#e2e8f0' },
+      tooltip: {
+        trigger: 'item',
+        confine: true,
+        backgroundColor: 'rgba(15,23,42,0.95)',
+        borderColor: '#1f2937',
+        textStyle: { color: '#e2e8f0', fontSize: 11 },
+        formatter: function (params) {
+          if (params.seriesType === 'line') return '';
+          var d = params.data;
+          var name = d && d.name ? d.name : '';
+          var v = params.value;
+          var elapsedMs = v && v[0] != null ? v[0] : 0;
+          var elapsedStr = formatElapsedMs(elapsedMs) + ' after first interaction';
+          return '<div style="max-width:280px;word-break:break-word;">' +
+            '<strong>#' + (v && v[1] != null ? v[1] : '') + '</strong> · ' + name +
+            '<br/><span style="color:#94a3b8;font-size:10px;">' + elapsedStr + '</span></div>';
+        }
+      },
+      grid: { left: 52, right: 18, top: 36, bottom: 52, containLabel: false },
+      xAxis: {
+        type: 'value',
+        name: 'Time elapsed',
+        nameTextStyle: { color: '#94a3b8', fontSize: 11 },
+        axisLine: { lineStyle: { color: '#334155' } },
+        axisLabel: {
+          color: '#94a3b8',
+          fontSize: 10,
+          formatter: function (val) {
+            return formatElapsedMs(val);
+          }
+        },
+        splitLine: { show: true, lineStyle: { color: 'rgba(51,65,85,0.35)' } },
+        min: 0
+      },
+      yAxis: {
+        type: 'value',
+        name: 'Interaction #',
+        minInterval: 1,
+        nameTextStyle: { color: '#94a3b8', fontSize: 11 },
+        axisLine: { lineStyle: { color: '#334155' } },
+        axisLabel: { color: '#94a3b8', fontSize: 10 },
+        splitLine: { lineStyle: { color: 'rgba(51,65,85,0.35)' } }
+      },
+      series: [
+        {
+          name: 'sequence',
+          type: 'line',
+          data: lineData,
+          showSymbol: false,
+          lineStyle: { color: 'rgba(148,163,184,0.4)', width: 1.5 },
+          z: 1
+        },
+        {
+          name: 'events',
+          type: 'scatter',
+          data: scatterData,
+          symbolSize: 11,
+          z: 2
+        }
+      ]
+    });
+    window.addEventListener('resize', function () {
+      try { chart.resize(); } catch (e) {}
+    });
+  });
+})();
+  </script>
+</body>
+</html>

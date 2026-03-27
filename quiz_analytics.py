@@ -18,6 +18,7 @@ import logging
 import math
 
 logger = logging.getLogger(__name__)
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -154,6 +155,7 @@ def _is_editor_time_activity(at: str) -> bool:
         "paste_attempt",
         "ai_analysis_trigger",
         "ai_analysis_complete",
+        "copilot_popup_cleared_for_analysis",
         "copilot_popup_accept",
         "copilot_popup_reject",
         "suggestion_accept",
@@ -165,6 +167,7 @@ def _is_editor_time_activity(at: str) -> bool:
         "execution_output",
         "history_interaction",
         "history_view",
+        "history_check",
         "font_size_change",
         "terminal_clear",
     ):
@@ -700,6 +703,511 @@ def _primary_session_duration_seconds(d: Dict[str, Any]) -> Optional[float]:
         except (TypeError, ValueError):
             pass
     return None
+
+
+def _normalize_log_dict_map(obj: Any) -> List[Dict[str, Any]]:
+    """Convert Firebase dict ``{'1': {...}, '2': {...}}`` to an ordered list of dicts."""
+    if isinstance(obj, list):
+        return [x for x in obj if isinstance(x, dict)]
+    if not isinstance(obj, dict):
+        return []
+    keys: List[int] = []
+    for k in obj.keys():
+        try:
+            keys.append(int(k))
+        except (TypeError, ValueError):
+            pass
+    keys.sort()
+    out: List[Dict[str, Any]] = []
+    for k in keys:
+        row = obj.get(str(k))
+        if row is None:
+            row = obj.get(k)
+        if isinstance(row, dict):
+            out.append(row)
+    return out
+
+
+_LOG_ACCEPT_TYPES = frozenset(
+    {"copilot_popup_accept", "suggestion_accept", "accept_suggestion"}
+)
+_LOG_REJECT_TYPES = frozenset(
+    {"copilot_popup_reject", "suggestion_reject", "reject_suggestion"}
+)
+
+# Activity types shown on the instructor interaction timeline (X=time, Y=sequence index).
+_INTERACTION_TIMELINE_ACTIVITY_TYPES = frozenset(
+    {
+        "session_start",
+        "code_editing_insert",
+        "code_editing_delete",
+        "code_editing_modify",
+        "ai_analysis_trigger",
+        "ai_analysis_complete",
+        "code_suggestion_generated",
+        "suggestion_popup_shown",
+        "copilot_popup_accept",
+        "copilot_popup_reject",
+        "code_execution",
+        "paste_attempt",
+        "tab_switching",
+        "code_submitted",
+    }
+)
+
+
+def _timeline_category_for_activity_type(at: str) -> str:
+    """Coarse bucket for chart coloring."""
+    a = str(at or "").strip().lower()
+    if a.startswith("code_editing"):
+        return "editing"
+    if a in (
+        "ai_analysis_trigger",
+        "ai_analysis_complete",
+        "code_suggestion_generated",
+        "suggestion_popup_shown",
+    ):
+        return "ai"
+    if a in _LOG_ACCEPT_TYPES or a in _LOG_REJECT_TYPES:
+        return "suggestion"
+    if a == "code_execution":
+        return "run"
+    if a == "paste_attempt":
+        return "paste"
+    if a == "tab_switching":
+        return "tab"
+    if a == "session_start":
+        return "session"
+    if a == "code_submitted":
+        return "submit"
+    return "other"
+
+
+def _build_timeline_points_by_problem(user_data: Dict[str, Any]) -> Dict[int, List[Dict[str, Any]]]:
+    """
+    Chronological interaction index (1..N) per problem for activity_log entries
+    in :data:`_INTERACTION_TIMELINE_ACTIVITY_TYPES`.
+    """
+    entries = _sorted_activity_entries_chrono(user_data)
+    by_pi: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        at = str(e.get("activity_type") or "").strip().lower()
+        if at not in _INTERACTION_TIMELINE_ACTIVITY_TYPES:
+            continue
+        pi = _problem_index_from_entry(e)
+        if pi is None:
+            pi = 0
+        ts = _parse_iso(e.get("timestamp"))
+        if ts is None:
+            continue
+        by_pi[pi].append(e)
+
+    out: Dict[int, List[Dict[str, Any]]] = {}
+    for pi in sorted(by_pi.keys()):
+        pts: List[Dict[str, Any]] = []
+        for i, e in enumerate(by_pi[pi], start=1):
+            at = str(e.get("activity_type") or "").strip().lower()
+            ts = _parse_iso(e.get("timestamp"))
+            tu = _utc_for_delta(ts)
+            if not tu:
+                continue
+            t_ms = int(tu.timestamp() * 1000)
+            pts.append(
+                {
+                    "interaction_index": i,
+                    "timestamp_ms": t_ms,
+                    "timestamp_iso": _dt_to_iso_display(tu) or "",
+                    "activity_type": at,
+                    "chart_category": _timeline_category_for_activity_type(at),
+                }
+            )
+        out[pi] = pts
+    return out
+
+
+def _sorted_activity_entries_chrono(user_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    raw = _activity_entries(user_data)
+    out = [e for e in raw if isinstance(e, dict)]
+
+    def sort_key(e: Dict[str, Any]) -> datetime:
+        t = _parse_iso(e.get("timestamp"))
+        if t is None:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        u = _utc_for_delta(t)
+        return u if u else datetime.min.replace(tzinfo=timezone.utc)
+
+    return sorted(out, key=sort_key)
+
+
+def _ai_suggestion_completion_events(user_data: Dict[str, Any]) -> List[Tuple[Optional[datetime], int]]:
+    """``ai_analysis_complete`` with ``suggestion_generated``, chronologically — for pairing with ``logs.ai_guesses``."""
+    out: List[Tuple[Optional[datetime], int]] = []
+    for e in _sorted_activity_entries_chrono(user_data):
+        at = str(e.get("activity_type") or "").strip().lower()
+        if at != "ai_analysis_complete":
+            continue
+        _ad = e.get("activity_details")
+        ad: Dict[str, Any] = _ad if isinstance(_ad, dict) else {}
+        sg = ad.get("suggestion_generated")
+        if not (sg is True or sg == "true" or sg == 1):
+            continue
+        ts = _parse_iso(e.get("timestamp"))
+        pi = _problem_index_from_entry(e)
+        out.append((ts, int(pi) if pi is not None else 0))
+    return out
+
+
+def _problem_indices_for_guess_rows(
+    base_rows: List[Dict[str, Any]], completions: List[Tuple[Optional[datetime], int]]
+) -> List[int]:
+    """One problem_index per Firebase guess row (aligned to activity completions or nearest timestamp)."""
+    n = len(base_rows)
+    if n == 0:
+        return []
+    m = len(completions)
+    if m == 0:
+        return [0] * n
+    if m == n:
+        return [completions[i][1] for i in range(n)]
+    if m > n:
+        return [completions[i][1] for i in range(n)]
+    # m < n: nearest completion timestamp per guess
+    indices: List[int] = []
+    for g in base_rows:
+        gt = _parse_iso(g.get("timestamp"))
+        if gt is None:
+            indices.append(completions[-1][1])
+            continue
+        gu = _utc_for_delta(gt)
+        best_pi = completions[0][1]
+        best_sec: Optional[float] = None
+        for ts, pi in completions:
+            if ts is None:
+                continue
+            tu = _utc_for_delta(ts)
+            if not gu or not tu:
+                continue
+            sec = abs((gu - tu).total_seconds())
+            if best_sec is None or sec < best_sec:
+                best_sec = sec
+                best_pi = pi
+        indices.append(best_pi)
+    return indices
+
+
+def _all_ai_analysis_trigger_times(entries_sorted: List[Dict[str, Any]]) -> List[Optional[datetime]]:
+    """Chronological ``ai_analysis_trigger`` timestamps (client clock — pairs with copilot events)."""
+    out: List[Optional[datetime]] = []
+    for e in entries_sorted:
+        at = str(e.get("activity_type") or "").strip().lower()
+        if at != "ai_analysis_trigger":
+            continue
+        ts = _parse_iso(e.get("timestamp"))
+        out.append(_utc_for_delta(ts) if ts else None)
+    return out
+
+
+def _all_copilot_reactions_chrono(
+    entries_sorted: List[Dict[str, Any]],
+) -> List[Tuple[Optional[datetime], str, Dict[str, Any]]]:
+    """``(utc_datetime, 'accepted'|'rejected', entry)`` for each copilot popup action, in log order."""
+    out: List[Tuple[Optional[datetime], str, Dict[str, Any]]] = []
+    for e in entries_sorted:
+        at = str(e.get("activity_type") or "").strip().lower()
+        ts = _parse_iso(e.get("timestamp"))
+        tu = _utc_for_delta(ts) if ts else None
+        if at in _LOG_ACCEPT_TYPES:
+            out.append((tu, "accepted", e))
+        elif at in _LOG_REJECT_TYPES:
+            out.append((tu, "rejected", e))
+    return out
+
+
+def _snapshot_from_copilot_activity_entry(e: Dict[str, Any]) -> str:
+    """Editor snapshot logged on accept/reject (post-decision), if present."""
+    ad = e.get("activity_details")
+    if not isinstance(ad, dict):
+        return ""
+    return str(ad.get("user_code_snapshot") or "").strip()
+
+
+def _dt_to_iso_display(dt: Optional[datetime]) -> Optional[str]:
+    if dt is None:
+        return None
+    try:
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc).isoformat()
+        return dt.isoformat()
+    except Exception:
+        return None
+
+
+def _first_accept_reject_between_timestamps(
+    entries_sorted: List[Dict[str, Any]],
+    start_ts: Optional[datetime],
+    end_ts: Optional[datetime],
+) -> Tuple[Optional[str], Optional[float], str]:
+    """Last-resort pairing: first copilot action at or after ``start_ts``, before ``end_ts`` (Firebase guess windows)."""
+    if start_ts is None:
+        return None, None, ""
+    su = _utc_for_delta(start_ts)
+    eu = _utc_for_delta(end_ts) if end_ts else None
+    for e in entries_sorted:
+        ts = _parse_iso(e.get("timestamp"))
+        if ts is None:
+            continue
+        tu = _utc_for_delta(ts)
+        if su and tu < su:
+            continue
+        if eu is not None and tu >= eu:
+            break
+        at = str(e.get("activity_type") or "").strip().lower()
+        snap = _snapshot_from_copilot_activity_entry(e)
+        if at in _LOG_ACCEPT_TYPES:
+            sec = (tu - su).total_seconds() if su and tu else None
+            return "accepted", float(sec) if sec is not None else None, snap
+        if at in _LOG_REJECT_TYPES:
+            sec = (tu - su).total_seconds() if su and tu else None
+            return "rejected", float(sec) if sec is not None else None, snap
+    return None, None, ""
+
+
+def _verdict_latency_for_suggestion_row(
+    entries_sorted: List[Dict[str, Any]],
+    completion_events: List[Tuple[Optional[datetime], int]],
+    row_index: int,
+    guess_timestamp_raw: Any,
+    next_guess_ts: Optional[datetime],
+) -> Tuple[Optional[str], Optional[float], Optional[str], str]:
+    """
+    Pair each Firebase guess row with accept/reject using **activity_log** only for latency:
+
+    1. Start time: ``ai_analysis_trigger`` at ``row_index`` (same clock as copilot).
+    2. Window: after that trigger, before the next ``ai_analysis_trigger`` (if any).
+    3. Fallback start: ``ai_analysis_complete`` (suggestion_generated) at same index.
+    4. Fallback start: Firebase guess ``timestamp``.
+    5. Fallback verdict: ``i``-th copilot accept/reject in chronological order (ordinal match).
+
+    Returns ``(verdict, reaction_latency_seconds, suggestion_time_iso, activity_code_snapshot)``.
+    The fourth value is the editor snapshot from the paired ``copilot_popup_*`` activity when logged.
+    """
+    triggers = _all_ai_analysis_trigger_times(entries_sorted)
+    reactions = _all_copilot_reactions_chrono(entries_sorted)
+
+    t_start: Optional[datetime] = None
+    activity_snapshot = ""
+    if row_index < len(triggers) and triggers[row_index] is not None:
+        t_start = triggers[row_index]
+    elif row_index < len(completion_events) and completion_events[row_index][0] is not None:
+        t_start = _utc_for_delta(completion_events[row_index][0])
+    else:
+        t_start = _utc_for_delta(_parse_iso(guess_timestamp_raw))
+
+    t_next_trigger: Optional[datetime] = None
+    if row_index + 1 < len(triggers) and triggers[row_index + 1] is not None:
+        t_next_trigger = triggers[row_index + 1]
+
+    suggestion_time_iso = _dt_to_iso_display(t_start) or (
+        str(guess_timestamp_raw).strip() if guess_timestamp_raw else None
+    )
+
+    verdict: Optional[str] = None
+    reaction_seconds: Optional[float] = None
+
+    if t_start is not None:
+        for tu, v, entry in reactions:
+            if tu is None:
+                continue
+            if tu <= t_start:
+                continue
+            if t_next_trigger is not None and tu >= t_next_trigger:
+                break
+            verdict = v
+            reaction_seconds = float((tu - t_start).total_seconds())
+            activity_snapshot = _snapshot_from_copilot_activity_entry(entry)
+            break
+
+    # Ordinal fallback: i-th copilot reaction ↔ i-th suggestion (ordering matches guesses)
+    if verdict is None and row_index < len(reactions):
+        tu, v, entry = reactions[row_index]
+        if tu is not None and t_start is not None:
+            verdict = v
+            reaction_seconds = float((tu - t_start).total_seconds())
+            activity_snapshot = _snapshot_from_copilot_activity_entry(entry)
+        elif tu is not None:
+            verdict = v
+            reaction_seconds = None
+            activity_snapshot = _snapshot_from_copilot_activity_entry(entry)
+
+    # Last resort: Firebase guess timestamp window (older sessions without ai_analysis_trigger)
+    if verdict is None:
+        gs = _parse_iso(guess_timestamp_raw)
+        verdict, reaction_seconds, activity_snapshot = _first_accept_reject_between_timestamps(
+            entries_sorted, gs, next_guess_ts
+        )
+        if verdict is not None and gs is not None and suggestion_time_iso is None:
+            suggestion_time_iso = _dt_to_iso_display(_utc_for_delta(gs)) or str(guess_timestamp_raw).strip()
+
+    if reaction_seconds is not None and reaction_seconds < 0:
+        reaction_seconds = 0.0
+
+    return verdict, reaction_seconds, suggestion_time_iso, activity_snapshot
+
+
+def build_user_ai_activity_log_rows(user_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    One row per Firebase ``logs.ai_guesses`` (or ``suggestions_only``).
+
+    Accept/reject and latency use ``activity_log``: ``ai_analysis_trigger`` start time (client clock),
+    first ``copilot_popup_*`` before the next trigger; fallbacks for legacy data.
+    """
+    logs = user_data.get("logs")
+    if not isinstance(logs, dict):
+        logs = {}
+
+    guesses = _normalize_log_dict_map(logs.get("ai_guesses"))
+    sugg_only = _normalize_log_dict_map(logs.get("suggestions_only"))
+
+    if not guesses and sugg_only:
+        base_rows = sugg_only
+        source = "suggestions_only"
+    else:
+        base_rows = guesses
+        source = "ai_guesses"
+
+    entries_sorted = _sorted_activity_entries_chrono(user_data)
+    completions = _ai_suggestion_completion_events(user_data)
+
+    out_rows: List[Dict[str, Any]] = []
+    for i, g in enumerate(base_rows):
+        next_ts: Optional[datetime] = None
+        if i + 1 < len(base_rows):
+            next_ts = _parse_iso(base_rows[i + 1].get("timestamp"))
+
+        if source == "suggestions_only":
+            suggestion = str(g.get("suggestion_only") or g.get("next_line_suggestion") or "")
+            interpretation = ""
+        else:
+            suggestion = str(g.get("next_line_suggestion") or g.get("full_code_suggestion") or "")
+            interpretation = str(g.get("ai_analysis") or "")
+
+        verdict, reaction_seconds, suggestion_time_iso, activity_snapshot = _verdict_latency_for_suggestion_row(
+            entries_sorted,
+            completions,
+            i,
+            g.get("timestamp"),
+            next_ts,
+        )
+        ts_display = suggestion_time_iso if suggestion_time_iso else g.get("timestamp")
+
+        snapshot = (activity_snapshot or "").strip() or str(g.get("user_code_snapshot") or "")
+
+        out_rows.append(
+            {
+                "index": i + 1,
+                "timestamp": ts_display,
+                "suggestion": suggestion,
+                "accept_reject": verdict,
+                "reaction_latency_seconds": reaction_seconds,
+                "interpretation": interpretation,
+                "code_snapshot": snapshot,
+            }
+        )
+
+    problem_indices = _problem_indices_for_guess_rows(out_rows, completions)
+    for i, r in enumerate(out_rows):
+        r["problem_index"] = problem_indices[i] if i < len(problem_indices) else 0
+
+    return out_rows
+
+
+def build_user_ai_activity_log(
+    user_data: Dict[str, Any], problem_labels: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    meta = _session_meta(user_data)
+    rows = build_user_ai_activity_log_rows(user_data)
+
+    labels = problem_labels if problem_labels and len(problem_labels) > 0 else []
+    by_pi: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        try:
+            pi = int(r.get("problem_index") or 0)
+        except (TypeError, ValueError):
+            pi = 0
+        by_pi[pi].append(r)
+
+    problem_tables: List[Dict[str, Any]] = []
+    for pi in sorted(by_pi.keys()):
+        sub = by_pi[pi]
+        for j, row in enumerate(sub):
+            row["index_in_problem"] = j + 1
+        title = ""
+        if labels and 0 <= pi < len(labels):
+            title = str(labels[pi]).strip()
+        if not title:
+            title = f"Problem {pi + 1}"
+        problem_tables.append({"problem_index": pi, "label": title, "rows": sub})
+
+    timelines = _build_timeline_points_by_problem(user_data)
+    for pt in problem_tables:
+        try:
+            tpi = int(pt.get("problem_index") or 0)
+        except (TypeError, ValueError):
+            tpi = 0
+        pt["timeline"] = {
+            "problem_index": tpi,
+            "label": str(pt.get("label") or ""),
+            "points": timelines.get(tpi, []),
+        }
+
+    return sanitize_for_json(
+        {
+            "user_id": meta.get("user_id"),
+            "session_id": meta.get("session_id"),
+            "rows": rows,
+            "problem_tables": problem_tables,
+        }
+    )
+
+
+def find_user_session_payload_for_quiz(
+    sessions: List[Dict[str, Any]],
+    quiz_id: str,
+    user_id: str,
+    num_problems: int,
+) -> Optional[Dict[str, Any]]:
+    """
+    Return the Firebase user payload for this user on this quiz (same matching rules as
+    aggregate_quiz_analytics). If multiple payloads exist, prefer the one with the most
+    AI log rows and the latest ``end_time``.
+    """
+    want = str(user_id).strip()
+    if not want:
+        return None
+    matches: List[Dict[str, Any]] = []
+    for ud in sessions:
+        if str(_session_meta(ud).get("user_id") or "").strip() != want:
+            continue
+        if derive_session_metrics(ud, quiz_id, num_problems) is None:
+            continue
+        matches.append(ud)
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return matches[0]
+
+    def score(ud: Dict[str, Any]) -> Tuple[int, str]:
+        lg = ud.get("logs")
+        if not isinstance(lg, dict):
+            return 0, ""
+        ag = len(_normalize_log_dict_map(lg.get("ai_guesses")))
+        so = len(_normalize_log_dict_map(lg.get("suggestions_only")))
+        return max(ag, so), str(_session_meta(ud).get("end_time") or "")
+
+    return max(matches, key=score)
+
 
 
 def aggregate_quiz_analytics(
@@ -1270,5 +1778,99 @@ def export_per_session_csv(problem_labels: List[str], per_session: List[Dict[str
             )
         out.extend(_survey_csv_answers_for_row(row.get("survey_summary"), survey_specs))
         w.writerow(out)
+
+    return buf.getvalue()
+
+
+def export_activity_log_csv(
+    problem_tables: List[Dict[str, Any]],
+    user_id: str,
+    session_id: Optional[str],
+    only_problem_index: Optional[int] = None,
+) -> str:
+    """CSV for one problem table or all tables (Excel-friendly; multiline fields quoted)."""
+    if not isinstance(problem_tables, list):
+        problem_tables = []
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+
+    def _latency_cell(r: Dict[str, Any]) -> Any:
+        lat = r.get("reaction_latency_seconds")
+        if lat is None:
+            return ""
+        try:
+            x = float(lat)
+            if math.isnan(x) or math.isinf(x):
+                return ""
+            return round(x, 4)
+        except (TypeError, ValueError):
+            return ""
+
+    if only_problem_index is not None:
+        want = int(only_problem_index)
+        tables = [t for t in problem_tables if int(t.get("problem_index", -1)) == want]
+        if not tables:
+            return ""
+        header = [
+            "user_id",
+            "session_id",
+            "row_in_problem",
+            "suggestion_time",
+            "code_suggestion",
+            "accept_reject",
+            "reaction_latency_seconds",
+            "interpretation",
+            "code_snapshot",
+        ]
+        w.writerow(header)
+        for r in tables[0].get("rows") or []:
+            w.writerow(
+                [
+                    user_id,
+                    session_id or "",
+                    r.get("index_in_problem") or r.get("index") or "",
+                    r.get("timestamp") or "",
+                    r.get("suggestion") or "",
+                    r.get("accept_reject") or "",
+                    _latency_cell(r),
+                    r.get("interpretation") or "",
+                    r.get("code_snapshot") or "",
+                ]
+            )
+    else:
+        header = [
+            "user_id",
+            "session_id",
+            "problem_index",
+            "problem_label",
+            "row_in_problem",
+            "suggestion_time",
+            "code_suggestion",
+            "accept_reject",
+            "reaction_latency_seconds",
+            "interpretation",
+            "code_snapshot",
+        ]
+        w.writerow(header)
+        for t in problem_tables:
+            pi = t.get("problem_index", "")
+            lab = t.get("label") or ""
+            for r in t.get("rows") or []:
+                w.writerow(
+                    [
+                        user_id,
+                        session_id or "",
+                        pi,
+                        lab,
+                        r.get("index_in_problem") or r.get("index") or "",
+                        r.get("timestamp") or "",
+                        r.get("suggestion") or "",
+                        r.get("accept_reject") or "",
+                        _latency_cell(r),
+                        r.get("interpretation") or "",
+                        r.get("code_snapshot") or "",
+                    ]
+                )
 
     return buf.getvalue()
