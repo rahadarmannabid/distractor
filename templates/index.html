@@ -12,32 +12,81 @@
             padding: 0;
             box-sizing: border-box;
         }
+
+        :root {
+            --font-ui-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            --font-code-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Courier New', monospace;
+            --font-size-code: 12px;
+            --font-size-ui: 13px;
+            --chrome-header-bg: linear-gradient(135deg, #2d2d30, #3e3e42);
+            --chrome-header-border: 1px solid #333;
+            --chrome-header-padding: 0 14px;
+            --chrome-header-height: 48px;
+            --chrome-header-min-height: 48px;
+            --panel-border-color: #333;
+            --chrome-title-size: 13px;
+            --chrome-title-color: #e6edf3;
+            --chrome-title-weight: 600;
+        }
+
+        /* Inline code in dynamic HTML (survey / history) — matches editor mono stack */
+        .inline-code-font {
+            font-family: var(--font-code-mono);
+        }
         
         html, body {
             height: 100%;
+            width: 100%;
+            max-width: 100%;
             overflow: hidden;
         }
         
         body {
-            font-family: 'Consolas', 'Menlo', 'Ubuntu Mono', monospace;
+            font-family: var(--font-ui-sans);
+            font-size: var(--font-size-ui);
             background: #1e1e1e;
             color: #d4d4d4;
         }
 
-        /* Flex Container */
+        /* Main workbench — grid aligns all panel headers on one row.
+           Problem column is capped so the editor (1fr) gets the rest of the width — no empty gutter. */
         #application {
-            display: flex;
-            width: 100vw;
+            display: grid;
+            grid-template-columns: 180px minmax(0, 1fr) 6px minmax(220px, min(32vw, 420px));
+            grid-template-rows: var(--chrome-header-height) minmax(0, 1fr);
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
             height: 100vh;
+            height: 100dvh;
             overflow: hidden;
         }
-        #content {
-            flex: 1;
+        #application > #fileTreeSidebar {
+            grid-column: 1;
+            grid-row: 1 / -1;
             min-width: 0;
+            min-height: 0;
             display: flex;
             flex-direction: column;
-            height: 100vh;
             overflow: hidden;
+        }
+        #application > #header.header {
+            grid-column: 2;
+            grid-row: 1;
+        }
+        #application > .editor-col {
+            grid-column: 2;
+            grid-row: 2;
+            min-height: 0;
+        }
+        #application > #resize-problem {
+            grid-column: 3;
+            grid-row: 1 / -1;
+        }
+        #application > #problemPanel {
+            grid-column: 4;
+            grid-row: 1 / -1;
+            min-width: 0;
         }
         .editor-wrapper {
             position: relative;
@@ -85,69 +134,72 @@
 
         /* ── Left Problem Panel ─────────────────────────── */
         #problemPanel {
-            width: 28vw;
-            min-width: 200px;
-            max-width: 45vw;
-            height: 100vh;
+            width: 100%;
+            min-width: 0;
+            max-width: none;
+            height: 100%;
             display: flex;
             flex-direction: column;
             background: #1e1e1e;
-            border-left: 1px solid #333;
             overflow: hidden;
-            flex-shrink: 0;
         }
         .problem-panel__header {
-            padding: 10px 16px 8px;
-            min-height: 40px;
+            box-sizing: border-box;
+            height: var(--chrome-header-height);
+            min-height: var(--chrome-header-min-height);
+            padding: var(--chrome-header-padding);
             display: flex;
             align-items: center;
-            background: linear-gradient(180deg, #2d2d30 0%, #252526 100%);
-            border-bottom: 1px solid #30363d;
-            box-shadow: 0 1px 0 rgba(0,0,0,0.25);
+            background: var(--chrome-header-bg);
+            border-bottom: var(--chrome-header-border);
             flex-shrink: 0;
-        }
-        .problem-panel__current-label {
-            margin: 0;
-            font-size: 15px;
-            font-weight: 600;
-            color: #4ade80;
-            line-height: 1.35;
-            letter-spacing: -0.02em;
         }
         .problem-panel__body {
             flex: 1;
             overflow-y: auto;
-            padding: 4px 16px 20px;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            font-size: 15px;
-            line-height: 1.7;
+            padding: 8px 12px 12px;
+            font-family: var(--font-ui-sans);
+            font-size: var(--font-size-ui);
+            line-height: 1.5;
             color: #d4d4d4;
-            white-space: pre-wrap;
             word-wrap: break-word;
+        }
+        .problem-panel__body .problem-section {
+            margin-bottom: 10px;
+        }
+        .problem-panel__body .problem-section:last-child {
+            margin-bottom: 0;
         }
         .problem-panel__body .section-label {
             display: block;
+            font-family: var(--font-ui-sans);
             font-size: 11px;
             font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 1.1px;
-            color: #58a6ff;
-            margin: 0 0 6px 0;
-            padding-bottom: 4px;
+            letter-spacing: 0.06em;
+            color: #79c0ff;
+            margin: 0 0 4px 0;
+            padding: 0 0 3px 0;
             border-bottom: 1px solid #30363d;
         }
-        .problem-panel__body .section-label:first-of-type {
-            margin-top: 0;
-            padding-top: 0;
+        .problem-panel__body .section-content {
+            white-space: pre-wrap;
+            margin: 0;
+            color: #d4d4d4;
         }
-        .problem-panel__body .section-label:not(:first-of-type) {
-            margin-top: 18px;
+        .problem-panel__body .section-content--mono {
+            font-family: var(--font-code-mono);
+            font-size: var(--font-size-code);
+            line-height: 1.45;
+            color: #c9d1d9;
         }
         .problem-panel__body .quiz-title {
-            font-size: 20px;
+            font-family: var(--font-ui-sans);
+            font-size: 16px;
             font-weight: 700;
             color: #e6edf3;
-            margin-bottom: 12px;
+            margin: 0 0 8px 0;
+            line-height: 1.3;
         }
         /* Title is shown in header; server may still emit .problem-title briefly before JS moves it */
         .problem-panel__body .problem-title {
@@ -158,23 +210,72 @@
             font-style: italic;
         }
         #resize-problem {
-            width: 5px;
-            background-color: #333;
+            width: 6px;
             cursor: ew-resize;
             flex-shrink: 0;
-            transition: background-color 0.15s;
+            position: relative;
+            z-index: 2;
+            background: transparent;
+            margin: 0;
+            padding: 0;
+            align-self: stretch;
         }
-        #resize-problem:hover {
-            background-color: #007acc;
+        #resize-problem::after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            top: 0;
+            bottom: 0;
+            width: 1px;
+            background: var(--panel-border-color);
+            pointer-events: none;
+        }
+        #resize-problem:hover::after {
+            background: #007acc;
         }
 
-        /* ── File Tree Panel ────────────────────────────── */
-        .editor-row {
+        /* ── File tree sidebar (collapsible) ────────────────────────────── */
+        .file-tree-sidebar {
+            background: #252526;
+            border-right: 1px solid var(--panel-border-color);
+        }
+        .file-tree__collapse-btn {
+            background: transparent;
+            border: none;
+            color: #c9d1d9;
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
             display: flex;
-            flex-direction: row;
-            flex: 1;
-            min-height: 0;
-            overflow: hidden;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            line-height: 0;
+        }
+        .file-tree__collapse-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: #fff;
+        }
+        .file-tree__collapse-btn svg {
+            transition: transform 0.2s ease;
+        }
+        #application.file-tree--collapsed .file-tree__collapse-btn svg {
+            transform: rotate(180deg);
+        }
+        #application.file-tree--collapsed .file-tree__header h3 {
+            display: none;
+        }
+        #application.file-tree--collapsed #fileTreePanel {
+            display: none;
+        }
+        #application.file-tree--collapsed .file-tree__header {
+            justify-content: center;
+            padding-left: 4px;
+            padding-right: 4px;
+        }
+        #application.file-tree--collapsed > #fileTreeSidebar {
+            min-width: 0;
         }
         .editor-col {
             display: flex;
@@ -182,34 +283,27 @@
             flex: 1;
             min-width: 0;
             min-height: 0;
+            overflow: hidden;
         }
         #fileTreePanel {
-            width: 180px;
-            min-width: 120px;
+            flex: 1;
+            min-width: 0;
             display: flex;
             flex-direction: column;
-            background: #252526;
-            border-right: 1px solid #333;
             overflow: hidden;
-            flex-shrink: 0;
+            min-height: 0;
         }
         .file-tree__header {
-            padding: 8px 15px;
-            min-height: 40px;
+            box-sizing: border-box;
+            height: var(--chrome-header-height);
+            min-height: var(--chrome-header-min-height);
+            padding: var(--chrome-header-padding);
             display: flex;
             align-items: center;
-            background: #333334;
-            border-bottom: 1px solid #333;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            gap: 6px;
+            background: var(--chrome-header-bg);
+            border-bottom: var(--chrome-header-border);
             flex-shrink: 0;
-        }
-        .file-tree__header h3 {
-            margin: 0;
-            font-size: 12px;
-            font-weight: 600;
-            color: #999;
-            text-transform: uppercase;
-            letter-spacing: 0.8px;
         }
         .file-tree__list {
             list-style: none;
@@ -223,8 +317,8 @@
             align-items: center;
             gap: 6px;
             padding: 4px 16px;
-            font-family: 'Consolas', 'Menlo', monospace;
-            font-size: 13px;
+            font-family: var(--font-code-mono);
+            font-size: var(--font-size-code);
             color: #ccc;
             cursor: default;
             user-select: none;
@@ -248,11 +342,27 @@
             stroke-linejoin: round;
         }
 
-        /* Resizing */
+        /* Resizing — 1px line centered in grab area */
         #resize-terminal {
-            height: 5px;
-            background-color: darkgray;
+            height: 6px;
             cursor: ns-resize;
+            flex-shrink: 0;
+            position: relative;
+            background: transparent;
+        }
+        #resize-terminal::after {
+            content: '';
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            height: 1px;
+            background: var(--panel-border-color);
+            pointer-events: none;
+        }
+        #resize-terminal:hover::after {
+            background: #007acc;
         }
 
         /* Dark Theme Scrollbar */
@@ -270,21 +380,52 @@
             background: #505050;
         }
 
-        /* Header Styling */
+        /* Header Styling — single row so all panel headers share the same height */
         .header {
+            box-sizing: border-box;
             display: flex;
             align-items: center;
-            background: linear-gradient(135deg, #2d2d30, #3e3e42);
-            padding: 8px 15px;
-            border-bottom: 1px solid #333;
+            background: var(--chrome-header-bg);
+            padding: var(--chrome-header-padding);
+            border-bottom: var(--chrome-header-border);
             gap: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
             white-space: nowrap;
-            overflow: visible;
-            min-height: 40px;
-            height: auto;
+            height: var(--chrome-header-height);
+            min-height: var(--chrome-header-min-height);
+            max-height: var(--chrome-header-height);
             flex-shrink: 0;
-            flex-wrap: wrap;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            overflow-y: hidden;
+        }
+        /* Panel chrome titles — same scale as VS Code–style tool UI */
+        .header h2,
+        .problem-panel__current-label {
+            margin: 0;
+            flex-shrink: 0;
+            font-family: var(--font-ui-sans);
+            font-size: var(--chrome-title-size);
+            font-weight: var(--chrome-title-weight);
+            line-height: 1.25;
+            letter-spacing: 0.01em;
+        }
+        .file-tree__header h3 {
+            margin: 0;
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-family: var(--font-ui-sans);
+            font-size: var(--chrome-title-size);
+            font-weight: var(--chrome-title-weight);
+            line-height: 1.25;
+            letter-spacing: 0.06em;
+            color: #8b949e;
+            text-transform: uppercase;
+        }
+        .header h2,
+        .problem-panel__current-label {
+            color: var(--chrome-title-color);
         }
 
         /* Hide unwanted header elements */
@@ -306,6 +447,7 @@
             display: flex;
             align-items: center;
             gap: 10px;
+            flex-shrink: 0;
         }
         .user-info__identity {
             display: flex;
@@ -329,6 +471,7 @@
             border-radius: 4px;
             padding: 6px 12px;
             color: white;
+            font-family: var(--font-ui-sans);
             font-size: 12px;
             cursor: pointer;
             transition: background 0.3s ease;
@@ -338,28 +481,58 @@
         .logout-btn:hover {
             background: #dc2626;
         }
+        .terminal .header {
+            box-sizing: border-box;
+            height: var(--chrome-header-height);
+            min-height: var(--chrome-header-min-height);
+            max-height: var(--chrome-header-height);
+        }
         .terminal-controls {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
             margin-left: auto;
+            flex-shrink: 0;
+            min-width: 0;
+        }
+        /* Terminal bar — identical box model so Run / Clear / Submit stay one height (no wrap, no extra margin from loading UI) */
+        .terminal .header .terminal-controls .run-button,
+        .terminal .header .terminal-controls .clear-button,
+        .terminal .header .terminal-controls .submit-button {
+            box-sizing: border-box;
+            flex: 1 1 0;
+            min-width: 4.5rem;
+            max-width: none;
+            height: 30px;
+            min-height: 30px;
+            max-height: 30px;
+            padding: 0 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            white-space: nowrap;
+            font-size: 11px;
+            line-height: 1;
+            gap: 4px;
         }
         .run-button {
             background: linear-gradient(135deg, #22c55e, #16a34a);
             border: none;
             border-radius: 4px;
-            padding: 8px 14px;
+            padding: 6px 12px;
             color: white;
-            font-size: 12px;
+            font-family: var(--font-ui-sans);
+            font-size: 11px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s ease;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            display: flex;
+            letter-spacing: 0.4px;
+            display: inline-flex;
             align-items: center;
-            gap: 5px;
-            min-height: 36px;
+            justify-content: center;
+            gap: 4px;
+            min-height: 30px;
         }
         .run-button:hover {
             background: linear-gradient(135deg, #16a34a, #15803d);
@@ -376,15 +549,19 @@
             background: linear-gradient(135deg, #3b82f6, #2563eb);
             border: none;
             border-radius: 4px;
-            padding: 8px 14px;
+            padding: 6px 12px;
             color: white;
-            font-size: 12px;
+            font-family: var(--font-ui-sans);
+            font-size: 11px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s ease;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            min-height: 36px;
+            letter-spacing: 0.4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 30px;
         }
         .clear-button:hover {
             background: linear-gradient(135deg, #2563eb, #1d4ed8);
@@ -395,18 +572,20 @@
             background: linear-gradient(135deg, #f97316, #ea580c);
             border: none;
             border-radius: 4px;
-            padding: 8px 14px;
+            padding: 6px 12px;
             color: white;
-            font-size: 12px;
+            font-family: var(--font-ui-sans);
+            font-size: 11px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s ease;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            display: flex;
+            letter-spacing: 0.4px;
+            display: inline-flex;
             align-items: center;
-            gap: 5px;
-            min-height: 36px;
+            justify-content: center;
+            gap: 4px;
+            min-height: 30px;
         }
         .submit-button:hover {
             background: linear-gradient(135deg, #ea580c, #dc2626);
@@ -429,6 +608,8 @@
             padding: 4px 8px;
             border-radius: 4px;
             margin-right: 10px;
+            font-family: var(--font-ui-sans);
+            flex-shrink: 0;
         }
         .font-button {
             background: #569cd6;
@@ -436,12 +617,13 @@
             border-radius: 3px;
             padding: 4px 8px;
             color: white;
-            font-size: 10px;
+            font-family: var(--font-ui-sans);
+            font-size: 11px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.2s ease;
             min-width: 24px;
-            height: 20px;
+            height: 22px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -454,10 +636,11 @@
             transform: translateY(0);
         }
         .font-size-display {
+            font-family: var(--font-ui-sans);
             color: #cccccc;
-            font-size: 10px;
+            font-size: 11px;
             font-weight: 500;
-            min-width: 30px;
+            min-width: 34px;
             text-align: center;
         }
 
@@ -522,12 +705,11 @@
             display: flex;
             flex-direction: column;
             background: #1e1e1e;
-            border-top: 1px solid #333;
         }
         .terminal-output {
-            font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro', monospace;
-            font-size: 12px;
-            line-height: 1.4;
+            font-family: var(--font-code-mono);
+            font-size: var(--font-size-code);
+            line-height: 1.45;
             padding: 12px 16px;
             overflow-y: auto;
             word-break: break-word;
@@ -560,11 +742,16 @@
             margin-top: 5px;
         }
         .terminal-loading {
-            display: flex;
+            display: inline-flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             color: #f59e0b;
-            margin: 10px 0;
+            margin: 0;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            white-space: nowrap;
         }
         .terminal-spinner {
             width: 12px;
@@ -792,8 +979,9 @@
         /* Markdown formatting styles for problem description */
         #problemDescriptionDisplay {
             white-space: normal;
-            line-height: 1.4;
-            font-size: 12px;
+            line-height: 1.45;
+            font-family: var(--font-ui-sans);
+            font-size: var(--font-size-ui);
         }
 
         #problemDescriptionDisplay h1, 
@@ -801,20 +989,21 @@
         #problemDescriptionDisplay h3 {
             color: #4ade80;
             margin: 10px 0 5px 0;
-            font-size: 13px;
+            font-size: 14px;
+            font-family: var(--font-ui-sans);
         }
 
         #problemDescriptionDisplay p {
             margin: 8px 0;
-            font-size: 12px;
+            font-size: var(--font-size-ui);
         }
 
         #problemDescriptionDisplay code {
             background: #2d2d2d;
             padding: 2px 6px;
             border-radius: 3px;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 12px;
+            font-family: var(--font-code-mono);
+            font-size: var(--font-size-code);
         }
 
         #problemDescriptionDisplay pre {
@@ -823,19 +1012,20 @@
             border-radius: 6px;
             overflow-x: auto;
             margin: 10px 0;
-            font-size: 12px;
+            font-family: var(--font-code-mono);
+            font-size: var(--font-size-code);
         }
 
         #problemDescriptionDisplay ul, 
         #problemDescriptionDisplay ol {
             padding-left: 20px;
             margin: 8px 0;
-            font-size: 12px;
+            font-size: var(--font-size-ui);
         }
 
         #problemDescriptionDisplay li {
             margin: 4px 0;
-            font-size: 12px;
+            font-size: var(--font-size-ui);
         }
 
         /* Loading screen */
@@ -1225,11 +1415,11 @@
     color: #d4d4d4;
     padding: 10px 20px;
     text-align: center;
-    font-size: 12px;
+    font-size: var(--font-size-ui);
     font-weight: 500;
     z-index: 9999;
     box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-    font-family: 'Consolas', 'Menlo', 'Ubuntu Mono', monospace;
+    font-family: var(--font-ui-sans);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1342,8 +1532,13 @@
     }
     
     .header h2 {
-        font-size: 14px;
+        font-size: 12px;
         margin-right: 5px;
+    }
+
+    .file-tree__header h3,
+    .problem-panel__current-label {
+        font-size: 12px;
     }
     
     .font-controls {
@@ -1363,7 +1558,9 @@
     .header {
         gap: 4px;
         padding: 6px 8px;
-        min-height: 44px;
+        height: var(--chrome-header-height);
+        min-height: var(--chrome-header-min-height);
+        max-height: var(--chrome-header-height);
     }
     
     .font-controls {
@@ -1398,7 +1595,8 @@
     }
     
     .terminal .header {
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
+        overflow-x: auto;
     }
     
     .terminal-controls {
@@ -1409,13 +1607,17 @@
         gap: 4px;
     }
     
-    .run-button,
-    .clear-button,
-    .submit-button {
+    .terminal .header .terminal-controls .run-button,
+    .terminal .header .terminal-controls .clear-button,
+    .terminal .header .terminal-controls .submit-button {
         flex: 1;
         min-width: 0;
-        padding: 8px 6px;
+        height: 28px;
+        min-height: 28px;
+        max-height: 28px;
+        padding: 0 6px;
         font-size: 10px;
+        white-space: nowrap;
     }
     
     .teaser-card {
@@ -1433,15 +1635,21 @@
 /* Mobile Phone (< 768px) */
 @media (max-width: 480px) {
     .header {
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
+        overflow-x: auto;
         gap: 4px;
         padding: 6px;
-        justify-content: space-between;
+        justify-content: flex-start;
     }
     
     .header h2 {
-        font-size: 12px;
+        font-size: 11px;
         flex: 0 0 auto;
+    }
+
+    .file-tree__header h3,
+    .problem-panel__current-label {
+        font-size: 11px;
     }
     
     .user-info {
@@ -1496,7 +1704,7 @@
             background: linear-gradient(135deg, #1e1e2e, #252538);
             border: 1.5px solid #f97316;
             box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 12px rgba(249,115,22,0.25);
-            font-family: 'Consolas', 'Menlo', 'Ubuntu Mono', monospace;
+            font-family: var(--font-ui-sans);
             overflow: hidden;
             animation: copilotPopIn 0.18s ease-out;
         }
@@ -1524,14 +1732,17 @@
             border-left: 3px solid #f97316;
             border-radius: 10px 10px 0 0;
             color: #fbd38d;
-            font-size: 12px;
+            font-size: var(--font-size-ui);
             line-height: 1.55;
+        }
+        #copilotPopupExplanation {
+            white-space: pre-line;
         }
         .copilot-popup__explanation-label {
             text-transform: uppercase;
-            font-size: 10px;
+            font-size: 11px;
             font-weight: 700;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.06em;
             color: #fbbf24;
             margin-bottom: 4px;
             display: flex;
@@ -1553,9 +1764,9 @@
         }
         .copilot-popup__suggestion-label {
             text-transform: uppercase;
-            font-size: 10px;
+            font-size: 11px;
             font-weight: 700;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.06em;
             color: #60a5fa;
             margin-bottom: 4px;
             display: flex;
@@ -1575,8 +1786,9 @@
             border-radius: 4px;
             padding: 6px 10px;
             color: #d4d4d4;
-            font-size: 11px;
-            line-height: 1.4;
+            font-family: var(--font-code-mono);
+            font-size: var(--font-size-code);
+            line-height: 1.45;
             white-space: pre-wrap;
             word-break: break-word;
         }
@@ -1686,22 +1898,23 @@
 
     <!-- Main App (Initially Hidden) -->
     <div id="application" class="hidden">
-        <div id="content">
-          <div class="editor-row">
-            <!-- File Tree Sidebar -->
+            <div id="fileTreeSidebar" class="file-tree-sidebar">
+            <div class="file-tree__header">
+                <button type="button" class="file-tree__collapse-btn" id="fileTreeToggleBtn" aria-expanded="true" aria-controls="fileTreePanel" title="Collapse files panel">
+                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+                </button>
+                <h3>Files</h3>
+            </div>
             <div id="fileTreePanel">
-                <div class="file-tree__header">
-                    <h3>Files</h3>
-                </div>
                 <ul class="file-tree__list" id="fileTreeList">
                 </ul>
             </div>
-            <div class="editor-col">
+            </div><!-- /#fileTreeSidebar -->
             <div id="header" class="header">
                 <h2>Code Editor</h2>
                 <div class="font-controls">
                     <button class="font-button" id="decreaseFontBtn">A-</button>
-                    <span class="font-size-display" id="fontSizeDisplay">14px</span>
+                    <span class="font-size-display" id="fontSizeDisplay">12px</span>
                     <button class="font-button" id="increaseFontBtn">A+</button>
                 </div>
                 <div class="user-info">
@@ -1710,18 +1923,19 @@
                     <span class="condition-indicator" id="problemProgress" style="display:none;background:linear-gradient(135deg,#7c3aed,#a78bfa);">Problem 1/1</span>
                     <div class="user-info__identity" title="Anonymous session icon (not a person)">
                         <img id="userAvatar" class="user-avatar" src="" alt="" width="32" height="32" decoding="async" referrerpolicy="no-referrer" />
-                        <span id="userDisplay">User: --</span>
+                        <span id="userDisplay">--</span>
                     </div>
                     <button class="logout-btn" id="logoutBtn">End Session</button>
                 </div>
             </div>
+            <div class="editor-col">
             <div class="editor-wrapper">
                 <div id="editor"></div>
 
                 <!-- Floating Copilot Suggestion Popup -->
                 <div id="copilotPopup">
                     <div class="copilot-popup__section copilot-popup__explanation">
-                        <div class="copilot-popup__explanation-label">Explanation</div>
+                        <div class="copilot-popup__explanation-label">Problem</div>
                         <div id="copilotPopupExplanation">Waiting for analysis...</div>
                     </div>
                     <div class="copilot-popup__section copilot-popup__suggestion">
@@ -1735,7 +1949,7 @@
                         <button class="copilot-popup__icon-btn copilot-popup__icon-btn--reject" id="copilotRejectBtn" title="Reject (Esc)">
                             <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                         </button>
-                        <span class="copilot-popup__hint"><kbd>Tab</kbd> accept · <kbd>Esc</kbd> dismiss</span>
+                        <span class="copilot-popup__hint"><kbd>Tab</kbd> accept · <kbd>Esc</kbd> reject</span>
                     </div>
                 </div>
 
@@ -1767,8 +1981,6 @@
                     </div>
                 </div>
             </div>
-            </div><!-- /.editor-col -->
-          </div><!-- /.editor-row -->
             <div id="resize-terminal"></div>
             <div class="terminal" id="terminal">
                 <div class="header">
@@ -1776,7 +1988,7 @@
                     <div class="terminal-controls">
                         <button class="run-button" id="runButton">▶ Run</button>
                         <button class="clear-button" id="clearButton">✕ Clear</button>
-                        <button class="submit-button" id="submitButton">✓ Submit Code</button>
+                        <button class="submit-button" id="submitButton">SUBMIT</button>
                     </div>
                 </div>
                 <div class="terminal-output" id="terminalOutput">
@@ -1791,7 +2003,7 @@
                     </div>
                 </div>
             </div>
-        </div>
+            </div><!-- /.editor-col -->
 
         <div id="resize-problem"></div>
         <!-- Right Problem Description Panel -->
@@ -2021,6 +2233,7 @@ function saveProgress() {
                 guessHistory: currentSession.guessHistory || [],
                 descHistory: currentSession.descHistory || [],
                 suggestionsHistory: currentSession.suggestionsHistory || [],
+                suggestionResponses: currentSession.suggestionResponses || [],
                 currentGuess: document.getElementById('analysis') ? document.getElementById('analysis').innerHTML : '',
                 currentSuggestion: document.getElementById('suggestionGuess') ? document.getElementById('suggestionGuess').innerHTML : ''
             },
@@ -2120,6 +2333,7 @@ function applyRestoredProgress(progressData) {
             currentSession.guessHistory = progressData.ai.guessHistory || [];
             currentSession.descHistory = progressData.ai.descHistory || [];
             currentSession.suggestionsHistory = progressData.ai.suggestionsHistory || [];
+            currentSession.suggestionResponses = progressData.ai.suggestionResponses || [];
             
             if (progressData.ai.currentGuess) {
                 const analysisEl = document.getElementById('analysis');
@@ -2166,9 +2380,6 @@ function applyRestoredProgress(progressData) {
         }
         
         const savedTime = new Date(progressData.timestamp);
-        addTerminalOutput(`✅ Progress restored from ${savedTime.toLocaleString()}`, 'success');
-        addTerminalOutput(`📝 Restored ${progressData.editor.code.length} characters of code`, 'info');
-        
         logActivity('progress_restored', {
             saved_timestamp: progressData.timestamp,
             code_length: progressData.editor.code.length,
@@ -2179,7 +2390,6 @@ function applyRestoredProgress(progressData) {
         
     } catch (error) {
         console.error('Failed to apply restored progress:', error);
-        addTerminalOutput('⚠️ Some progress could not be restored', 'warning');
     }
 }
 
@@ -2225,7 +2435,6 @@ function handleDismissRestore() {
     if (banner) banner.remove();
     
     clearProgress();
-    addTerminalOutput('Started with fresh state', 'info');
 }
 
 function clearProgress() {
@@ -2298,6 +2507,7 @@ let currentSession = {
     guessHistory: [],
     descHistory: [],
     suggestionsHistory: [],
+    suggestionResponses: [],
     // Multi-problem tracking
     totalProblems: 1,
     currentProblemIndex: 0,
@@ -2326,11 +2536,14 @@ let isTabVisible = true;
 let activityBuffer = [];
 const ACTIVITY_BATCH_SIZE = 10;
 
-    // Font size management
+    // Font size management — keep Monaco, terminal, file tree, and mono panels in sync via --font-size-code
+    const CODE_EDITOR_FONT_FAMILY = "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Courier New', monospace";
     let currentFontSize = 12;    
     const minFontSize = 10;
     const maxFontSize = 24;
     let isAnalyzing = false;
+    /** Idle delay (ms) before triggering /analyze after a newline or blank-line idle. */
+    var AI_SUGGESTION_IDLE_MS = 3000;
 
     let surveyData = {
     analysisCount: 0,
@@ -2713,7 +2926,8 @@ function captureAllSubmissionData() {
                 allActivityLogs: [...activityLog],
                 guessHistory: [...currentSession.guessHistory],
                 descHistory: [...currentSession.descHistory],
-                suggestionsHistory: [...currentSession.suggestionsHistory]
+                suggestionsHistory: [...currentSession.suggestionsHistory],
+                suggestionResponses: [...(currentSession.suggestionResponses || [])]
             },
             
             // Metrics
@@ -2931,6 +3145,11 @@ async function uploadActivityBatch() {
         loadingScreen.classList.add('hidden');
         accessDeniedScreen.classList.add('hidden');
         mainApp.classList.remove('hidden');
+        requestAnimationFrame(function () {
+            if (typeof restoreFileTreeSidebarFromStorage === 'function') {
+                restoreFileTreeSidebarFromStorage();
+            }
+        });
     }
 
     function showSuccessMessage(message, countdown = 3) {
@@ -3013,6 +3232,7 @@ async function initializeFromURL() {
             guessHistory: [],
             descHistory: [],
             suggestionsHistory: [],
+            suggestionResponses: [],
             // Multi-problem tracking
             totalProblems: authData.totalProblems || 1,
             currentProblemIndex: authData.currentProblemIndex || 0,
@@ -3037,7 +3257,7 @@ async function initializeFromURL() {
         restorePeriodicSurveysFromStorage();
 
         // Update UI
-        userDisplay.textContent = `User: ${authData.userId}`;
+        userDisplay.textContent = authData.userId || '--';
         (function initUserAvatar() {
             var img = document.getElementById('userAvatar');
             if (!img) return;
@@ -3259,39 +3479,8 @@ async function initializeFromURL() {
             startAutoSave();
         }, 500);
         
-        // Add welcome messages
+        // Session setup (terminal reserved for Run output — no welcome spam)
         setTimeout(() => {
-            addTerminalOutput(`Secure session restored successfully!`, 'success');
-            addTerminalOutput(`User ID: ${authData.userId}`, 'info');
-            addTerminalOutput(`Assignment: ${authData.assignmentKey}`, 'info');
-            addTerminalOutput(`Condition: ${authData.condition}`, 'info');
-            addTerminalOutput(`Session ID: ${authData.sessionId}`, 'info');
-            addTerminalOutput(`Database: Ready for logging`, 'info');
-            
-            // ✅ Show final survey status (match currentSession: strict booleans from auth JSON)
-            if (authData.finalSurveyDisabled === true) {
-                addTerminalOutput(`📋 Final Likert at submit: DISABLED for this assignment`, 'warning');
-            } else if (authData.periodicSurveyEnabled !== true) {
-                addTerminalOutput(`📋 In-IDE periodic / final Likert: OFF (recurrent surveys not enabled)`, 'info');
-            } else {
-                addTerminalOutput(`📋 Final Likert at submit: ON (when you have periodic survey questions)`, 'info');
-            }
-            
-            if (authData.pasteAllowed === 0 || authData.pasteAllowed === "0") {
-                addTerminalOutput(`⚠️  COPY/PASTE DISABLED: All code must be typed manually`, 'warning');
-                addTerminalOutput(`   This restriction is part of the research study`, 'info');
-            } else {
-                addTerminalOutput(`✅ Copy/paste functionality is enabled`, 'info');
-            }
-            if (authData.tabTrackingEnabled !== false) {
-                addTerminalOutput(`📋 Tab switching is tracked`, 'info');
-            } else {
-                addTerminalOutput(`📋 Tab switching: Not tracked`, 'info');
-            }
-            
-            addTerminalOutput(`IMPORTANT: Submitting code will automatically log you out`, 'warning');
-            addTerminalOutput(`TIP: Use A+/A- buttons on the top right corner to adjust font size (Current: 12px)`, 'info');
-            
             // Load survey configuration
             loadSurveyConfig();
             // Fetch survey questions from backend
@@ -3409,7 +3598,8 @@ async function initializeEditor() {
                     folding: true,
                     selectOnLineNumbers: true,
                     matchBrackets: 'always',
-                    fontSize: 12,
+                    fontFamily: CODE_EDITOR_FONT_FAMILY,
+                    fontSize: currentFontSize,
                     quickSuggestions: false,
                     suggestOnTriggerCharacters: false,
                     wordBasedSuggestions: 'off',
@@ -3495,29 +3685,31 @@ async function initializeEditor() {
                             startCodeEditingActivity(editType, details);
                             scheduleCodeEditingEnd();
                         }
-                        
-                        // Trigger AI analysis on new lines - fast response
+
+                        // 1) User goes to next line (Enter / inserted newline) → start suggestion
                         if (change.text.includes('\n')) {
-                            debounceNewlineAnalysis(0);
+                            _lastBlankIdleAnalyzeAt = Date.now();
+                            analyzeCurrentCode({ skipPreviousCodeCheck: true, triggerReason: 'newline' });
                             break;
                         }
                     }
                 });
 
+                // 2) User idles 3s on a blank line → start suggestion
                 setInterval(function() {
                     if (aiDisabled || !window.editor || isAnalyzing) return;
+                    if (isCopilotPopupPending()) return;
                     if (!currentSession || !currentSession.sessionId) return;
-                    if (Date.now() - _lastActivityForBlankIdle < 2000) return;
+                    if (Date.now() - _lastActivityForBlankIdle < AI_SUGGESTION_IDLE_MS) return;
                     var pos = window.editor.getPosition();
                     var lineNum = pos.lineNumber;
                     var ln = window.editor.getModel().getLineContent(lineNum);
                     if (ln.trim() !== '') return;
                     var codeProbe = window.editor.getValue().replace(/^\s+/, '');
                     if (!codeProbe || codeProbe === '// Start coding here...' || codeProbe === '# Start coding here...') return;
-                    // Avoid hammering the API if the user stays on an empty line
-                    if (Date.now() - _lastBlankIdleAnalyzeAt < 5000) return;
+                    if (Date.now() - _lastBlankIdleAnalyzeAt < AI_SUGGESTION_IDLE_MS) return;
                     _lastBlankIdleAnalyzeAt = Date.now();
-                    analyzeCurrentCode({ skipPreviousCodeCheck: true });
+                    analyzeCurrentCode({ skipPreviousCodeCheck: true, triggerReason: 'blank_line_idle' });
                 }, 300);
 
                 // ACTIVITY LOGGING: Cursor position tracking (for user interaction only - no logging)
@@ -3671,36 +3863,21 @@ function showTabReturnNotification() {
     }, 3000);
 }
 
-let debounceTimerNewline; // For Enter key - fast response
-let debounceTimerGeneral; // For general typing - slower
-
-// Quick response for Enter key
-function debounceNewlineAnalysis(delay = 300) {
-    if (aiDisabled) return;  // Skip if AI is disabled
-    clearTimeout(debounceTimerNewline);
-    debounceTimerNewline = setTimeout(() => { 
-        analyzeCurrentCode()
-    }, delay);
-}
-
-// Slower background analysis for general typing
-function debounceGeneralAnalysis(delay = 1500) {
-    if (aiDisabled) return;  // Skip if AI is disabled
-    clearTimeout(debounceTimerGeneral);
-    debounceTimerGeneral = setTimeout(() => { 
-        analyzeCurrentCode()
-    }, delay);
-}
-
-
 let previousCode = ''
-// Blank-line idle: 2s with no edits and no line change (column moves on same line do not reset)
+// Blank-line idle: AI_SUGGESTION_IDLE_MS with no edits and no line change (column moves on same line do not reset)
 var _lastActivityForBlankIdle = Date.now();
 var _prevCursorLineBlankIdle = 1;
 var _lastBlankIdleAnalyzeAt = 0;
 
+/** After accept/reject, require a fresh idle period on a blank line before the next suggestion. */
+function resetBlankIdleAfterSuggestionDismiss() {
+    _lastActivityForBlankIdle = Date.now();
+    _lastBlankIdleAnalyzeAt = Date.now();
+}
+
 // Analyze current code
 // opts.skipPreviousCodeCheck — allow re-run when code unchanged (e.g. idle on blank line)
+// opts.force — clear any open suggestion popup and run (e.g. final analysis before submit)
 async function analyzeCurrentCode(opts) {
     opts = opts || {};
     // Check if AI is disabled for this assignment
@@ -3711,6 +3888,15 @@ async function analyzeCurrentCode(opts) {
     
     if (!currentSession.sessionId) {
         console.warn('No active session for code analysis');
+        return;
+    }
+
+    if (opts.force && isCopilotPopupPending()) {
+        logActivity('copilot_popup_cleared_for_analysis', {});
+        _pendingSuggestionMeta = null;
+        hideCopilotPopup();
+    }
+    if (!opts.force && isCopilotPopupPending()) {
         return;
     }
     
@@ -3737,7 +3923,7 @@ async function analyzeCurrentCode(opts) {
 
     // ACTIVITY LOG: AI analysis trigger
 logActivity('ai_analysis_trigger', {
-    trigger_reason: 'new_line_added',
+    trigger_reason: opts.triggerReason || 'unknown',
     code_length: code.length,
     analysis_number: surveyData.analysisCount + 1
 });
@@ -3843,9 +4029,18 @@ logActivity('ai_analysis_complete', {
                 var popupExplanation = currentSession.condition === 3
                     ? 'AI Code Suggestion'
                     : problemDescription;
-                showCopilotPopup(popupExplanation, nextLineCode, popupType, suggestionKind,
+                var shown = showCopilotPopup(popupExplanation, nextLineCode, popupType, suggestionKind,
                     { lineNumber: triggerLine, column: triggerColumn });
+                if (shown) {
+                    _pendingSuggestionMeta = {
+                        nextLine: nextLineCode,
+                        problemDescription: problemDescription,
+                        suggestionKind: suggestionKind,
+                        shownAt: new Date().toISOString()
+                    };
+                }
             } catch (popupErr) {
+                _pendingSuggestionMeta = null;
                 console.warn('Copilot popup failed (non-blocking):', popupErr);
             }
         }
@@ -3853,7 +4048,6 @@ logActivity('ai_analysis_complete', {
 
     } catch (error) {
         console.error('Analysis error:', error);
-        addTerminalOutput('AI analysis failed - check connection: ' + error.message, 'error');
     } finally {
         // Always hide thinking animation and re-enable editor
         setTimeout(() => {
@@ -3895,6 +4089,35 @@ var _copilotPopupType = '';
 var _copilotSuggestionKind = 'next_line';
 var _copilotOriginPosition = null;   // cursor pos when suggestion was generated
 var _copilotDismissAttached = false;
+/** Set when a suggestion is shown; cleared on accept/reject or forced dismiss. */
+var _pendingSuggestionMeta = null;
+
+function isCopilotPopupPending() {
+    var popup = document.getElementById('copilotPopup');
+    return !!(popup && popup.style.display === 'block');
+}
+
+function recordSuggestionResponse(accepted) {
+    if (!_pendingSuggestionMeta) return;
+    if (!currentSession.suggestionResponses) currentSession.suggestionResponses = [];
+    currentSession.suggestionResponses.push({
+        accepted: accepted,
+        suggestionText: _pendingSuggestionMeta.nextLine,
+        problemAnalysis: _pendingSuggestionMeta.problemDescription,
+        suggestionKind: _pendingSuggestionMeta.suggestionKind,
+        respondedAt: new Date().toISOString(),
+        shownAt: _pendingSuggestionMeta.shownAt
+    });
+    _pendingSuggestionMeta = null;
+}
+
+function _copilotRestoreEditorAfterPopup() {
+    if (!window.editor) return;
+    var wrap = document.querySelector('.editor-wrapper');
+    if (wrap && wrap.classList.contains('editor-wrapper--suggestion-loading')) return;
+    if (typeof teaserActive !== 'undefined' && teaserActive) return;
+    window.editor.updateOptions({ readOnly: false, readOnlyMessage: { value: '' } });
+}
 
 function computeBaseIndentForSuggestion(model, lineNumber) {
     var lineContent = model.getLineContent(lineNumber);
@@ -3982,13 +4205,13 @@ function _copilotPositionAtCursor() {
 
 function showCopilotPopup(explanation, suggestionCode, suggestionType, suggestionKind, originPosition) {
     try {
-        if (!suggestionCode || !suggestionCode.trim()) return;
+        if (!suggestionCode || !suggestionCode.trim()) return false;
 
         var popup         = document.getElementById('copilotPopup');
         var elExplanation = document.getElementById('copilotPopupExplanation');
         var elCode        = document.getElementById('copilotPopupCode');
         var elKindLabel   = document.getElementById('copilotPopupSuggestionLabel');
-        if (!popup || !elExplanation || !elCode) return;
+        if (!popup || !elExplanation || !elCode) return false;
 
         _copilotPopupText = suggestionCode;
         _copilotPopupType = suggestionType  || 'guess';
@@ -4010,10 +4233,14 @@ function showCopilotPopup(explanation, suggestionCode, suggestionType, suggestio
         popup.classList.remove('closing');
         popup.style.display = 'block';
         _copilotPositionAtCursor();
-        _copilotEnsureDismissListener();
+        if (window.editor && !(typeof teaserActive !== 'undefined' && teaserActive)) {
+            window.editor.updateOptions({ readOnly: true, readOnlyMessage: { value: '' } });
+        }
         _copilotAttachKeyboard();
+        return true;
     } catch (e) {
         console.warn('Copilot popup show error:', e);
+        return false;
     }
 }
 
@@ -4021,8 +4248,9 @@ function hideCopilotPopup() {
     try {
         var popup = document.getElementById('copilotPopup');
         if (!popup || popup.style.display === 'none') return;
-        popup.classList.add('closing');
         _copilotDetachKeyboard();
+        _copilotRestoreEditorAfterPopup();
+        popup.classList.add('closing');
 
         setTimeout(function() {
             popup.style.display = 'none';
@@ -4036,9 +4264,14 @@ function hideCopilotPopup() {
 function _copilotHandleAccept() {
     try {
         if (!_copilotPopupText || !window.editor) {
+            _pendingSuggestionMeta = null;
             hideCopilotPopup();
             return;
         }
+
+        // Monaco ignores executeEdits while readOnly — must allow edits before inserting
+        window.editor.updateOptions({ readOnly: false, readOnlyMessage: { value: '' } });
+        window.editor.focus();
 
         var model = window.editor.getModel();
 
@@ -4127,14 +4360,18 @@ function _copilotHandleAccept() {
         });
         currentSession.suggestionClickCount++;
         checkSuggestionBasedPeriodicSurvey();
+        recordSuggestionResponse(true);
     } catch (e) {
         console.warn('Copilot popup accept error:', e);
+        _pendingSuggestionMeta = null;
     }
     hideCopilotPopup();
+    resetBlankIdleAfterSuggestionDismiss();
 }
 
 function _copilotHandleReject() {
     try {
+        recordSuggestionResponse(false);
         logActivity('copilot_popup_reject', {
             suggestion_type: _copilotPopupType,
             suggestion_text: _copilotPopupText.substring(0, 80)
@@ -4145,22 +4382,11 @@ function _copilotHandleReject() {
         console.warn('Copilot popup reject error:', e);
     }
     hideCopilotPopup();
+    resetBlankIdleAfterSuggestionDismiss();
 }
 
 function _copilotEnsureDismissListener() {
-    if (_copilotDismissAttached) return;
-    if (!window.editor) return;
-    try {
-        window.editor.onDidChangeModelContent(function() {
-            var popup = document.getElementById('copilotPopup');
-            if (popup && popup.style.display === 'block') {
-                hideCopilotPopup();
-            }
-        });
-        _copilotDismissAttached = true;
-    } catch (e) {
-        console.warn('Copilot dismiss listener error:', e);
-    }
+    // Intentionally empty: suggestions are dismissed only via accept/reject (editor is read-only).
 }
 
 function _copilotBindButtons() {
@@ -4231,7 +4457,9 @@ function hideAIThinking() {
     var dot = document.getElementById('aiLoadingDot');
     if (dot) dot.remove();
     if (window.editor) {
-        window.editor.updateOptions({ readOnly: false });
+        if (isCopilotPopupPending()) return;
+        if (typeof teaserActive !== 'undefined' && teaserActive) return;
+        window.editor.updateOptions({ readOnly: false, readOnlyMessage: { value: '' } });
     }
 }
 
@@ -4500,7 +4728,7 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
                         <span style="color: #d4d4d4; font-size: 10px; line-height: 1.3;">${interaction.problem_analysis}</span>
                     </div>
                     <div style="background: #2d1b0e; padding: 4px 6px; border-radius: 3px; border-left: 3px solid #f97316;">
-                        <span style="font-family: 'Consolas', monospace; font-size: 10px; color: #fbbf24;">${interaction.next_line_suggestion}</span>
+                        <span class="inline-code-font" style="font-size: 10px; color: #fbbf24;">${interaction.next_line_suggestion}</span>
                     </div>
                 </div>
             `;
@@ -4525,7 +4753,7 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
                             <span style="color: #888; font-size: 10px;">${timeStr}</span>
                         </div>
                         <div style="background: #0e2f1e; padding: 4px 6px; border-radius: 3px; border-left: 3px solid #22c55e;">
-                            <span style="font-family: 'Consolas', monospace; font-size: 10px; color: #4ade80;">${interaction.next_line_suggestion}</span>
+                            <span class="inline-code-font" style="font-size: 10px; color: #4ade80;">${interaction.next_line_suggestion}</span>
                         </div>
                     </div>
                 `;
@@ -4554,7 +4782,7 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
                     </div>
                     <div style="background: #1e1e1e; padding: 6px 8px; border-radius: 4px; border-left: 3px solid #f97316;">
                         <strong style="color: #f97316; font-size: 11px;">Suggestion:</strong> 
-                        <span style="font-family: 'Consolas', monospace; font-size: 11px; color: #fbbf24;">${interaction.next_line_suggestion}</span>
+                        <span class="inline-code-font" style="font-size: 11px; color: #fbbf24;">${interaction.next_line_suggestion}</span>
                     </div>
                 </div>
             `;
@@ -4577,7 +4805,7 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
                             <span style="color: #888; font-size: 10px;">${timeStr}</span>
                         </div>
                         <div style="background: #2d1b69; padding: 6px 8px; border-radius: 4px; border-left: 3px solid #8b5cf6;">
-                            <span style="font-family: 'Consolas', monospace; font-size: 11px; color: #e9d5ff;">${interaction.next_line_suggestion}</span>
+                            <span class="inline-code-font" style="font-size: 11px; color: #e9d5ff;">${interaction.next_line_suggestion}</span>
                         </div>
                     </div>
                 `;
@@ -5212,10 +5440,12 @@ async function loadSurveyQuestions() {
    function updateFontSize(newSize) {
        currentFontSize = Math.max(minFontSize, Math.min(maxFontSize, newSize));
        fontSizeDisplay.textContent = `${currentFontSize}px`;
+       document.documentElement.style.setProperty('--font-size-code', `${currentFontSize}px`);
        
        if (window.editor) {
            window.editor.updateOptions({
-               fontSize: currentFontSize
+               fontSize: currentFontSize,
+               fontFamily: CODE_EDITOR_FONT_FAMILY
            });
        }
 
@@ -5709,7 +5939,6 @@ async function checkAndShowPostSurvey() {
         }
     }
 
-    addTerminalOutput('All surveys completed! Proceeding with code submission...', 'success');
     await proceedWithActualSubmission();
 }
 
@@ -5720,15 +5949,11 @@ async function proceedWithActualSubmission() {
     isSubmissionInProgress = true;
     
     // ✅ NEW: Restore periodic surveys from storage before submission
-    const restored = restorePeriodicSurveysFromStorage();
-    if (restored) {
-        addTerminalOutput(`Restored ${surveyData.surveyResponses.length} periodic surveys from storage`, 'info');
-    }
+    restorePeriodicSurveysFromStorage();
     
     await uploadActivityBatch();
     // FINAL AI ANALYSIS BEFORE SUBMISSION
-    addTerminalOutput('Performing final AI analysis before submission...', 'info');
-    await analyzeCurrentCode();
+    await analyzeCurrentCode({ force: true, triggerReason: 'submit_final' });
     await uploadActivityBatch();
     // Fresh capture so activity_logs include analysis + accept/reject up to submit
     const cachedData = captureAllSubmissionData();
@@ -5740,11 +5965,9 @@ async function proceedWithActualSubmission() {
     }
 
     const code = cachedData.code;
-    addTerminalOutput('✅ Using cached submission data', 'success');
-    addTerminalOutput(`   Code: ${code.length} characters from cache`, 'info');
     
     submitButton.disabled = true;
-    submitButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Submitting Code...</div>';
+    submitButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Submitting...</div>';
 
     try {
         const response = await fetch('/submit', {
@@ -5824,7 +6047,7 @@ async function proceedWithActualSubmission() {
         addTerminalOutput(`Submission failed: ${error.message}`, 'error');
         addTerminalOutput(`Data preserved locally in session logs`, 'warning');
         submitButton.disabled = false;
-        submitButton.innerHTML = '✓ Submit Code';
+        submitButton.innerHTML = 'SUBMIT';
         isSubmissionInProgress = false;
     }
     
@@ -5957,16 +6180,88 @@ async function proceedWithActualSubmission() {
        }, { passive: false });
    }
 
+   var FILE_SIDEBAR_W_EXPANDED = 180;
+   var FILE_SIDEBAR_W_COLLAPSED = 40;
+
+   function getFileSidebarWidthPx() {
+       var app = document.getElementById('application');
+       return app && app.classList.contains('file-tree--collapsed') ? FILE_SIDEBAR_W_COLLAPSED : FILE_SIDEBAR_W_EXPANDED;
+   }
+
+   function applyProblemPanelWidthPx(newW) {
+       var app = document.getElementById('application');
+       var panel = document.getElementById('problemPanel');
+       if (!app || !panel) return;
+       window._lastProblemPanelWidthPx = newW;
+       var fw = getFileSidebarWidthPx();
+       app.style.gridTemplateColumns = fw + 'px minmax(0, 1fr) 6px ' + newW + 'px';
+       panel.style.width = '';
+       if (window.editor) window.editor.layout();
+   }
+
+   function toggleFileTreeSidebar() {
+       var app = document.getElementById('application');
+       if (!app) return;
+       var collapsed = app.classList.toggle('file-tree--collapsed');
+       var btn = document.getElementById('fileTreeToggleBtn');
+       var ftp = document.getElementById('fileTreePanel');
+       if (btn) {
+           btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+           btn.setAttribute('title', collapsed ? 'Expand files panel' : 'Collapse files panel');
+       }
+       if (ftp) ftp.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
+       try {
+           localStorage.setItem('fileTreeSidebarCollapsed', collapsed ? '1' : '0');
+       } catch (e) {}
+       var pw = window._lastProblemPanelWidthPx;
+       if (pw == null || isNaN(pw)) {
+           var prob = document.getElementById('problemPanel');
+           pw = prob ? Math.round(prob.getBoundingClientRect().width) : Math.min(Math.floor(window.innerWidth * 0.28), 420);
+       }
+       applyProblemPanelWidthPx(pw);
+   }
+
+   function restoreFileTreeSidebarFromStorage() {
+       try {
+           if (localStorage.getItem('fileTreeSidebarCollapsed') !== '1') return;
+       } catch (e) {
+           return;
+       }
+       var app = document.getElementById('application');
+       if (!app) return;
+       app.classList.add('file-tree--collapsed');
+       var btn = document.getElementById('fileTreeToggleBtn');
+       if (btn) {
+           btn.setAttribute('aria-expanded', 'false');
+           btn.setAttribute('title', 'Expand files panel');
+       }
+       var ftp = document.getElementById('fileTreePanel');
+       if (ftp) ftp.setAttribute('aria-hidden', 'true');
+       var pw = window._lastProblemPanelWidthPx;
+       if (pw == null || isNaN(pw)) {
+           var prob = document.getElementById('problemPanel');
+           pw = prob ? Math.round(prob.getBoundingClientRect().width) : Math.min(Math.floor(window.innerWidth * 0.28), 420);
+       }
+       applyProblemPanelWidthPx(pw);
+   }
+
+   var fileTreeToggleBtn = document.getElementById('fileTreeToggleBtn');
+   if (fileTreeToggleBtn) {
+       fileTreeToggleBtn.addEventListener('click', function (e) {
+           e.preventDefault();
+           toggleFileTreeSidebar();
+       });
+   }
+
    function handleProblemResize(e) {
        if (!resize.problem) return;
        e.preventDefault();
        var panel = document.getElementById('problemPanel');
        if (!panel) return;
        var minW = 200;
-       var maxW = window.innerWidth * 0.45;
+       var maxW = Math.min(window.innerWidth * 0.4, 520);
        var newW = Math.max(minW, Math.min(maxW, window.innerWidth - e.clientX));
-       panel.style.width = newW + 'px';
-       if (window.editor) window.editor.layout();
+       applyProblemPanelWidthPx(newW);
    }
 
    function handleProblemResizeTouch(e) {
@@ -5975,10 +6270,9 @@ async function proceedWithActualSubmission() {
        var panel = document.getElementById('problemPanel');
        if (!panel) return;
        var minW = 200;
-       var maxW = window.innerWidth * 0.45;
+       var maxW = Math.min(window.innerWidth * 0.4, 520);
        var newW = Math.max(minW, Math.min(maxW, window.innerWidth - e.touches[0].clientX));
-       panel.style.width = newW + 'px';
-       if (window.editor) window.editor.layout();
+       applyProblemPanelWidthPx(newW);
    }
 
    terminalHandle.addEventListener('mousedown', (e) => {

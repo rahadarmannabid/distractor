@@ -1097,36 +1097,78 @@ def get_response(prompt):
         logger.error(f"OpenAI API error: {e}")
         return f"Error getting AI response: {str(e)}"
 
+def _clamp_problem_description_to_lines(text: str, max_lines: int = 3) -> str:
+    """Keep explanation short: at most `max_lines` non-empty lines (LeetCode-style brevity)."""
+    if not text or not str(text).strip():
+        return text
+    lines = []
+    for ln in str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        s = ln.strip()
+        if s:
+            lines.append(s)
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+    return "\n".join(lines)
+
+
+_LEADING_GUESS = re.compile(
+    r"^\s*this\s+code\s+is\s+trying\s+(?:to\s+)?",
+    re.IGNORECASE,
+)
+
+
+def _ensure_problem_guess_framing(text: str) -> str:
+    """
+    Make it obvious the AI is guessing the programmer's intent: first line reads
+    'This code is trying to …'.
+    """
+    if not text or not str(text).strip():
+        return text
+    t0 = str(text).strip()
+    if t0.lower().startswith("error getting") or t0.lower().startswith("no code provided"):
+        return text
+    raw_lines = [ln.strip() for ln in str(text).replace("\r\n", "\n").split("\n") if ln.strip()]
+    if not raw_lines:
+        return text
+    first = raw_lines[0]
+    remainder = _LEADING_GUESS.sub("", first).strip()
+    if not remainder:
+        remainder = "infer what programming task you are solving from the code so far."
+    elif remainder[0].isupper():
+        remainder = remainder[0].lower() + remainder[1:]
+    raw_lines[0] = "This code is trying to " + remainder
+    return "\n".join(raw_lines)
+
+
 def analyze_problem_statement(existing_code, language=None):
-    """Analyze what problem the programmer is trying to solve - language agnostic"""
+    """Infer a concise LeetCode-style problem statement from the current code."""
     if not existing_code or not existing_code.strip():
         return "No code provided for analysis"
 
     if not language:
         language = detect_programming_language(existing_code)
-    
+
     what_problem_is_this = f"""
-    You are an expert code analyst. Analyze the following {language} code and provide a brief problem description:
+    You are guessing what problem the programmer is trying to solve from this incomplete {language} code.
 
     ```{language}
     {existing_code}
     ```
 
-    Provide ONLY a brief description of what problem this code is trying to solve. Keep it concise.
-    
-    Examples of good responses:
-    - "This code implements a factorial function using recursion"
-    - "Building a sorting algorithm to arrange numbers in ascending order"
-    - "Creating a class to represent a data structure with methods"
-    - "Implementing a search function to find elements in a list"
-    - "This code creates a simple calculator interface"
-    - "Building a web form with input validation"
-    
-    Do NOT include sections, bullet points, or markdown formatting. Just a simple, clear description.
+    Write a short description so the reader knows this is the AI's guess about their goal (not a fact about the assignment).
+
+    Format:
+    - Line 1 MUST begin with these exact words: This code is trying to
+      (then continue on the same line with a short phrase: what the code seems to be solving or building.)
+    - Optional lines 2–3: extra LeetCode-style detail (goal, constraint, or edge case) in plain English.
+    - No markdown, bullets, "Example:", code fences, or solution steps.
+
+    Limits: at most 3 lines total, ~280 characters total.
     """
-    
+
     problem_description = get_response(what_problem_is_this)
-    return problem_description
+    problem_description = _ensure_problem_guess_framing(problem_description)
+    return _clamp_problem_description_to_lines(problem_description, max_lines=3)
 
 
 def _normalized_code_lines(code: str) -> list:
@@ -1178,6 +1220,123 @@ def _strip_comment_only_lines(text: str, language: Optional[str]) -> str:
     if out:
         return out
     # Entire suggestion was comment-only — discard so callers can fall back
+    return ""
+
+
+def _runtime_blocked_substrings_for_suggestions(language: Optional[str]) -> tuple:
+    """
+    Substrings that must not appear in AI suggestions — align with execute_python_code /
+    sandbox limits (no stdin, no unsafe imports, etc.).
+    """
+    lang = (language or "").lower()
+    if lang == "python":
+        return (
+            "input(",
+            "raw_input(",
+            "open(",
+            "file(",
+            "eval(",
+            "exec(",
+            "__import__(",
+            "import os",
+            "import sys",
+            "import subprocess",
+            "import shutil",
+            "import socket",
+            "import urllib",
+            "import requests",
+            "import http",
+        )
+    if lang in ("c", "cpp"):
+        return ("scanf(", "gets(", "getchar(", "fgets(stdin", "sscanf(")
+    if lang in ("javascript", "typescript", "js", "ts"):
+        return ("prompt(",)
+    if lang == "java":
+        return ("system.in", "scanner(system.in)", "new scanner(system.in)")
+    return tuple()
+
+
+def _contains_blocked_suggestion(text: str, language: Optional[str]) -> bool:
+    if not text or not str(text).strip():
+        return False
+    tl = text.lower()
+    for sub in _runtime_blocked_substrings_for_suggestions(language):
+        if sub in tl:
+            return True
+    return False
+
+
+def _strip_blocked_suggestion_lines(text: str, language: Optional[str]) -> str:
+    """Drop lines that contain blocked substrings; return empty if nothing remains."""
+    if not text or not str(text).strip():
+        return text
+    lines = str(text).replace("\r\n", "\n").split("\n")
+    kept = [ln for ln in lines if not _contains_blocked_suggestion(ln, language)]
+    return "\n".join(kept).strip()
+
+
+def _suggestion_runtime_prompt_rule(language: Optional[str]) -> str:
+    """Short rule text injected into AI prompts (per language)."""
+    lang = (language or "").lower()
+    if lang == "python":
+        return (
+            "- The runner cannot use interactive stdin or blocked APIs: NEVER suggest "
+            "input(, raw_input(, open(, file(, eval(, exec(, __import__(, or imports of "
+            "os, sys, subprocess, shutil, socket, urllib, requests, http. Use literals, "
+            "parameters, or existing variables instead."
+        )
+    if lang in ("c", "cpp"):
+        return (
+            "- The runner has no interactive stdin: NEVER suggest scanf(, gets(, getchar(, "
+            "sscanf( reading from stdin, or fgets(..., stdin). Use fixed values or function arguments."
+        )
+    if lang in ("javascript", "typescript", "js", "ts"):
+        return (
+            "- Do not suggest prompt( or other blocking stdin-style browser dialogs for input; "
+            "use literals or variables already in the code."
+        )
+    if lang == "java":
+        return (
+            "- The environment may not support interactive stdin: avoid System.in, Scanner(System.in), "
+            "and console readLine for input; use literals or method parameters."
+        )
+    return (
+        "- Do not suggest code that requires interactive stdin or sandbox-blocked APIs for this IDE."
+    )
+
+
+def _next_line_from_full_completion(
+    existing_code: str,
+    full_code: str,
+    max_lines: int = 2,
+    language: Optional[str] = None,
+) -> str:
+    """
+    When the next-line model returns empty, derive 1–2 new lines from the concurrent
+    full-code completion if it extends the user's current buffer.
+    """
+    if not full_code or not str(full_code).strip():
+        return ""
+    lang = language or detect_programming_language(existing_code)
+    ec = existing_code.replace("\r\n", "\n").replace("\r", "\n").rstrip()
+    fc = full_code.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not fc:
+        return ""
+    if ec and fc.startswith(ec):
+        suffix = fc[len(ec) :].lstrip("\n")
+        lines = [ln for ln in suffix.split("\n") if ln.strip()]
+        if not lines:
+            return ""
+        out = "\n".join(lines[:max_lines]).strip()
+        return _strip_blocked_suggestion_lines(out, lang)
+    ec_lines = ec.split("\n") if ec else []
+    fc_lines = fc.split("\n")
+    if ec_lines and len(fc_lines) > len(ec_lines) and fc_lines[: len(ec_lines)] == ec_lines:
+        rest = fc_lines[len(ec_lines) :]
+        rest = [ln for ln in rest if ln.strip()]
+        if rest:
+            out = "\n".join(rest[:max_lines]).strip()
+            return _strip_blocked_suggestion_lines(out, lang)
     return ""
 
 
@@ -1337,6 +1496,7 @@ Rules:
 - At most 2 lines total if a line break is strictly required; otherwise one line.
 - No explanations, markdown fences, or commentary — only the insertable characters.
 - Do NOT output comments of any kind (no #, //, /* */, <!-- -->, docstrings, or inline comments).
+{_suggestion_runtime_prompt_rule(language)}
 """
     suffix = get_response(prompt.strip())
     suffix = re.sub(r"```\w*\n?", "", suffix)
@@ -1379,6 +1539,8 @@ Rules:
     lines_out = suffix.split("\n")
     if len(lines_out) > 2:
         suffix = "\n".join(lines_out[:2])
+    if _contains_blocked_suggestion(suffix, language):
+        return ""
     return suffix if suffix else ""
 
 
@@ -1454,6 +1616,7 @@ def predict_next_line(problem_description, existing_code, language=None):
     - The suggestion must CONTINUE the program, not rewrite what exists
     - If a function body is complete (has a return), suggest calling it or defining the NEXT function
     - Focus on what is MISSING, not what is already written
+    {_suggestion_runtime_prompt_rule(language)}
     
     Examples of good responses for {language}:
     {chr(10).join([f'    - "{example}"' for example in examples[:4]])}    
@@ -1469,7 +1632,15 @@ def predict_next_line(problem_description, existing_code, language=None):
         suggestion_lines = next_line.strip().split("\n")
         kept = [ln for ln in suggestion_lines if ln.strip().lower() not in existing_stripped]
         next_line = "\n".join(kept).strip()
+        # If dedup removed every line, keep the model's first line (better than empty)
+        if not next_line and suggestion_lines:
+            for ln in suggestion_lines:
+                if ln.strip():
+                    next_line = ln.strip()
+                    break
 
+    if _contains_blocked_suggestion(next_line, language):
+        return ""
     return next_line
 
 def generate_full_code_suggestion(problem_description, existing_code, is_correct_description=False, language=None):
@@ -1499,7 +1670,8 @@ def generate_full_code_suggestion(problem_description, existing_code, is_correct
     - Use proper {language} syntax.
     - Do NOT add comments of any kind: no line comments (#, //), block comments (/* */), HTML comments, or docstrings
     - Don't include extraneous text outside the code.
-    - Output should be in markdown text. 
+    - Output should be in markdown text.
+    {_suggestion_runtime_prompt_rule(language)}
 
     Complete code:
     """
@@ -1515,6 +1687,9 @@ def generate_full_code_suggestion(problem_description, existing_code, is_correct
     full_suggestion = "\n".join(
         ln for ln in full_lines if not _line_is_comment_only(ln, language)
     ).strip()
+
+    if _contains_blocked_suggestion(full_suggestion, language):
+        return ""
 
     return full_suggestion
 
@@ -1606,8 +1781,9 @@ async def analyze_code(request: CodeRequest):
         
         language = request.programming_language or detect_programming_language(code)
 
-        # Enhanced analysis for very short code snippets
-        if len(code.strip()) < 10:
+        # Skip heavy suggestions only for tiny snippets (was 10 — too strict, blocked early edits)
+        min_chars = int(os.getenv("MIN_CODE_CHARS_FOR_SUGGESTION", "3"))
+        if len(code.strip()) < min_chars:
             return CodeResponse(
                 analysis=f"Code snippet in progress: {code.strip()} (detected: {language})",
                 next_line="",
@@ -1621,7 +1797,8 @@ async def analyze_code(request: CodeRequest):
         problem_description = re.sub(r'^\*\*.*?\*\*:\s*', '', problem_description)
         problem_description = re.sub(r'^Problem.*?:\s*', '', problem_description, flags=re.IGNORECASE)
         problem_description = problem_description.strip()
-        
+        problem_description = _clamp_problem_description_to_lines(problem_description, max_lines=3)
+
         # Always use next_line mode (suggestions only on new lines)
         suggestion_kind = "next_line"
         
@@ -1671,7 +1848,15 @@ async def analyze_code(request: CodeRequest):
         # Ensure we have something useful (suffix can be a single character)
         if not ai_next_line or not str(ai_next_line).strip():
             ai_next_line = ""
-        
+
+        # Fallback: next-line model often returns empty after dedup/comments; full-code task may still succeed
+        if not ai_next_line.strip() and ai_full_code_suggestion:
+            fb = _next_line_from_full_completion(
+                code, ai_full_code_suggestion, max_lines=2, language=language
+            )
+            if fb:
+                ai_next_line = fb
+
         # Clean correct next line suggestion (for condition 1)
         if session_log and session_log.condition == 1 and correct_next_line != ai_next_line:
             correct_next_line = re.sub(r'```\w*\n?', '', correct_next_line)
@@ -1688,7 +1873,20 @@ async def analyze_code(request: CodeRequest):
             
             if not correct_next_line or not str(correct_next_line).strip():
                 correct_next_line = ai_next_line
-        
+
+        if (
+            session_log
+            and session_log.condition == 1
+            and getattr(session_log, "problem_description", None)
+            and (not correct_next_line or not str(correct_next_line).strip())
+            and correct_full_code_suggestion
+        ):
+            cfb = _next_line_from_full_completion(
+                code, correct_full_code_suggestion, max_lines=2, language=language
+            )
+            if cfb:
+                correct_next_line = cfb
+
         # Log this analysis to session if session_id provided
         if session_log:
             # Create AI guess entry for problem guessing
@@ -3489,12 +3687,27 @@ async def get_assignment_text(assignment_key: str, problem_index: int = 0):
                     if prob_title:
                         parts.append(f'<div class="problem-title">{html_mod.escape(prob_title)}</div>')
                     if problem.get("problem_statement"):
-                        parts.append(f'<span class="section-label">Problem Description</span>{html_mod.escape(problem["problem_statement"])}')
+                        parts.append(
+                            '<div class="problem-section">'
+                            '<span class="section-label">Problem Description</span>'
+                            f'<div class="section-content">{html_mod.escape(problem["problem_statement"])}</div>'
+                            "</div>"
+                        )
                     if problem.get("test_cases"):
-                        parts.append(f'<span class="section-label">Test Cases</span>{html_mod.escape(problem["test_cases"])}')
+                        parts.append(
+                            '<div class="problem-section">'
+                            '<span class="section-label">Test Cases</span>'
+                            f'<div class="section-content section-content--mono">{html_mod.escape(problem["test_cases"])}</div>'
+                            "</div>"
+                        )
                     if problem.get("constraints"):
-                        parts.append(f'<span class="section-label">Constraints</span>{html_mod.escape(problem["constraints"])}')
-                    html_out = "\n\n".join(parts)
+                        parts.append(
+                            '<div class="problem-section">'
+                            '<span class="section-label">Constraints</span>'
+                            f'<div class="section-content">{html_mod.escape(problem["constraints"])}</div>'
+                            "</div>"
+                        )
+                    html_out = "".join(parts)
                     return {"html": html_out if html_out else None, "text": "No problem description provided." if not html_out else None}
             raise HTTPException(status_code=404, detail="Quiz not found")
 
