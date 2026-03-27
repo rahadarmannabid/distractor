@@ -154,8 +154,61 @@
             border-bottom: var(--chrome-header-border);
             flex-shrink: 0;
         }
+        .problem-panel__tabs {
+            display: flex;
+            flex-shrink: 0;
+            gap: 0;
+            padding: 0 8px;
+            background: #1e1e1e;
+            border-bottom: 1px solid #30363d;
+        }
+        .problem-panel__tab {
+            font-family: var(--font-ui-sans);
+            font-size: 12px;
+            font-weight: 600;
+            color: #8b949e;
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            padding: 10px 12px 8px;
+            margin: 0;
+            cursor: pointer;
+            transition: color 0.15s ease, border-color 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .problem-panel__tab:hover {
+            color: #e6edf3;
+        }
+        .problem-panel__tab--active {
+            color: #e6edf3;
+            border-bottom-color: #007acc;
+        }
+        .problem-panel__tab-count {
+            font-size: 10px;
+            font-weight: 600;
+            color: #8b949e;
+            background: #30363d;
+            border-radius: 10px;
+            padding: 2px 7px;
+            min-width: 1.25rem;
+            text-align: center;
+        }
+        .problem-panel__tab--active .problem-panel__tab-count {
+            color: #c9d1d9;
+            background: #21262d;
+        }
+        .problem-panel__stack {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
         .problem-panel__body {
             flex: 1;
+            min-height: 0;
             overflow-y: auto;
             padding: 8px 12px 12px;
             font-family: var(--font-ui-sans);
@@ -163,6 +216,44 @@
             line-height: 1.5;
             color: #d4d4d4;
             word-wrap: break-word;
+        }
+        .problem-panel__body[hidden] {
+            display: none !important;
+        }
+        .problem-panel__ai-history-embed .ai-history-section {
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            border: none;
+            box-shadow: none;
+        }
+        .problem-panel__ai-history-embed .ai-history-section h3 {
+            font-size: 12px;
+            margin: 0 0 10px 0;
+        }
+        .problem-panel__ai-history-embed .ai-history-scroll {
+            max-height: none !important;
+            margin-bottom: 0 !important;
+        }
+        .ai-history-see-more {
+            display: block;
+            width: 100%;
+            margin-top: 12px;
+            padding: 8px 12px;
+            font-family: var(--font-ui-sans);
+            font-size: 12px;
+            font-weight: 600;
+            color: #58a6ff;
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.15s ease, border-color 0.15s ease;
+        }
+        .ai-history-see-more:hover {
+            background: #30363d;
+            border-color: #58a6ff;
+            color: #79c0ff;
         }
         .problem-panel__body .problem-section {
             margin-bottom: 10px;
@@ -1739,10 +1830,10 @@
             white-space: pre-line;
         }
         .copilot-popup__explanation-label {
-            text-transform: uppercase;
+            text-transform: none;
             font-size: 11px;
             font-weight: 700;
-            letter-spacing: 0.06em;
+            letter-spacing: 0.02em;
             color: #fbbf24;
             margin-bottom: 4px;
             display: flex;
@@ -1935,7 +2026,7 @@
                 <!-- Floating Copilot Suggestion Popup -->
                 <div id="copilotPopup">
                     <div class="copilot-popup__section copilot-popup__explanation">
-                        <div class="copilot-popup__explanation-label">Problem</div>
+                        <div class="copilot-popup__explanation-label">AI's Interpretation</div>
                         <div id="copilotPopupExplanation">Waiting for analysis...</div>
                     </div>
                     <div class="copilot-popup__section copilot-popup__suggestion">
@@ -2011,8 +2102,18 @@
             <div class="problem-panel__header">
                 <span id="problemPanelHeading" class="problem-panel__current-label">Loading…</span>
             </div>
-            <div class="problem-panel__body" id="problemPanelBody">
+            <div class="problem-panel__tabs" role="tablist" aria-label="Problem panel">
+                <button type="button" class="problem-panel__tab problem-panel__tab--active" id="problemTabProblem" role="tab" aria-selected="true" aria-controls="problemPanelBody" tabindex="0">Problem</button>
+                <button type="button" class="problem-panel__tab" id="problemTabAiHistory" role="tab" aria-selected="false" aria-controls="problemPanelAiHistory" tabindex="-1">
+                    AI history <span class="problem-panel__tab-count" id="aiHistoryTabCount">0</span>
+                </button>
+            </div>
+            <div class="problem-panel__stack">
+            <div class="problem-panel__body problem-panel__tabpanel" id="problemPanelBody" role="tabpanel" aria-labelledby="problemTabProblem">
                 Loading problem...
+            </div>
+            <div class="problem-panel__body problem-panel__tabpanel problem-panel__ai-history-embed" id="problemPanelAiHistory" role="tabpanel" aria-labelledby="problemTabAiHistory" hidden>
+            </div>
             </div>
         </div>
 
@@ -2387,6 +2488,7 @@ function applyRestoredProgress(progressData) {
         });
         
         updateAutosaveIndicator('saved');
+        refreshProblemPanelAiHistory();
         
     } catch (error) {
         console.error('Failed to apply restored progress:', error);
@@ -3462,6 +3564,8 @@ async function initializeFromURL() {
         maybeShowTeaser();
         
         initializeSidebar();
+        initProblemPanelTabs();
+        refreshProblemPanelAiHistory();
         
         // Check for saved progress (skip on non-first problems — starter code is already set)
         setTimeout(() => {
@@ -4015,6 +4119,8 @@ logActivity('ai_analysis_complete', {
             });
             currentSession.suggestionsLogCount++;
         }
+
+        refreshProblemPanelAiHistory();
 
         // ANIMATE THE RESULTS with typing effect and box shaking
         await animateAnalysisResults(problemDescription, nextLineCode, correctNextLineCode);
@@ -4685,7 +4791,7 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
         return `
             <div class="ai-history-section">
                 <h3 style="color: #569cd6; margin-bottom: 15px;">AI Interaction History</h3>
-                <div style="background: #2d2d2d; padding: 15px; border-radius: 6px; margin-bottom: 20px; color: #888; text-align: center;">
+                <div class="ai-history-scroll" style="background: #2d2d2d; padding: 15px; border-radius: 6px; margin-bottom: 20px; color: #888; text-align: center;">
                     No AI interactions recorded yet. Start coding to see ${conditionText}.
                 </div>
             </div>
@@ -4704,18 +4810,18 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
     let historyHTML = `
         <div class="ai-history-section">
             <h3 style="color: #569cd6; margin-bottom: 15px;">${historyTitle} (${aiHistoryContext.ai_guess_history.length} analyses)</h3>
-            <div style="background: #2d2d2d; padding: 15px; border-radius: 6px; margin-bottom: 20px; flex: 1; overflow-y: auto;">
+            <div class="ai-history-scroll" style="background: #2d2d2d; padding: 15px; border-radius: 6px; margin-bottom: 20px; flex: 1; overflow-y: auto;">
     `;
     
-    // CONDITION 1: Show AI analysis + correct descriptions
+    // CONDITION 1: Show AI analysis + correct descriptions (full history, scrollable)
     if (condition === 1) {
-        const recentInteractions = aiHistoryContext.ai_guess_history.slice(-5);
+        const allGuesses = aiHistoryContext.ai_guess_history;
         
         // Show AI Problem Guess
-        historyHTML += `<h4 style="color: #f97316; font-size: 12px; margin-bottom: 10px;">AI Problem Guess (Last 5)</h4>`;
-        recentInteractions.forEach((interaction, index) => {
+        historyHTML += `<h4 style="color: #f97316; font-size: 12px; margin-bottom: 10px;">AI Problem Guess (${allGuesses.length})</h4>`;
+        allGuesses.forEach((interaction, index) => {
             const timeStr = new Date(interaction.timestamp).toLocaleTimeString();
-            const analysisNumber = aiHistoryContext.ai_guess_history.length - recentInteractions.length + index + 1;
+            const analysisNumber = index + 1;
             
             historyHTML += `
                 <div style="border-bottom: 1px solid #444; padding: 8px 0; margin-bottom: 8px;">
@@ -4738,13 +4844,13 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
         if (aiHistoryContext.correct_description_history && aiHistoryContext.correct_description_history.length > 0) {
             historyHTML += `
                 <div style="border-top: 2px solid #22c55e; margin-top: 15px; padding-top: 15px;">
-                    <h4 style="color: #22c55e; font-size: 12px; margin-bottom: 10px;">Correct Problem Suggestions (Last 5)</h4>
+                    <h4 style="color: #22c55e; font-size: 12px; margin-bottom: 10px;">Correct Problem Suggestions (${aiHistoryContext.correct_description_history.length})</h4>
             `;
             
-            const recentCorrect = aiHistoryContext.correct_description_history.slice(-5);
-            recentCorrect.forEach((interaction, index) => {
+            const allCorrect = aiHistoryContext.correct_description_history;
+            allCorrect.forEach((interaction, index) => {
                 const timeStr = new Date(interaction.timestamp).toLocaleTimeString();
-                const analysisNumber = aiHistoryContext.correct_description_history.length - recentCorrect.length + index + 1;
+                const analysisNumber = index + 1;
                 
                 historyHTML += `
                     <div style="border-bottom: 1px solid #333; padding: 8px 0; margin-bottom: 8px;">
@@ -4762,13 +4868,13 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
         }
     }
     
-    // CONDITION 2: Show only AI problem analysis
+    // CONDITION 2: Show only AI problem analysis (full history)
     else if (condition === 2) {
-        const recentInteractions = aiHistoryContext.ai_guess_history.slice(-5);
+        const allAnalyses = aiHistoryContext.ai_guess_history;
         
-        recentInteractions.forEach((interaction, index) => {
+        allAnalyses.forEach((interaction, index) => {
             const timeStr = new Date(interaction.timestamp).toLocaleTimeString();
-            const analysisNumber = aiHistoryContext.ai_guess_history.length - recentInteractions.length + index + 1;
+            const analysisNumber = index + 1;
             
             historyHTML += `
                 <div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 10px;">
@@ -4789,14 +4895,14 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
         });
 }
 
-    // CONDITION 3: Show only AI code suggestions (no problem analysis)
+    // CONDITION 3: Show only AI code suggestions (full history)
     else if (condition === 3) {
         if (aiHistoryContext.suggestions_only_history && aiHistoryContext.suggestions_only_history.length > 0) {
-            const recentSuggestions = aiHistoryContext.suggestions_only_history.slice(-5);
+            const allSuggestions = aiHistoryContext.suggestions_only_history;
             
-            recentSuggestions.forEach((interaction, index) => {
+            allSuggestions.forEach((interaction, index) => {
                 const timeStr = new Date(interaction.timestamp).toLocaleTimeString();
-                const analysisNumber = aiHistoryContext.suggestions_only_history.length - recentSuggestions.length + index + 1;
+                const analysisNumber = index + 1;
                 
                 historyHTML += `
                     <div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 10px;">
@@ -4811,22 +4917,6 @@ function generateAIHistoryDisplayHTML(aiHistoryContext) {
                 `;
             });
         }
-    }
-    
-    // Show count information
-    const totalCount = condition === 3 ? 
-        (aiHistoryContext.suggestions_only_history?.length || 0) : 
-        aiHistoryContext.ai_guess_history.length;
-    const showingCount = 5;
-    
-    if (totalCount > showingCount) {
-        historyHTML += `
-            <div style="text-align: center; margin-top: 10px; padding-top: 10px; border-top: 1px solid #444;">
-                <span style="color: #888; font-size: 10px; font-style: italic;">
-                    Showing last ${Math.min(showingCount, totalCount)} of ${totalCount} total ${condition === 3 ? 'suggestions' : 'analyses'}
-                </span>
-            </div>
-        `;
     }
     
     historyHTML += `
@@ -5258,6 +5348,234 @@ function collectAIHistoryContext() {
     }
     
     return context;
+}
+
+var _problemPanelTabsInitialized = false;
+
+function updateAiHistoryTabBadge(aiHistoryContext) {
+    var el = document.getElementById('aiHistoryTabCount');
+    if (!el || !aiHistoryContext) return;
+    var n = 0;
+    if (currentSession && currentSession.condition === 3) {
+        n = (aiHistoryContext.suggestions_only_history && aiHistoryContext.suggestions_only_history.length) ||
+            (aiHistoryContext.ai_guess_history && aiHistoryContext.ai_guess_history.length) || 0;
+    } else {
+        n = (aiHistoryContext.ai_guess_history && aiHistoryContext.ai_guess_history.length) || 0;
+    }
+    el.textContent = String(n);
+}
+
+var AI_HISTORY_PAGE_SIZE = 5;
+
+function resetProblemAiHistoryPagination() {
+    window._problemAiHistoryVisible = { guess: AI_HISTORY_PAGE_SIZE, correct: AI_HISTORY_PAGE_SIZE, main: AI_HISTORY_PAGE_SIZE, suggestions: AI_HISTORY_PAGE_SIZE };
+}
+
+function getProblemAiHistoryVisible() {
+    if (!window._problemAiHistoryVisible) resetProblemAiHistoryPagination();
+    return window._problemAiHistoryVisible;
+}
+
+/** Chronological array: render up to `visibleCap` from the end, newest first. Returns { html, total, take }. */
+function aiHistoryHtmlNewestFirst(arr, visibleCap, renderOne) {
+    var html = '';
+    var total = arr.length;
+    var take = Math.min(visibleCap, total);
+    if (take === 0) return { html: '', total: total, take: 0 };
+    var batch = arr.slice(-take);
+    for (var k = batch.length - 1; k >= 0; k--) {
+        var interaction = batch[k];
+        var origIndex = total - take + k;
+        var analysisNumber = origIndex + 1;
+        html += renderOne(interaction, analysisNumber);
+    }
+    return { html: html, total: total, take: take };
+}
+
+function aiHistorySeeMoreButton(kind, total, visible) {
+    if (total <= 0 || visible >= total) return '';
+    var older = Math.min(AI_HISTORY_PAGE_SIZE, total - visible);
+    return '<button type="button" class="ai-history-see-more" onclick="loadMoreProblemAiHistory(\'' + kind + '\')">See more (' + older + ' older)</button>';
+}
+
+function loadMoreProblemAiHistory(kind) {
+    getProblemAiHistoryVisible();
+    var ctx = collectAIHistoryContext();
+    var st = window._problemAiHistoryVisible;
+    if (!ctx || !st) return;
+    if (kind === 'guess') {
+        var n = (ctx.ai_guess_history && ctx.ai_guess_history.length) || 0;
+        st.guess = Math.min(st.guess + AI_HISTORY_PAGE_SIZE, n);
+    } else if (kind === 'correct') {
+        var nc = (ctx.correct_description_history && ctx.correct_description_history.length) || 0;
+        st.correct = Math.min(st.correct + AI_HISTORY_PAGE_SIZE, nc);
+    } else if (kind === 'main') {
+        var nm = (ctx.ai_guess_history && ctx.ai_guess_history.length) || 0;
+        st.main = Math.min(st.main + AI_HISTORY_PAGE_SIZE, nm);
+    } else if (kind === 'suggestions') {
+        var ns = (ctx.suggestions_only_history && ctx.suggestions_only_history.length) || 0;
+        st.suggestions = Math.min(st.suggestions + AI_HISTORY_PAGE_SIZE, ns);
+    }
+    refreshProblemPanelAiHistoryContent();
+}
+
+function buildProblemPanelAiHistoryHTML(aiHistoryContext) {
+    var condition = currentSession.condition;
+    if (!aiHistoryContext || !aiHistoryContext.ai_guess_history || aiHistoryContext.ai_guess_history.length === 0) {
+        var conditionText = condition === 1 ? 'AI analysis and correct descriptions' : condition === 2 ? 'AI analysis' : 'AI code suggestions';
+        return (
+            '<div class="ai-history-section">' +
+            '<h3 style="color: #569cd6; margin-bottom: 15px;">AI Interaction History</h3>' +
+            '<div class="ai-history-scroll" style="background: #2d2d2d; padding: 15px; border-radius: 6px; margin-bottom: 20px; color: #888; text-align: center;">' +
+            'No AI interactions recorded yet. Start coding to see ' + conditionText + '.' +
+            '</div></div>'
+        );
+    }
+
+    var st = getProblemAiHistoryVisible();
+    var historyTitle = 'AI Interaction History';
+    if (condition === 1) historyTitle = 'AI Analysis & Correct Descriptions';
+    else if (condition === 2) historyTitle = 'AI Problem Analysis';
+    else if (condition === 3) historyTitle = 'AI Code Suggestions';
+
+    var historyHTML =
+        '<div class="ai-history-section">' +
+        '<h3 style="color: #569cd6; margin-bottom: 15px;">' + historyTitle + ' (' + aiHistoryContext.ai_guess_history.length + ' analyses)</h3>' +
+        '<div class="ai-history-scroll" style="background: #2d2d2d; padding: 15px; border-radius: 6px; margin-bottom: 20px; flex: 1; overflow-y: auto;">';
+
+    if (condition === 1) {
+        var allGuesses = aiHistoryContext.ai_guess_history;
+        var vg = Math.min(st.guess, allGuesses.length);
+        historyHTML += '<h4 style="color: #f97316; font-size: 12px; margin-bottom: 10px;">AI Problem Guess (' + allGuesses.length + ')</h4>';
+        var rg = aiHistoryHtmlNewestFirst(allGuesses, vg, function (interaction, analysisNumber) {
+            var timeStr = new Date(interaction.timestamp).toLocaleTimeString();
+            return (
+                '<div style="border-bottom: 1px solid #444; padding: 8px 0; margin-bottom: 8px;">' +
+                '<div style="display: flex; justify-content: space-between; margin-bottom: 5px;">' +
+                '<span style="color: #f97316; font-weight: bold; font-size: 11px;">Analysis #' + analysisNumber + '</span>' +
+                '<span style="color: #888; font-size: 10px;">' + timeStr + '</span></div>' +
+                '<div style="margin-bottom: 5px;">' +
+                '<strong style="color: #f97316; font-size: 10px;">Problem:</strong><br>' +
+                '<span style="color: #d4d4d4; font-size: 10px; line-height: 1.3;">' + interaction.problem_analysis + '</span></div>' +
+                '<div style="background: #2d1b0e; padding: 4px 6px; border-radius: 3px; border-left: 3px solid #f97316;">' +
+                '<span class="inline-code-font" style="font-size: 10px; color: #fbbf24;">' + interaction.next_line_suggestion + '</span></div></div>'
+            );
+        });
+        historyHTML += rg.html;
+        historyHTML += aiHistorySeeMoreButton('guess', rg.total, vg);
+
+        if (aiHistoryContext.correct_description_history && aiHistoryContext.correct_description_history.length > 0) {
+            var allCorrect = aiHistoryContext.correct_description_history;
+            var vc = Math.min(st.correct, allCorrect.length);
+            historyHTML +=
+                '<div style="border-top: 2px solid #22c55e; margin-top: 15px; padding-top: 15px;">' +
+                '<h4 style="color: #22c55e; font-size: 12px; margin-bottom: 10px;">Correct Problem Suggestions (' + allCorrect.length + ')</h4>';
+            var rc = aiHistoryHtmlNewestFirst(allCorrect, vc, function (interaction, analysisNumber) {
+                var timeStr = new Date(interaction.timestamp).toLocaleTimeString();
+                return (
+                    '<div style="border-bottom: 1px solid #333; padding: 8px 0; margin-bottom: 8px;">' +
+                    '<div style="display: flex; justify-content: space-between; margin-bottom: 5px;">' +
+                    '<span style="color: #22c55e; font-weight: bold; font-size: 11px;">Correct #' + analysisNumber + '</span>' +
+                    '<span style="color: #888; font-size: 10px;">' + timeStr + '</span></div>' +
+                    '<div style="background: #0e2f1e; padding: 4px 6px; border-radius: 3px; border-left: 3px solid #22c55e;">' +
+                    '<span class="inline-code-font" style="font-size: 10px; color: #4ade80;">' + interaction.next_line_suggestion + '</span></div></div>'
+                );
+            });
+            historyHTML += rc.html;
+            historyHTML += aiHistorySeeMoreButton('correct', rc.total, vc);
+            historyHTML += '</div>';
+        }
+    } else if (condition === 2) {
+        var allAnalyses = aiHistoryContext.ai_guess_history;
+        var vm = Math.min(st.main, allAnalyses.length);
+        var rm = aiHistoryHtmlNewestFirst(allAnalyses, vm, function (interaction, analysisNumber) {
+            var timeStr = new Date(interaction.timestamp).toLocaleTimeString();
+            return (
+                '<div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 10px;">' +
+                '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">' +
+                '<span style="color: #f97316; font-weight: bold; font-size: 12px;">Analysis #' + analysisNumber + '</span>' +
+                '<span style="color: #888; font-size: 10px;">' + timeStr + '</span></div>' +
+                '<div style="margin-bottom: 8px;">' +
+                '<strong style="color: #4ade80; font-size: 11px;">Problem Analysis:</strong><br>' +
+                '<span style="color: #d4d4d4; font-size: 11px; line-height: 1.3;">' + interaction.problem_analysis + '</span></div>' +
+                '<div style="background: #1e1e1e; padding: 6px 8px; border-radius: 4px; border-left: 3px solid #f97316;">' +
+                '<strong style="color: #f97316; font-size: 11px;">Suggestion:</strong> ' +
+                '<span class="inline-code-font" style="font-size: 11px; color: #fbbf24;">' + interaction.next_line_suggestion + '</span></div></div>'
+            );
+        });
+        historyHTML += rm.html;
+        historyHTML += aiHistorySeeMoreButton('main', rm.total, vm);
+    } else if (condition === 3) {
+        if (aiHistoryContext.suggestions_only_history && aiHistoryContext.suggestions_only_history.length > 0) {
+            var allSuggestions = aiHistoryContext.suggestions_only_history;
+            var vs = Math.min(st.suggestions, allSuggestions.length);
+            var rs = aiHistoryHtmlNewestFirst(allSuggestions, vs, function (interaction, analysisNumber) {
+                var timeStr = new Date(interaction.timestamp).toLocaleTimeString();
+                return (
+                    '<div style="border-bottom: 1px solid #444; padding: 10px 0; margin-bottom: 10px;">' +
+                    '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">' +
+                    '<span style="color: #8b5cf6; font-weight: bold; font-size: 12px;">Suggestion #' + analysisNumber + '</span>' +
+                    '<span style="color: #888; font-size: 10px;">' + timeStr + '</span></div>' +
+                    '<div style="background: #2d1b69; padding: 6px 8px; border-radius: 4px; border-left: 3px solid #8b5cf6;">' +
+                    '<span class="inline-code-font" style="font-size: 11px; color: #e9d5ff;">' + interaction.next_line_suggestion + '</span></div></div>'
+                );
+            });
+            historyHTML += rs.html;
+            historyHTML += aiHistorySeeMoreButton('suggestions', rs.total, vs);
+        }
+    }
+
+    historyHTML += '</div></div>';
+    return historyHTML;
+}
+
+function refreshProblemPanelAiHistoryContent() {
+    var host = document.getElementById('problemPanelAiHistory');
+    if (!host || typeof currentSession === 'undefined' || !currentSession) return;
+    try {
+        var ctx = collectAIHistoryContext();
+        host.innerHTML = buildProblemPanelAiHistoryHTML(ctx);
+        updateAiHistoryTabBadge(ctx);
+    } catch (e) {
+        console.warn('refreshProblemPanelAiHistoryContent:', e);
+    }
+}
+
+function initProblemPanelTabs() {
+    if (_problemPanelTabsInitialized) return;
+    var tabProblem = document.getElementById('problemTabProblem');
+    var tabAi = document.getElementById('problemTabAiHistory');
+    var panelProblem = document.getElementById('problemPanelBody');
+    var panelAi = document.getElementById('problemPanelAiHistory');
+    if (!tabProblem || !tabAi || !panelProblem || !panelAi) return;
+    _problemPanelTabsInitialized = true;
+
+    function selectTab(which) {
+        var isProblem = which === 'problem';
+        tabProblem.classList.toggle('problem-panel__tab--active', isProblem);
+        tabAi.classList.toggle('problem-panel__tab--active', !isProblem);
+        tabProblem.setAttribute('aria-selected', isProblem ? 'true' : 'false');
+        tabAi.setAttribute('aria-selected', isProblem ? 'false' : 'true');
+        tabProblem.tabIndex = isProblem ? 0 : -1;
+        tabAi.tabIndex = isProblem ? -1 : 0;
+        panelProblem.hidden = !isProblem;
+        panelAi.hidden = isProblem;
+    }
+
+    tabProblem.addEventListener('click', function () { selectTab('problem'); });
+    tabAi.addEventListener('click', function () { selectTab('ai'); });
+    selectTab('problem');
+}
+
+function refreshProblemPanelAiHistory() {
+    var host = document.getElementById('problemPanelAiHistory');
+    if (!host || typeof currentSession === 'undefined' || !currentSession) return;
+    try {
+        resetProblemAiHistoryPagination();
+        refreshProblemPanelAiHistoryContent();
+    } catch (e) {
+        console.warn('refreshProblemPanelAiHistory:', e);
+    }
 }
 
 async function saveSurveyResponses(responses, surveyType) {
