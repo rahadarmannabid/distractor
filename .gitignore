@@ -79,9 +79,10 @@ docker-compose*.yml
 # ============================================
 # DOCUMENTATION
 # ============================================
-README.md
-readme.md
+# Ignore loose Markdown; keep repo README trackable
 *.md
+!README.md
+!readme.md
 frontend.txt
 docs/
 documentation/
