@@ -3483,22 +3483,39 @@ async function initializeFromURL() {
                 }
             }
 
+            function assignmentPanelHtmlIsPresent(s) {
+                return typeof s === 'string' && s.trim().length > 0;
+            }
+            function assignmentTextLooksLikeHtml(s) {
+                if (typeof s !== 'string' || !s.trim()) return false;
+                return /<[a-z][\s\S]*>/i.test(s);
+            }
+            function applyAssignmentPanelPayload(data) {
+                if (assignmentPanelHtmlIsPresent(data.html)) {
+                    problemBody.innerHTML = data.html;
+                    applyHeadingFromDom();
+                    return;
+                }
+                if (typeof data.text === 'string' && data.text.trim()) {
+                    if (assignmentTextLooksLikeHtml(data.text)) {
+                        problemBody.innerHTML = data.text;
+                    } else {
+                        problemBody.textContent = data.text;
+                    }
+                    if (headingEl) headingEl.textContent = defaultProblemHeading();
+                    return;
+                }
+                problemBody.innerHTML = '<span class="problem-panel__placeholder">No problem description available for this assignment.</span>';
+                if (headingEl) headingEl.textContent = 'Problem Description';
+            }
+
             fetch('/assignment-text/' + encodeURIComponent(authData.assignmentKey) + '?problem_index=' + (currentSession.currentProblemIndex || 0))
                 .then(function(res) {
                     if (!res.ok) throw new Error(res.status);
                     return res.json();
                 })
                 .then(function(data) {
-                    if (data.html) {
-                        problemBody.innerHTML = data.html;
-                        applyHeadingFromDom();
-                    } else if (data.text) {
-                        problemBody.textContent = data.text;
-                        if (headingEl) headingEl.textContent = defaultProblemHeading();
-                    } else {
-                        problemBody.innerHTML = '<span class="problem-panel__placeholder">No problem description available for this assignment.</span>';
-                        if (headingEl) headingEl.textContent = 'Problem Description';
-                    }
+                    applyAssignmentPanelPayload(data);
                 })
                 .catch(function() {
                     problemBody.innerHTML = '<span class="problem-panel__placeholder">No problem description available for this assignment.</span>';

@@ -3940,9 +3940,18 @@ async def get_assignment_text(assignment_key: str, problem_index: int = 0):
         assignment_file = get_assignment_file_path(assignment_key)
         if not assignment_file or not assignment_file.exists():
             raise HTTPException(status_code=404, detail="Assignment text not found")
-        with open(assignment_file, 'r', encoding='utf-8') as f:
+        with open(assignment_file, "r", encoding="utf-8") as f:
             content = f.read().strip()
-        return {"text": content}
+        # Plain .txt assignments: always return `html` so the IDE panel uses innerHTML (not textContent),
+        # which would show angle brackets as raw characters. Escaped text only — no raw HTML from file.
+        safe_txt = html_std.escape(content).replace("\n", "<br/>")
+        html_plain = (
+            f'<div class="problem-section">'
+            f'<span class="section-label">Assignment</span>'
+            f'<div class="section-content">{safe_txt}</div>'
+            f"</div>"
+        )
+        return {"html": html_plain, "text": None}
     except HTTPException:
         raise
     except Exception as e:

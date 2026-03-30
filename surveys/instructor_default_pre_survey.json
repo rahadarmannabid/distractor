@@ -5,10 +5,10 @@
     "type": "multiple_choice",
     "required": true,
     "options": [
-      "Freshman",
-      "Sophomore",
-      "Junior",
-      "Senior"
+      "1st year",
+      "2nd year",
+      "3rd year",
+      "4th year"
     ],
     "help_text": ""
   },
