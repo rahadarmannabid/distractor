@@ -3488,19 +3488,38 @@ async function initializeFromURL() {
             }
             function assignmentTextLooksLikeHtml(s) {
                 if (typeof s !== 'string' || !s.trim()) return false;
-                return /<[a-z][\s\S]*>/i.test(s);
+                if (/<[a-z][\s\S]*>/i.test(s)) return true;
+                if (/&lt;[a-z]/i.test(s)) return true;
+                return false;
+            }
+            function decodeHtmlEntities(str) {
+                var ta = document.createElement('textarea');
+                ta.innerHTML = str;
+                return ta.value;
             }
             function applyAssignmentPanelPayload(data) {
-                if (assignmentPanelHtmlIsPresent(data.html)) {
-                    problemBody.innerHTML = data.html;
+                var htmlRaw = data.html;
+                if (htmlRaw == null && data && typeof data === 'object' && 'Html' in data) {
+                    htmlRaw = data.Html;
+                }
+                if (assignmentPanelHtmlIsPresent(htmlRaw)) {
+                    var toInsert = htmlRaw;
+                    if (/&lt;[a-z]/i.test(toInsert) && !/<[a-z]/i.test(toInsert.slice(0, Math.min(toInsert.length, 500)))) {
+                        toInsert = decodeHtmlEntities(toInsert);
+                    }
+                    problemBody.innerHTML = toInsert;
                     applyHeadingFromDom();
                     return;
                 }
                 if (typeof data.text === 'string' && data.text.trim()) {
-                    if (assignmentTextLooksLikeHtml(data.text)) {
-                        problemBody.innerHTML = data.text;
+                    var t = data.text;
+                    if (assignmentTextLooksLikeHtml(t)) {
+                        if (/&lt;[a-z]/i.test(t) && !/<[a-z]/i.test(t.slice(0, Math.min(t.length, 500)))) {
+                            t = decodeHtmlEntities(t);
+                        }
+                        problemBody.innerHTML = t;
                     } else {
-                        problemBody.textContent = data.text;
+                        problemBody.textContent = t;
                     }
                     if (headingEl) headingEl.textContent = defaultProblemHeading();
                     return;

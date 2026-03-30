@@ -53,79 +53,77 @@ def _field_looks_like_html(s: str) -> bool:
 
 
 def sanitize_instructor_rich_html(raw: Optional[str]) -> str:
-    """Strip unsafe tags/scripts; allow Quill-like formatting (bold, color, hr, lists, links)."""
+    """Strip unsafe tags/scripts; allow Quill-like formatting (bold, color, hr, lists, links).
+
+    Uses nh3 (Rust ammonia) instead of bleach so production (e.g. Koyeb) does not depend on
+    bleach + tinycss2/css_sanitizer imports; a single binary wheel is sufficient.
+    """
     if raw is None or not str(raw).strip():
         return ""
     try:
-        import bleach
-        from bleach.css_sanitizer import CSSSanitizer
+        import nh3
     except ImportError:
-        logger.warning("bleach not installed; escaping problem HTML instead")
+        logger.warning("nh3 not installed; escaping problem HTML instead")
         return html_std.escape(str(raw))
-    css_sanitizer = CSSSanitizer(
-        allowed_css_properties=[
-            "color",
-            "background-color",
-            "text-align",
-            "font-weight",
-            "font-style",
-            "text-decoration",
-            "margin",
-            "margin-left",
-            "padding",
-            "white-space",
-        ]
-    )
-    allowed_tags = [
-        "p",
-        "br",
-        "strong",
-        "b",
-        "em",
-        "i",
-        "u",
-        "s",
-        "strike",
-        "sub",
-        "sup",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "ul",
-        "ol",
-        "li",
-        "a",
-        "blockquote",
-        "pre",
-        "code",
-        "hr",
-        "span",
-        "div",
-    ]
-    allowed_attrs = {
-        "a": ["href", "title", "target", "rel"],
-        "p": ["class", "style"],
-        "span": ["class", "style"],
-        "div": ["class", "style"],
-        "ol": ["class", "style"],
-        "ul": ["class", "style"],
-        "li": ["class", "style"],
-        "h1": ["class", "style"],
-        "h2": ["class", "style"],
-        "h3": ["class", "style"],
-        "h4": ["class", "style"],
-        "blockquote": ["class", "style"],
-        "pre": ["class", "style", "spellcheck"],
-        "code": ["class", "style"],
+
+    tags = frozenset({
+        "p", "br", "strong", "b", "em", "i", "u", "s", "strike",
+        "sub", "sup", "h1", "h2", "h3", "h4", "ul", "ol", "li", "a",
+        "blockquote", "pre", "code", "hr", "span", "div",
+    })
+    attributes = {
+        "a": frozenset({"href", "title", "target", "rel"}),
+        "p": frozenset({"class", "style"}),
+        "span": frozenset({"class", "style"}),
+        "div": frozenset({"class", "style"}),
+        "ol": frozenset({"class", "style"}),
+        "ul": frozenset({"class", "style"}),
+        "li": frozenset({"class", "style"}),
+        "h1": frozenset({"class", "style"}),
+        "h2": frozenset({"class", "style"}),
+        "h3": frozenset({"class", "style"}),
+        "h4": frozenset({"class", "style"}),
+        "blockquote": frozenset({"class", "style"}),
+        "pre": frozenset({"class", "style", "spellcheck"}),
+        "code": frozenset({"class", "style"}),
     }
-    return bleach.clean(
-        str(raw),
-        tags=allowed_tags,
-        attributes=allowed_attrs,
-        css_sanitizer=css_sanitizer,
-        strip=True,
-    )
+    filter_style_properties = frozenset({
+        "color", "background-color", "text-align", "font-weight", "font-style",
+        "text-decoration", "margin", "margin-left", "padding", "white-space",
+    })
+    try:
+        # link_rel=None: we whitelist rel on <a> so nh3 does not force-insert rel (see nh3 docs).
+        return nh3.clean(
+            str(raw),
+            tags=tags,
+            attributes=attributes,
+            filter_style_properties=filter_style_properties,
+            link_rel=None,
+        )
+    except Exception as e:
+        logger.warning("nh3.clean failed: %s; escaping problem HTML instead", e)
+        return html_std.escape(str(raw))
+
+
+def _maybe_unescape_stored_html_entities(s: str) -> str:
+    """
+    Firebase / JSON sometimes stores markup as HTML entities (&lt;p&gt;...).
+    Double-encoded payloads (&amp;lt;p&amp;gt;...) do not contain the literal
+    substring "&lt;", so a single guard missed them. Unescape repeatedly until
+    stable (capped) so the sanitizer sees real tags and the panel does not show &lt;p&gt; text.
+    """
+    if not s:
+        return s
+    prev = None
+    for _ in range(12):
+        if s == prev:
+            break
+        prev = s
+        u = html_std.unescape(s)
+        if u == s:
+            break
+        s = u
+    return s
 
 
 def format_instructor_problem_html_field(raw: Optional[str]) -> tuple[str, bool]:
@@ -135,10 +133,13 @@ def format_instructor_problem_html_field(raw: Optional[str]) -> tuple[str, bool]
     """
     if raw is None or not str(raw).strip():
         return "", False
-    s = str(raw)
+    s = str(raw).strip()
+    s = _maybe_unescape_stored_html_entities(s)
     if not _field_looks_like_html(s):
         return html_std.escape(s), False
     return sanitize_instructor_rich_html(s), True
+
+
 def initialize_firebase():
     """Initialize Firebase Admin SDK using environment variables"""
     try:
