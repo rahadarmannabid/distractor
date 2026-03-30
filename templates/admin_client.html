@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - AI Code Assistant</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e1e1e, #2d2d30);
+            color: #d4d4d4;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: #252526;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        h1 {
+            color: #569cd6;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        .section {
+            margin-bottom: 40px;
+            padding: 20px;
+            background: #2d2d30;
+            border-radius: 8px;
+            border-left: 4px solid #569cd6;
+        }
+        .section h2 {
+            color: #f97316;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #cccccc;
+            font-weight: 500;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 12px;
+            background: #1e1e1e;
+            border: 2px solid #404040;
+            border-radius: 6px;
+            color: #d4d4d4;
+            font-family: 'Consolas', monospace;
+        }
+        input:focus, textarea:focus {
+            outline: none;
+            border-color: #569cd6;
+        }
+        button {
+            background: linear-gradient(135deg, #569cd6, #4a86c7);
+            border: none;
+            padding: 12px 24px;
+            color: white;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        button:hover {
+            background: linear-gradient(135deg, #4a86c7, #3a76b7);
+            transform: translateY(-2px);
+        }
+        .file-input {
+            padding: 8px;
+        }
+        .success {
+            background: #22c55e;
+            color: white;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 20px;
+        }
+        .error {
+            background: #ef4444;
+            color: white;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 20px;
+        }
+        .env-list {
+            max-height: 400px;
+            overflow-y: auto;
+            background: #1e1e1e;
+            padding: 15px;
+            border-radius: 6px;
+        }
+        .env-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            margin-bottom: 8px;
+            background: #2d2d30;
+            border-radius: 4px;
+        }
+        .env-key {
+            color: #569cd6;
+            font-weight: 600;
+        }
+        .env-value {
+            color: #22c55e;
+            font-family: 'Consolas', monospace;
+        }
+        .btn-danger {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+        }
+        .btn-danger:hover {
+            background: linear-gradient(135deg, #dc2626, #b91c1c);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Admin Control Panel</h1>
+
+        <!-- Login Section -->
+        <div class="section" id="loginSection">
+            <h2>🔐 Admin Login</h2>
+            <div class="form-group">
+                <label>Teacher Access Code:</label>
+                <input type="password" id="accessCode" placeholder="Enter access code">
+            </div>
+            <button onclick="login()">Login</button>
+            <div id="loginMessage"></div>
+        </div>
+
+        <!-- Admin Panel (Hidden until logged in) -->
+        <div id="adminPanel" style="display: none;">
+            
+            <!-- Upload Assignment Section -->
+            <div class="section">
+                <h2>📤 Upload Assignment Files</h2>
+                <form id="uploadForm">
+                    <div class="form-group">
+                        <label>Assignment Key:</label>
+                        <input type="text" id="assignmentKey" placeholder="e.g., LARP1, zenith" required>
+                    </div>
+                    <div class="form-group">
+                        <label>PDF File:</label>
+                        <input type="file" id="pdfFile" accept=".pdf" class="file-input" required>
+                    </div>
+                    <div class="form-group">
+                        <label>TXT File (Markdown):</label>
+                        <input type="file" id="txtFile" accept=".txt" class="file-input" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Survey JSON:</label>
+                        <input type="file" id="surveyFile" accept=".json" class="file-input" required>
+                    </div>
+                    <button type="submit">Upload Files</button>
+                </form>
+                <div id="uploadMessage"></div>
+            </div>
+
+            <!-- ENV Management Section -->
+            <div class="section">
+                <h2>⚙️ Environment Variables</h2>
+                <button onclick="loadEnvVariables()">Refresh Variables</button>
+                <div id="envList" class="env-list"></div>
+                
+                <h3 style="margin-top: 30px; color: #22c55e;">Add/Update Variable</h3>
+                <div class="form-group">
+                    <label>Key:</label>
+                    <input type="text" id="envKey" placeholder="VARIABLE_NAME">
+                </div>
+                <div class="form-group">
+                    <label>Value:</label>
+                    <textarea id="envValue" rows="3" placeholder="Variable value"></textarea>
+                </div>
+                <button onclick="updateEnvVariable()">Save Variable</button>
+                <div id="envMessage"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let authToken = null;
+        const API_BASE = '';
+
+        function login() {
+            const code = document.getElementById('accessCode').value;
+            authToken = code;
+            
+            // Test the token
+            fetch(`${API_BASE}/admin/env`, {
+                headers: { 'Authorization': `Bearer ${authToken}` }
+            })
+            .then(response => {
+                if (response.ok) {
+                    document.getElementById('loginSection').style.display = 'none';
+                    document.getElementById('adminPanel').style.display = 'block';
+                    showMessage('loginMessage', 'Login successful!', 'success');
+                    loadEnvVariables();
+                } else {
+                    showMessage('loginMessage', 'Invalid access code', 'error');
+                }
+            })
+            .catch(error => {
+                showMessage('loginMessage', 'Login failed: ' + error.message, 'error');
+            });
+        }
+
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData();
+            formData.append('assignment_key', document.getElementById('assignmentKey').value);
+            formData.append('pdf_file', document.getElementById('pdfFile').files[0]);
+            formData.append('txt_file', document.getElementById('txtFile').files[0]);
+            formData.append('survey_file', document.getElementById('surveyFile').files[0]);
+            
+            try {
+                const response = await fetch(`${API_BASE}/admin/upload-assignment`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${authToken}` },
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showMessage('uploadMessage', 'Files uploaded successfully!', 'success');
+                    document.getElementById('uploadForm').reset();
+                } else {
+                    showMessage('uploadMessage', result.detail || 'Upload failed', 'error');
+                }
+            } catch (error) {
+                showMessage('uploadMessage', 'Upload error: ' + error.message, 'error');
+            }
+        });
+
+        async function loadEnvVariables() {
+            try {
+                const response = await fetch(`${API_BASE}/admin/env`, {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+                
+                const data = await response.json();
+                const envList = document.getElementById('envList');
+                envList.innerHTML = '';
+                
+                for (const [key, value] of Object.entries(data.variables)) {
+                    const item = document.createElement('div');
+                    item.className = 'env-item';
+                    item.innerHTML = `
+                        <div>
+                            <span class="env-key">${key}</span>: 
+                            <span class="env-value">${value}</span>
+                        </div>
+                        <button class="btn-danger" onclick="deleteEnvVariable('${key}')">Delete</button>
+                    `;
+                    envList.appendChild(item);
+                }
+            } catch (error) {
+                showMessage('envMessage', 'Failed to load variables: ' + error.message, 'error');
+            }
+        }
+
+        async function updateEnvVariable() {
+            const key = document.getElementById('envKey').value;
+            const value = document.getElementById('envValue').value;
+            
+            if (!key || !value) {
+                showMessage('envMessage', 'Please fill in both key and value', 'error');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('key', key);
+            formData.append('value', value);
+            
+            try {
+                const response = await fetch(`${API_BASE}/admin/env`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${authToken}` },
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showMessage('envMessage', `Variable ${key} saved!`, 'success');
+                    document.getElementById('envKey').value = '';
+                    document.getElementById('envValue').value = '';
+                    loadEnvVariables();
+                } else {
+                    showMessage('envMessage', result.detail || 'Save failed', 'error');
+                }
+            } catch (error) {
+                showMessage('envMessage', 'Save error: ' + error.message, 'error');
+            }
+        }
+
+        async function deleteEnvVariable(key) {
+            if (!confirm(`Delete variable ${key}?`)) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/admin/env/${key}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showMessage('envMessage', `Variable ${key} deleted!`, 'success');
+                    loadEnvVariables();
+                } else {
+                    showMessage('envMessage', result.detail || 'Delete failed', 'error');
+                }
+            } catch (error) {
+                showMessage('envMessage', 'Delete error: ' + error.message, 'error');
+            }
+        }
+
+        function showMessage(elementId, message, type) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<div class="${type}">${message}</div>`;
+            setTimeout(() => element.innerHTML = '', 5000);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{
+  "include": ["."],
+  "exclude": ["**/__pycache__", "**/.venv", "**/venv", "submissions"],
+  "reportMissingImports": false,
+  "pythonVersion": "3.11"
+}

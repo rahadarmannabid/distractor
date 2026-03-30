@@ -1,3 +1,0 @@
-Write a JavaScript program that analyzes a paragraph of text and calculates how many times each word appears. The program should ignore case (so "Hello" and "hello" are the same word) and should not count punctuation (e.g., commas, periods, exclamation marks).
-
-The results must be displayed in descending order of frequency (the most common words appear first).

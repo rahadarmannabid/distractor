@@ -1,44 +1,176 @@
-# Python
+# ============================================
+# PYTHON
+# ============================================
 __pycache__/
 *.py[cod]
-*.pyc
+*$py.class
+*.so
 .Python
+*.pyc
+pip-log.txt
+pip-delete-this-directory.txt
 
-# Virtual environments
-.env
+# ============================================
+# VIRTUAL ENVIRONMENTS
+# ============================================
 .venv/
 venv/
 env/
+ENV/
+env.bak/
+venv.bak/
 
-# Application specific
+# ============================================
+# DATA DIRECTORIES (will be mounted as volumes)
+# ============================================
 submissions/
+session_logs/
 logs/
+surveys/quiz_assets/
 *.log
+
+# Temporary code execution files
 user_code_*.py
+user_code_*.js
+user_code_*.c
+user_code_*.java
 
-# Jupyter Notebook
-.ipynb_checkpoints/
-
-# IDE
+# ============================================
+# IDE & EDITOR FILES
+# ============================================
 .vscode/
 .idea/
 *.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-project
+*.sublime-workspace
 
-# OS
+# ============================================
+# OS FILES
+# ============================================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# Database
+# ============================================
+# GIT
+# ============================================
+.git/
+.gitignore
+.gitattributes
+.gitmodules
+
+# ============================================
+# DOCKER (Dockerfile / compose are tracked for Hub & deploy)
+# ============================================
+
+# ============================================
+# DOCUMENTATION
+# ============================================
+# Ignore loose Markdown; keep repo README trackable
+*.md
+!README.md
+!readme.md
+!DOCKER.md
+frontend.txt
+docs/
+documentation/
+
+# ============================================
+# TESTING
+# ============================================
+tests/
+test_*.py
+*_test.py
+.pytest_cache/
+.coverage
+.tox/
+htmlcov/
+.hypothesis/
+pytest.ini
+.coveragerc
+
+# ============================================
+# CI/CD
+# ============================================
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+azure-pipelines.yml
+
+# ============================================
+# JUPYTER
+# ============================================
+.ipynb_checkpoints/
+*.ipynb
+
+# ============================================
+# BUILD ARTIFACTS
+# ============================================
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+*.whl
+
+# ============================================
+# CREDENTIALS & SECRETS
+# ============================================
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+credentials/
+firebase-service-account.json
+
+# ============================================
+# ENVIRONMENT FILES (MUST NOT GO TO GITHUB!)
+# ============================================
+.env
+.env.local
+.env.*.local
+.env.backup
+.env.development
+.env.production
+.env.test
+
+# ============================================
+# DATABASE FILES
+# ============================================
 *.db
 *.sqlite
+*.sqlite3
 
-# Testing
-.pytest_cache/
-.coveragefirebase-service-account.json
-firebase-service-account.json
-*.json # Or be more specific
-.env # Also ignore environment files
+# ============================================
+# TEMPORARY FILES
+# ============================================
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+*.cache
 
-# Custom text files
-backend.txt
-frontend.txt
+# ============================================
+# NODE
+# ============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+

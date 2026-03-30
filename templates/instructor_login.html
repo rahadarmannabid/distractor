@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Instructor Login</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: linear-gradient(135deg, #1e1e1e 0%, #2d2d30 100%);
+      color: #ffffff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+    }
+
+    .container {
+      background-color: #252526;
+      padding: 48px 40px;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      animation: fadeIn 0.8s ease-in-out;
+      width: 100%;
+      max-width: 480px;
+      border: 1px solid #3e3e42;
+    }
+
+    .header { text-align: center; margin-bottom: 32px; }
+
+    h1 {
+      font-size: 28px;
+      font-weight: 600;
+      background: linear-gradient(135deg, #238636, #2ea043);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin: 8px 0;
+    }
+
+    .subtitle { color: #8b949e; font-size: 15px; }
+
+    .info-box {
+      background: rgba(88,166,255,0.1);
+      padding: 16px; border-left: 4px solid #0078d4;
+      border-radius: 8px; margin-bottom: 24px;
+      font-size: 14px; color: #c9d1d9;
+    }
+
+    .success-box {
+      background: rgba(35,134,54,0.1);
+      padding: 16px; border-left: 4px solid #238636;
+      border-radius: 8px; margin-bottom: 24px;
+      font-size: 14px; color: #3fb950;
+    }
+
+    .error-message {
+      background: rgba(248,81,73,0.1);
+      color: #f85149; padding: 16px;
+      border-radius: 8px; margin-bottom: 24px;
+      font-size: 14px; border: 1px solid rgba(248,81,73,0.3);
+    }
+
+    .form-group { margin-bottom: 20px; }
+
+    label {
+      display: block; margin-bottom: 8px;
+      font-size: 14px; color: #c9d1d9; font-weight: 500;
+    }
+
+    input[type="email"], input[type="text"] {
+      width: 100%; padding: 14px 16px; font-size: 16px;
+      background: #1e1e1e; color: #fff;
+      border: 2px solid #3e3e42; border-radius: 8px;
+      transition: all 0.3s ease; font-family: 'Inter', sans-serif;
+    }
+
+    input[type="text"] { text-align: center; letter-spacing: 0.3em; }
+
+    input:focus { border-color: #0078d4; outline: none; box-shadow: 0 0 0 3px rgba(0,120,212,0.2); }
+
+    .submit-btn {
+      width: 100%; padding: 16px; margin-top: 24px;
+      font-size: 16px; font-weight: 600;
+      background: linear-gradient(135deg, #238636, #2ea043);
+      color: white; border: none; border-radius: 8px;
+      cursor: pointer; transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(35,134,54,0.3);
+      font-family: 'Inter', sans-serif;
+    }
+
+    .submit-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(35,134,54,0.4); }
+    .submit-btn:disabled { background: #30363d; cursor: not-allowed; opacity: 0.5; box-shadow: none; }
+
+    .back-link { margin-top: 24px; text-align: center; }
+    .back-link a { color: #58a6ff; text-decoration: none; font-size: 14px; font-weight: 500; }
+    .back-link a:hover { color: #79c0ff; text-decoration: underline; }
+
+    .timer {
+      text-align: center; margin-top: 16px; color: #8b949e;
+      font-size: 14px; padding: 12px;
+      background: rgba(139,148,158,0.1); border-radius: 6px;
+    }
+    .timer.warning { color: #f85149; font-weight: 600; background: rgba(248,81,73,0.1); }
+
+    .resend-link { text-align: center; margin-top: 16px; font-size: 14px; }
+    .resend-link button {
+      background: none; border: none; color: #58a6ff;
+      cursor: pointer; text-decoration: underline;
+      font-size: 14px; font-weight: 500; padding: 8px 12px;
+      font-family: 'Inter', sans-serif;
+    }
+    .resend-link button:disabled { color: #484f58; cursor: not-allowed; text-decoration: none; }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Instructor Portal</h1>
+      <p class="subtitle">Secure OTP authentication for educators</p>
+    </div>
+
+    {% if error %}
+      <div class="error-message">{{ error }}</div>
+    {% endif %}
+
+    {% if otp_sent %}
+      <div class="success-box">OTP sent to <strong>{{ email }}</strong>. Check your inbox (valid for 5 minutes).</div>
+
+      <form method="POST" action="/instructor/verify-otp">
+        <input type="hidden" name="email" value="{{ email }}">
+        <div class="form-group">
+          <label for="otp">Enter 6-Digit OTP</label>
+          <input type="text" id="otp" name="otp" placeholder="000000"
+                 maxlength="6" pattern="[0-9]{6}" required autofocus />
+        </div>
+        <button type="submit" class="submit-btn">Verify &amp; Login</button>
+      </form>
+
+      <div class="timer" id="timer">Time remaining: <span id="countdown">5:00</span></div>
+
+      <div class="resend-link">
+        <button id="resendBtn" onclick="resendOTP()" disabled>
+          Resend OTP (<span id="resendTimer">60</span>s)
+        </button>
+      </div>
+
+      <div class="back-link"><a href="/instructor/login">Change Email</a></div>
+
+    {% else %}
+      <div class="info-box">Enter your email to receive a one-time password.</div>
+
+      <form method="POST" action="/instructor/send-otp">
+        <div class="form-group">
+          <label for="email">Email Address</label>
+          <input type="email" id="email" name="email"
+                 placeholder="instructor@university.edu" required autofocus />
+        </div>
+        <button type="submit" class="submit-btn">Send OTP Code</button>
+      </form>
+
+      <div class="back-link"><a href="/home.html">Back to Student Login</a></div>
+    {% endif %}
+  </div>
+
+  <script type="application/json" id="instructor-login-bootstrap">{{ {"otp_sent": otp_sent|default(false)} | tojson | safe }}</script>
+  <script>
+    (function () {
+    var bootstrap = JSON.parse(document.getElementById('instructor-login-bootstrap').textContent);
+    if (!bootstrap.otp_sent) return;
+    let timeLeft = 300;
+    const countdownEl = document.getElementById('countdown');
+    const timerEl = document.getElementById('timer');
+    const interval = setInterval(() => {
+      timeLeft--;
+      const m = Math.floor(timeLeft / 60);
+      const s = timeLeft % 60;
+      countdownEl.textContent = m + ':' + String(s).padStart(2, '0');
+      if (timeLeft <= 30) timerEl.classList.add('warning');
+      if (timeLeft <= 0) {
+        clearInterval(interval);
+        countdownEl.textContent = 'EXPIRED';
+        window.location.href = '/instructor/login';
+      }
+    }, 1000);
+
+    let resendLeft = 60;
+    const resendBtn = document.getElementById('resendBtn');
+    const resendTimerEl = document.getElementById('resendTimer');
+    const resendInterval = setInterval(() => {
+      resendLeft--;
+      resendTimerEl.textContent = resendLeft;
+      if (resendLeft <= 0) {
+        clearInterval(resendInterval);
+        resendBtn.disabled = false;
+        resendBtn.innerHTML = 'Resend OTP';
+      }
+    }, 1000);
+
+    function resendOTP() {
+      const email = document.querySelector('input[name="email"]').value;
+      fetch('/instructor/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'email=' + encodeURIComponent(email)
+      }).then(r => { if (r.ok) window.location.reload(); });
+    }
+    })();
+  </script>
+</body>
+</html>

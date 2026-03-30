@@ -33,39 +33,6 @@
             z-index: -1;
         }
 
-        .bg-animation::before,
-        .bg-animation::after {
-            content: '';
-            position: absolute;
-            width: 200px;
-            height: 200px;
-            border-radius: 50%;
-            opacity: 0.1;
-            animation: float 6s ease-in-out infinite;
-        }
-
-        .bg-animation::before {
-            background: linear-gradient(135deg, #f97316, #ea580c);
-            top: 20%;
-            left: 10%;
-            animation-delay: 0s;
-        }
-
-        .bg-animation::after {
-            background: linear-gradient(135deg, #569cd6, #4a86c7);
-            bottom: 20%;
-            right: 10%;
-            animation-delay: 3s;
-        }
-
-        @keyframes float {
-            0%, 100% {
-                transform: translateY(0px) scale(1);
-            }
-            50% {
-                transform: translateY(-20px) scale(1.1);
-            }
-        }
 
         .container {
             background: linear-gradient(135deg, #252526, #2d2d30);
@@ -73,7 +40,7 @@
             border-radius: 16px;
             padding: 40px;
             box-shadow: 0 15px 40px rgba(0,0,0,0.6);
-            width: 600px;
+            width: 900px;
             max-width: 95vw;
             max-height: 90vh;
             overflow-y: auto;
@@ -319,29 +286,6 @@
             margin-bottom: 20px;
         }
 
-        .features {
-            display: flex;
-            justify-content: space-around;
-            margin: 20px 0;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-
-        .feature {
-            background: rgba(64, 64, 64, 0.3);
-            padding: 8px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            color: #569cd6;
-            border: 1px solid rgba(86, 156, 214, 0.3);
-            transition: all 0.3s ease;
-        }
-
-        .feature:hover {
-            background: rgba(86, 156, 214, 0.1);
-            border-color: #569cd6;
-            transform: translateY(-2px);
-        }
 
         .login-form {
             display: flex;
@@ -529,7 +473,7 @@
         }
 
         /* Responsive design */
-        @media (max-width: 600px) {
+        @media (max-width: 900px) {
             .container {
                 padding: 25px 20px;
                 width: 95vw;
@@ -538,15 +482,6 @@
             
             .consent-title, .login-title {
                 font-size: 22px;
-            }
-            
-            .features {
-                flex-direction: column;
-                gap: 8px;
-            }
-            
-            .feature {
-                text-align: center;
             }
 
             .consent-section {
@@ -572,6 +507,104 @@
         .container::-webkit-scrollbar-thumb:hover {
             background: #4a86c7;
         }
+
+        /* Toast Notification Styles */
+        .toast-notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #0e2f1e, #1a4d2e);
+            border: 2px solid #22c55e;
+            border-radius: 12px;
+            padding: 16px 20px;
+            color: #4ade80;
+            font-size: 14px;
+            font-weight: 600;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 300px;
+            max-width: 400px;
+            animation: slideInRight 0.4s ease-out;
+            opacity: 0;
+            transform: translateX(400px);
+        }
+
+        .toast-notification.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .toast-notification.hide {
+            animation: slideOutRight 0.4s ease-in forwards;
+        }
+
+        .toast-notification.warning {
+            background: linear-gradient(135deg, #3d2e1b, #4d3722);
+            border-color: #f59e0b;
+            color: #fbbf24;
+        }
+
+        .toast-notification.error {
+            background: linear-gradient(135deg, #2d1b1b, #3d2222);
+            border-color: #ef4444;
+            color: #ff6b6b;
+        }
+
+        .toast-icon {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+
+        .toast-content {
+            flex: 1;
+            line-height: 1.4;
+        }
+
+        .toast-title {
+            font-weight: 700;
+            margin-bottom: 2px;
+        }
+
+        .toast-message {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateX(400px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        @keyframes slideOutRight {
+            from {
+                opacity: 1;
+                transform: translateX(0);
+            }
+            to {
+                opacity: 0;
+                transform: translateX(400px);
+            }
+        }
+
+        /* Mobile responsive toast */
+        @media (max-width: 768px) {
+            .toast-notification {
+                top: 10px;
+                right: 10px;
+                left: 10px;
+                min-width: auto;
+                max-width: none;
+            }
+        }
     </style>
 </head>
 <body>
@@ -581,73 +614,69 @@
         <!-- Consent Form Screen -->
         <div class="consent-screen" id="consentScreen">
             <div class="consent-header">
-                <div class="consent-title">Research Participation Consent</div>
-                <div class="consent-subtitle">
-                    AI Code Assistant Research Study - Please read carefully before proceeding
-                </div>
+                <div class="consent-title">GUIDE Research Study</div>
+
+<div class="consent-subtitle">
+    Investigating Student Interaction Behaviors with AI Code Assistants - Please read carefully before proceeding
+</div>
             </div>
             
-            <div class="consent-content">
-                <div class="consent-section">
-                    <h3>📋 Study Purpose</h3>
-                    <p>You are being invited to participate in a research study investigating how AI-powered coding assistants affect programming behavior and learning. This study examines the interaction between developers and AI code suggestions.</p>
-                </div>
+ <div class="consent-content">
+    <div class="consent-section">
+        <h3>📋 What is this? Why are we asking for your participation?</h3>
+        <p>We are asking you to participate in a research study titled "GUIDE (Guessing IDE)". We will describe the study to you and answer any questions that come up. The Faculty Advisor for this study is Stephen MacNeil, CIS Department at Temple University. We are interested in participants who are at least 18 years old, speak and read fluent English, and have access to a computer with an internet connection.</p>
+    </div>
 
-                <div class="consent-section">
-                    <h3>🔬 What You Will Do</h3>
-                    <ul>
-                        <li>Complete coding tasks using an AI-assisted development environment</li>
-                        <li>Interact with AI-generated code suggestions and problem analysis</li>
-                        <li>Your coding activity, interactions, and submitted code will be recorded</li>
-                        <li>Session duration: Approximately 30-60 minutes</li>
-                    </ul>
-                </div>
+    <div class="consent-section">
+        <h3>🔬 What is this study about?</h3>
+        <p>The purpose of this study is to understand how your trust and coding behavior may change when you see an AI shows its reasoning behind suggestions in real time. Based on the code you write, the system will generate its best guess of the programming problem you are solving and provide next-line code suggestions to assist you in completing the assignment.</p>
+        <p>You will use a tool similar to GitHub Copilot within a VS Code–style coding editor to complete multiple programming tasks. The tool will log your coding practices and interactions, which will be stored in an anonymized database. Additionally, the system will collect survey data during the study to gain insights into your experience.</p>
+    </div>
 
-                <div class="consent-section">
-                    <h3>📊 Data Collection</h3>
-                    <p>The following data will be collected and stored securely:</p>
-                    <ul>
-                        <li><strong>Code Activity:</strong> All code you write, edit, and submit</li>
-                        <li><strong>AI Interactions:</strong> Which suggestions you click, view, or use</li>
-                        <li><strong>Session Metrics:</strong> Time spent, number of compilations, completion status</li>
-                        <li><strong>User Identifier:</strong> Your provided user ID (no personal information required)</li>
-                    </ul>
-                    
-                    <div class="warning-box">
-                        <strong>Important:</strong> Do not include any personal, confidential, or proprietary information in your code submissions. Use only example/practice code.
-                    </div>
-                </div>
+    <div class="consent-section">
+        <h3>💻 What will you do in this study?</h3>
+        <p>If you agree to participate in this study, you will begin by accessing it through a provided link. You will then complete multiple coding assignments using GUIDE (Guessing IDE). The study session will last about 15 minutes at max. You can complete the study remotely at your convenience.</p>
+    </div>
 
-                <div class="consent-section">
-                    <h3>🔒 Privacy & Data Security</h3>
-                    <ul>
-                        <li>All data is stored securely in encrypted databases</li>
-                        <li>Your user ID will be anonymized for analysis</li>
-                        <li>Data will be used solely for research purposes</li>
-                        <li>No personal identifying information is collected or stored</li>
-                        <li>Data may be shared in aggregate form for academic publication</li>
-                    </ul>
-                </div>
+    <div class="consent-section">
+        <h3>⚠️ What risks are associated with this study?</h3>
+        <p><strong>Inappropriate Content:</strong> Generative AI models such as GPT-4o have the potential to generate inappropriate suggestions. While we have not observed any inappropriate or harmful content, we will continue to monitor the AI system throughout the study.</p>
+        <p><strong>Potential for Incorrect Code Suggestions:</strong> GPT-4o may generate incorrect suggestions when providing code. It is important that you verify any generated code yourself before accepting suggestions.</p>
+        <p><strong>Loss of Confidentiality:</strong> Data we collect during the coding assignments, such as your interactions with AI-generated suggestions, will only be shared among members of our research team. Data will be deleted at the conclusion of our study.</p>
+        <p>Research records will be kept confidential to the extent allowed by law. Research records may also be reviewed by the Temple Institutional Review Board (IRB).</p>
+    </div>
 
-                <div class="consent-section">
-                    <h3>⚖️ Your Rights</h3>
-                    <ul>
-                        <li><strong>Voluntary Participation:</strong> Your participation is completely voluntary</li>
-                        <li><strong>Right to Withdraw:</strong> You may end your session at any time without penalty</li>
-                        <li><strong>No Compensation:</strong> This is unpaid research participation</li>
-                        <li><strong>Questions:</strong> You may ask questions about the study at any time</li>
-                    </ul>
-                </div>
+    <div class="consent-section">
+        <h3>🔄 What are the alternatives to participating in the study?</h3>
+        <p>You are not under any obligation to participate in the study. If at any time you choose to end participation in the study, you may notify a researcher, and we will delete your data.</p>
+    </div>
 
-                <div class="consent-section">
-                    <h3>⚠️ Risks & Benefits</h3>
-                    <p><strong>Risks:</strong> Minimal risk involved. Standard computer use precautions apply.</p>
-                    <p><strong>Benefits:</strong> Contributing to AI and programming education research. Experience using AI coding tools.</p>
-                </div>
+    <div class="consent-section">
+        <h3>🎁 What benefits/compensation can you expect?</h3>
+        <p>You will receive extra credit in the course you were recruited through, at the discretion of your instructor, for your participation in the study. Choosing not to participate will not affect your actual course grade.</p>
+    </div>
 
-                <div class="highlight-box">
-                    <strong>Contact Information:</strong> If you have questions about this research study, please contact the research team through the provided institutional channels.
-                </div>
+    <div class="consent-section">
+        <h3>🚪 Ending participation in our study</h3>
+        <p>Participation is entirely voluntary. You may end participation early at any time without penalty or loss of the benefits/compensation to which you are entitled. If you decide to end participation early, you may notify a researcher, and we will delete your data.</p>
+    </div>
+
+    <div class="consent-section">
+        <h3>⚖️ Other conditions of withdrawal</h3>
+        <p>The PI may remove you from the study without your consent if the PI feels it is in your best interest or the best interest of the study. If you encountered unforeseen technical issues, we will remove you from the study.</p>
+    </div>
+
+    <div class="consent-section">
+        <h3>💰 Are there any associated costs?</h3>
+        <p>No, this study will not come at any cost to you.</p>
+    </div>
+
+    <div class="highlight-box">
+        <h3>📞 Who can you contact if there are additional questions?</h3>
+        <p>If you have any additional questions, you may contact the researchers (Rahad Arman Nabid: rahad.arman.nabid@temple.edu, Ian Tyler Applebaum: ian.tyler@temple.edu). You may also contact Stephen MacNeil, the Faculty Advisor, at stephen.macneil@temple.edu</p>
+        <p>Participants may contact Temple's Human Research Protection Program through the IRB at irb@temple.edu or (215) 707-3390.</p>
+        <p><strong>Protocol Number:</strong> 32615<br><strong>PI Name:</strong> Stephen MacNeil</p>
+    </div>
 
                 <div class="checkbox-container" id="consentCheckbox">
                     <div class="checkbox" id="checkbox"></div>
@@ -671,15 +700,14 @@
                 <div class="login-subtitle">
                      Coding environment with real-time AI assistance
                 </div>
-                    <div class="features">
-                    <div class="feature">🤖 AI Copilot</div>
-                    <div class="feature">🧑‍💻 IDE</div>
-                    <div class="feature">🔬 Research</div> <!-- or 🔒 Secure Research if privacy-focused -->
-                    <div class="feature">⚡ Real-time Coding</div>
-                </div>
             </div>
-            
+
             <form class="login-form" id="loginForm">
+                {% if quiz_mode is defined and quiz_mode and quiz_teaser %}
+                <div style="background:rgba(88,166,255,0.1);padding:14px;border-left:4px solid #58a6ff;border-radius:8px;margin-bottom:18px;font-size:14px;color:#c9d1d9;">
+                    {{ quiz_teaser }}
+                </div>
+                {% endif %}
                 <div class="form-group">
                     <label class="form-label" for="userId">
                         👤 User ID
@@ -697,23 +725,51 @@
                 </div>
                 
                 <div class="form-group">
-                    <label class="form-label" for="assignmentKey">
-                        🔑 Assignment Key
-                    </label>
-                    <input 
-                        type="text" 
-                        id="assignmentKey" 
-                        name="assignmentKey" 
-                        class="form-input" 
-                        placeholder="Enter your assignment access key"
-                        required
-                        minlength="5"
-                        autocomplete="off"
-                    >
-                    <small class="info-text">
-                        Only valid assignment keys are accepted. Invalid keys will be rejected for security.
-                    </small>
-                </div>
+    <label class="form-label" for="assignmentKey">
+        🔑 Assignment Key
+    </label>
+    <input
+        type="text"
+        id="assignmentKey"
+        name="assignmentKey"
+        class="form-input"
+        placeholder="Enter your assignment access key"
+        required
+        minlength="4"
+        autocomplete="off"
+        {% if quiz_mode is defined and quiz_mode %}value="{{ access_code }}" readonly{% endif %}
+    >
+    <small class="info-text">
+        Only valid assignment keys are accepted. Invalid keys will be rejected for security.
+    </small>
+</div>
+
+<div class="form-group">
+    <label class="form-label" for="programmingLanguage">
+        💻 Programming Language
+    </label>
+    <select 
+        id="programmingLanguage" 
+        name="programmingLanguage" 
+        class="form-input" 
+        required
+        style="cursor: pointer;"
+    >
+        <option value="">Select your preferred language</option>
+        {% if quiz_mode is defined and quiz_mode and allowed_languages %}
+            {% for lang in allowed_languages %}
+            <option value="{{ lang }}">{{ lang|capitalize }}</option>
+            {% endfor %}
+        {% else %}
+            <option value="javascript">JavaScript</option>
+            <option value="python">Python</option>
+            <option value="c">C</option>
+        {% endif %}
+    </select>
+    <small class="info-text">
+        Choose the programming language you'll be working with in the IDE.
+    </small>
+</div>
                 
                 <button type="submit" class="login-button" id="loginButton">
                     Enter Coding Environment
@@ -725,12 +781,16 @@
                 </div>
             </form>
             
+
             <div class="info-section">
                 <div class="info-text">
                     This is a secure research environment. All sessions are logged and monitored for research purposes.
                 </div>
                 <div class="security-badge">
                     🛡️ Research Database Integration Active
+                </div>
+                <div style="text-align:center;margin-top:12px;">
+                    <a href="/instructor/login" style="color:#58a6ff;font-size:13px;text-decoration:none;">Instructor Login</a>
                 </div>
             </div>
         </div>
@@ -750,8 +810,48 @@
         const errorText = document.getElementById('errorText');
         const userIdInput = document.getElementById('userId');
         const assignmentKeyInput = document.getElementById('assignmentKey');
+        const programmingLanguageSelect = document.getElementById('programmingLanguage');
 
         let consentGiven = false;
+
+        // Toast Notification Functions
+        function showToast(title, message, type = 'success', duration = 2500) {
+            // Create toast element
+            const toast = document.createElement('div');
+            toast.className = `toast-notification ${type}`;
+            
+            // Set icon based on type
+            let icon = '✅';
+            if (type === 'warning') icon = '⚠️';
+            if (type === 'error') icon = '❌';
+            if (type === 'download') icon = '📥';
+            
+            toast.innerHTML = `
+                <div class="toast-icon">${icon}</div>
+                <div class="toast-content">
+                    <div class="toast-title">${title}</div>
+                    <div class="toast-message">${message}</div>
+                </div>
+            `;
+            
+            // Add to body
+            document.body.appendChild(toast);
+            
+            // Trigger animation
+            setTimeout(() => {
+                toast.classList.add('show');
+            }, 10);
+            
+            // Auto-dismiss
+            setTimeout(() => {
+                toast.classList.add('hide');
+                setTimeout(() => {
+                    if (document.body.contains(toast)) {
+                        document.body.removeChild(toast);
+                    }
+                }, 400); // Match animation duration
+            }, duration);
+        }
 
         // Consent checkbox handling
         consentCheckbox.addEventListener('click', () => {
@@ -783,19 +883,33 @@
             consentScreen.style.display = 'block';
             hideError();
             
-            // Clear login form
+            // Clear login form (preserve pre-filled assignment key)
             userIdInput.value = '';
-            assignmentKeyInput.value = '';
+            if (!assignmentKeyInput.readOnly) assignmentKeyInput.value = '';
         });
 
         // Show/hide error messages
-        function showError(message) {
+        function showError(message, type = 'error') {
             errorText.textContent = message;
             errorMessage.classList.remove('hidden');
+            
+            // Visual styling based on type
+            if (type === 'warning') {
+                errorMessage.style.borderColor = '#f59e0b';
+                errorMessage.style.background = 'linear-gradient(135deg, #3d2e1b, #4d3722)';
+                errorMessage.querySelector('span:first-child').textContent = '⚠️';
+            } else {
+                errorMessage.style.borderColor = '#ef4444';
+                errorMessage.style.background = 'linear-gradient(135deg, #2d1b1b, #3d2222)';
+                errorMessage.querySelector('span:first-child').textContent = '⚠️';
+            }
         }
 
         function hideError() {
             errorMessage.classList.add('hidden');
+            // Reset to default error styling
+            errorMessage.style.borderColor = '#ef4444';
+            errorMessage.style.background = 'linear-gradient(135deg, #2d1b1b, #3d2222)';
         }
 
         // Generate session token for URL
@@ -817,10 +931,11 @@
             
             const userId = userIdInput.value.trim();
             const assignmentKey = assignmentKeyInput.value.trim();
-            
+            const selectedLanguage = programmingLanguageSelect.value;
+
             // Basic validation
-            if (!userId || !assignmentKey) {
-                showError('Please fill in both User ID and Assignment Key');
+            if (!userId || !assignmentKey || !selectedLanguage) {
+                showError('Please fill in User ID, Assignment Key, and select a Programming Language');
                 return;
             }
 
@@ -829,8 +944,8 @@
                 return;
             }
 
-            if (assignmentKey.length < 5) {
-                showError('Assignment Key must be at least 5 characters long');
+            if (assignmentKey.length < 4) {
+                showError('Assignment Key must be at least 4 characters long');
                 return;
             }
             
@@ -840,29 +955,82 @@
             hideError();
             
             try {
-                // Test authentication with backend
+                // Try standard assignment key auth first
                 const response = await fetch('/authenticate', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ 
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
                         user_id: userId,
-                        assignment_key: assignmentKey
+                        assignment_key: assignmentKey,
+                        programming_language: selectedLanguage
                     })
                 });
 
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.detail || 'Authentication failed');
+                    // Standard auth failed — try as instructor-created assignment
+                    const quizRes = await fetch('/quiz/join', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            access_code: assignmentKey,
+                            user_id: userId,
+                            programming_language: selectedLanguage
+                        })
+                    });
+
+                    if (!quizRes.ok) {
+                        const quizErr = await quizRes.json();
+                        throw new Error(quizErr.detail || 'Invalid assignment key. Please verify your credentials.');
+                    }
+
+                    // Quiz join succeeded
+                    const data = await quizRes.json();
+                    const sessionToken = Date.now().toString(36) + Math.random().toString(36).substring(2);
+                    sessionStorage.setItem('authData', JSON.stringify({
+                        userId: userId,
+                        assignmentKey: 'quiz_' + assignmentKey,
+                        sessionToken: sessionToken,
+                        condition: data.condition,
+                        problemDescription: data.problem_description,
+                        sessionId: data.session_id,
+                        programmingLanguage: selectedLanguage,
+                        timestamp: new Date().toISOString(),
+                        consentGiven: true,
+                        consentTimestamp: new Date().toISOString(),
+                        pasteAllowed: data.paste_allowed !== undefined ? data.paste_allowed : 1,
+                        tabTrackingEnabled: data.tab_tracking_enabled !== false,
+                        hasPreSurvey: data.has_pre_survey || false,
+                        hasPostSurvey: data.has_post_survey || false,
+                        starterCode: data.starter_code || null,
+                        starterFiles: data.starter_files || null,
+                        periodicSurveyEnabled: data.periodic_survey_enabled === true,
+                        periodicSurveyStart: data.periodic_survey_start || 5,
+                        periodicSurveyInterval: data.periodic_survey_interval || 4,
+                        finalSurveyDisabled: data.final_survey_disabled === true,
+                        quizId: data.quiz_id || null,
+                        quizTeaser: data.quiz_teaser || '',
+                        timeLimitMinutes: data.time_limit_minutes || 0,
+                        totalProblems: data.total_problems || 1,
+                        currentProblemIndex: data.current_problem_index || 0,
+                    }));
+
+                    loginButton.innerHTML = 'Authenticated! Redirecting...';
+                    loginButton.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
+
+                    let redirectUrl;
+                    if (data.has_pre_survey) {
+                        redirectUrl = '/survey.html?type=pre';
+                    } else {
+                        redirectUrl = '/index.html?session=' + sessionToken + '&user=' + encodeURIComponent(userId);
+                    }
+                    setTimeout(() => { window.location.href = redirectUrl; }, 1000);
+                    return;
                 }
 
+                // Standard assignment key auth succeeded
                 const data = await response.json();
-                
-                // Generate unique session URL
                 const sessionToken = generateSessionToken(userId, assignmentKey);
-                
-                // Store credentials and consent status in sessionStorage for the IDE page
+
                 sessionStorage.setItem('authData', JSON.stringify({
                     userId: userId,
                     assignmentKey: assignmentKey,
@@ -870,35 +1038,73 @@
                     condition: data.condition,
                     problemDescription: data.problem_description,
                     sessionId: data.session_id,
+                    programmingLanguage: selectedLanguage,
                     timestamp: new Date().toISOString(),
                     consentGiven: true,
-                    consentTimestamp: new Date().toISOString()
+                    consentTimestamp: new Date().toISOString(),
+                    pasteAllowed: data.paste_allowed !== undefined ? data.paste_allowed : 1,
+                    tabTrackingEnabled: data.tab_tracking_enabled !== false,
+                    hasPreSurvey: data.has_pre_survey || false,
+                    hasPostSurvey: data.has_post_survey || false,
+                    starterCode: data.starter_code || null,
+                    periodicSurveyEnabled: data.periodic_survey_enabled === true,
+                    periodicSurveyStart: data.periodic_survey_start || 5,
+                    finalSurveyDisabled: data.final_survey_disabled === true,
+                    currentProblemIndex: typeof data.current_problem_index === 'number' ? data.current_problem_index : 0,
+                    totalProblems: typeof data.total_problems === 'number' ? data.total_problems : 1
                 }));
-                
-                // Redirect to unique IDE URL
-                const ideUrl = `index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
-                
-                // Show success message briefly before redirect
-                loginButton.innerHTML = '✅ Authentication successful! Redirecting to research environment...';
+
+                // Download assignment PDF
+                try {
+                    loginButton.innerHTML = '<div class="loading"><span class="spinner"></span>Downloading assignment...</div>';
+                    const downloadResponse = await fetch(`/download-assignment/${assignmentKey}`);
+                    if (downloadResponse.ok) {
+                        const blob = await downloadResponse.blob();
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = `${assignmentKey}.pdf`;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        setTimeout(() => URL.revokeObjectURL(url), 100);
+                        showToast('Assignment Downloaded!', `File saved: ${assignmentKey}.pdf`, 'download', 2500);
+                        loginButton.innerHTML = 'Download complete';
+                        loginButton.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    } else {
+                        throw new Error('not found');
+                    }
+                } catch (downloadError) {
+                    console.error('PDF download error:', downloadError);
+                    showToast('Assignment File Not Available', 'Contact your instructor for assignment details', 'warning', 3500);
+                    loginButton.innerHTML = 'File not available';
+                    loginButton.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                }
+
+                let redirectUrl;
+                let successMessage;
+                if (data.has_pre_survey) {
+                    redirectUrl = `survey.html?type=pre`;
+                    successMessage = 'Authentication successful! Redirecting to pre-study survey...';
+                } else {
+                    redirectUrl = `index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
+                    successMessage = 'Authentication successful! Redirecting to coding environment...';
+                }
+                loginButton.innerHTML = successMessage;
                 loginButton.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
-                
-                setTimeout(() => {
-                    window.location.href = ideUrl;
-                }, 1500);
+                setTimeout(() => { window.location.href = redirectUrl; }, 1500);
 
             } catch (error) {
                 console.error('Authentication error:', error);
-                
                 let errorMsg = error.message;
-                if (errorMsg.includes('Invalid assignment key')) {
-                    errorMsg = 'Invalid assignment key. Access denied. Please verify your credentials with the research administrator.';
-                } else if (errorMsg.includes('network') || errorMsg.includes('fetch')) {
+                if (errorMsg.includes('network') || errorMsg.includes('fetch')) {
                     errorMsg = 'Network error. Please check your connection and try again.';
                 }
-                
                 showError(errorMsg);
                 loginButton.disabled = false;
-                loginButton.innerHTML = 'Enter Research Environment';
+                loginButton.innerHTML = 'Enter Coding Environment';
                 loginButton.style.background = 'linear-gradient(135deg, #f97316, #ea580c)';
             }
         });
@@ -910,9 +1116,11 @@
             checkbox.classList.remove('checked');
             consentCheckbox.classList.remove('checked');
             continueButton.disabled = true;
-            
+
             userIdInput.value = '';
-            assignmentKeyInput.value = '';
+            // Don't clear pre-filled assignment key (readonly field from direct link)
+            if (!assignmentKeyInput.readOnly) assignmentKeyInput.value = '';
+            programmingLanguageSelect.value = '';
             hideError();
             
             // Clear any existing session data
@@ -924,7 +1132,7 @@
         });
 
         // Add interactive effects
-        [userIdInput, assignmentKeyInput].forEach(input => {
+            [userIdInput, assignmentKeyInput, programmingLanguageSelect].forEach(input => {
             input.addEventListener('focus', () => {
                 hideError();
             });
@@ -980,6 +1188,8 @@
         // Additional security: Clear any existing auth on page load
         sessionStorage.removeItem('authData');
         localStorage.removeItem('authData');
+
+
     </script>
 </body>
 </html>

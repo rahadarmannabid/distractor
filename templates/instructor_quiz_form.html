@@ -1,0 +1,1343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{% if edit_mode %}Edit{% else %}Create{% endif %} Quiz</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --border: #334155;
+      --border-hover: #475569;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --dim: #64748b;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --primary-bg: rgba(59, 130, 246, 0.1);
+      --success: #10b981;
+      --success-light: #34d399;
+      --danger: #ef4444;
+      --danger-light: #f87171;
+      --warning: #f59e0b;
+      --input-bg: #0f172a;
+      --radius: 12px;
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--bg); color: var(--text);
+      min-height: 100vh; line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Navbar ── */
+    .navbar {
+      background: rgba(30, 41, 59, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      padding: 16px 32px; border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+      position: sticky; top: 0; z-index: 100;
+    }
+    .navbar h1 { font-size: 1.2rem; font-weight: 600; letter-spacing: -0.025em; }
+    .nav-link {
+      color: var(--muted); text-decoration: none; font-size: 0.9rem;
+      font-weight: 500; transition: color 0.2s;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .nav-link:hover { color: var(--text); }
+    .nav-link::before { content: '←'; font-size: 1.1em; }
+
+    /* ── Progress Steps ── */
+    .steps-bar {
+      background: var(--panel); border-bottom: 1px solid var(--border);
+      padding: 16px 32px; display: flex; justify-content: center; gap: 8px;
+      position: sticky; top: 61px; z-index: 99;
+      box-shadow: var(--shadow-sm);
+    }
+    .step-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 16px; border-radius: 8px;
+      font-size: 0.875rem; font-weight: 500; color: var(--muted);
+      cursor: pointer; transition: all 0.2s; white-space: nowrap;
+    }
+    .step-item:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+    .step-item.active { color: var(--primary); background: var(--primary-bg); font-weight: 600; }
+    .step-item.completed { color: var(--success-light); }
+    .step-num {
+      width: 24px; height: 24px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.75rem; font-weight: 700;
+      background: var(--input-bg); border: 2px solid var(--border); color: var(--muted);
+      transition: all 0.2s;
+    }
+    .step-item.active .step-num { border-color: var(--primary); background: var(--primary); color: #fff; }
+    .step-item.completed .step-num { border-color: var(--success); background: var(--success); color: #fff; }
+    .step-divider { color: var(--border); font-size: 1.2rem; align-self: center; font-weight: 300; }
+
+    /* ── Container ── */
+    .container { max-width: 900px; margin: 0 auto; padding: 40px 24px 120px; }
+
+    /* ── Step panels ── */
+    .step-panel { display: none; animation: fadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+    .step-panel.active { display: block; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* ── Cards / Sections ── */
+    .card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 32px; margin-bottom: 24px;
+      box-shadow: var(--shadow-sm);
+    }
+    .card h2 { font-size: 1.25rem; font-weight: 600; margin-bottom: 6px; color: #fff; letter-spacing: -0.01em; }
+    .card .subtitle { font-size: 0.9rem; color: var(--muted); margin-bottom: 24px; }
+
+    /* ── Form inputs ── */
+    .fg { margin-bottom: 24px; }
+    .fg:last-child { margin-bottom: 0; }
+    .fg label { display: block; margin-bottom: 8px; font-size: 0.875rem; color: var(--text); font-weight: 500; }
+    .fg .hint { font-size: 0.8rem; color: var(--muted); margin-top: 6px; }
+    
+    input[type="text"], input[type="number"], input[type="datetime-local"],
+    textarea, select {
+      width: 100%; padding: 12px 16px; font-size: 0.95rem;
+      background: var(--input-bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      font-family: 'Inter', sans-serif; transition: all 0.2s;
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
+    }
+    input::placeholder, textarea::placeholder { color: var(--dim); }
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--primary); outline: none;
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+    }
+    textarea { resize: vertical; min-height: 100px; line-height: 1.5; }
+    textarea.code-area { font-family: 'Fira Code', monospace; font-size: 0.85rem; min-height: 200px; tab-size: 4; background: #0b1120; }
+
+    /* ── Checkbox / radio groups ── */
+    .chip-group { display: flex; flex-wrap: wrap; gap: 12px; }
+    .chip {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 20px; border-radius: 8px; cursor: pointer;
+      font-size: 0.9rem; font-weight: 500; color: var(--muted);
+      background: var(--input-bg); border: 1px solid var(--border);
+      transition: all 0.2s; user-select: none;
+    }
+    .chip:hover { border-color: var(--border-hover); color: var(--text); }
+    .chip input { display: none; }
+    .chip.selected { border-color: var(--primary); color: var(--primary); background: var(--primary-bg); box-shadow: 0 0 0 1px var(--primary); }
+
+    /* ── Condition cards ── */
+    .cond-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    @media (max-width: 768px) { .cond-grid { grid-template-columns: 1fr; } }
+    .cond-card {
+      background: var(--input-bg); border: 2px solid var(--border);
+      border-radius: var(--radius); padding: 24px 20px; cursor: pointer;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); text-align: center;
+      position: relative; overflow: hidden;
+    }
+    .cond-card:hover { border-color: var(--border-hover); transform: translateY(-3px); box-shadow: var(--shadow); }
+    .cond-card.selected { border-color: var(--primary); background: var(--primary-bg); box-shadow: 0 4px 12px rgba(59,130,246,0.15); }
+    .cond-card .cond-num {
+      width: 48px; height: 48px; border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 1.25rem; font-weight: 700; margin-bottom: 16px;
+      background: var(--panel); color: var(--muted); border: 1px solid var(--border);
+      transition: all 0.2s;
+    }
+    .cond-card.selected .cond-num { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .cond-card h3 { font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: var(--text); }
+    .cond-card p { font-size: 0.85rem; color: var(--muted); line-height: 1.5; }
+
+    /* ── Problem Tabs ── */
+    .problem-tabs-container { margin-bottom: 24px; }
+    .problem-tabs {
+      display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+      background: var(--input-bg); padding: 8px; border-radius: 8px; border: 1px solid var(--border);
+    }
+    .prob-tab {
+      padding: 8px 16px; border-radius: 6px; font-size: 0.85rem; font-weight: 600;
+      background: transparent; color: var(--muted); border: none;
+      cursor: pointer; transition: all 0.2s; font-family: 'Inter', sans-serif;
+    }
+    .prob-tab:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+    .prob-tab.active { background: var(--panel); color: var(--primary); box-shadow: var(--shadow-sm); }
+    
+    /* ── Starter code tabs ── */
+    .code-tabs { display: flex; gap: 4px; margin-bottom: -1px; position: relative; z-index: 1; padding: 0 8px; }
+    .code-tab {
+      padding: 10px 24px; font-size: 0.85rem; font-weight: 600;
+      background: var(--panel); color: var(--muted); border: 1px solid transparent;
+      border-bottom: none; border-radius: 8px 8px 0 0;
+      cursor: pointer; transition: all 0.2s; font-family: 'Inter', sans-serif;
+    }
+    .code-tab:hover { color: var(--text); }
+    .code-tab.active { background: var(--input-bg); color: var(--primary); border-color: var(--border); }
+    .starter-files-wrap { background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+    
+    .starter-file-card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; padding: 12px; margin-bottom: 16px;
+    }
+    .starter-file-card:last-child { margin-bottom: 0; }
+
+    .remove-btn {
+      background: rgba(239,68,68,0.1); border: 1px solid transparent; color: var(--danger-light);
+      cursor: pointer; font-size: 1.2rem; width: 36px; height: 36px; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s; flex-shrink: 0;
+    }
+    .remove-btn:hover { background: var(--danger); color: white; border-color: var(--danger); }
+
+    /* ── Survey questions ── */
+    .sq-card {
+      background: var(--input-bg); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px; margin-bottom: 16px;
+      position: relative; transition: border-color 0.2s;
+    }
+    .sq-card:hover { border-color: var(--border-hover); }
+    .sq-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .sq-top .sq-badge { 
+      font-size: 0.75rem; color: #fff; background: var(--primary); font-weight: 700; 
+      padding: 4px 10px; border-radius: 12px; letter-spacing: 0.5px;
+    }
+    .sq-fields { display: flex; flex-direction: column; gap: 16px; }
+    .sq-row-inline { display: flex; gap: 12px; align-items: flex-start;}
+    .sq-row-inline select { width: 200px; flex-shrink: 0; }
+    .sq-row-inline input { flex: 1; }
+    .sq-options { margin-top: 4px; padding-left: 16px; border-left: 2px solid var(--border); }
+    .sq-option-row { display: flex; gap: 12px; margin-bottom: 8px; align-items: center; }
+    .sq-option-row input { flex: 1; }
+
+    .add-btn {
+      background: transparent; border: 1px dashed var(--muted);
+      color: var(--text); padding: 12px; width: 100%;
+      border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 500;
+      font-family: 'Inter', sans-serif; transition: all 0.2s;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .add-btn:hover { border-color: var(--primary); color: var(--primary); background: rgba(59,130,246,0.05); }
+
+    .action-btn-sm {
+      background: var(--panel); border: 1px solid var(--border); color: var(--text);
+      padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; font-weight: 500;
+      transition: all 0.2s;
+    }
+    .action-btn-sm:hover { border-color: var(--muted); }
+
+    /* ── Survey tab bar ── */
+    .survey-tabs { 
+      display: flex; gap: 0; margin-bottom: 24px; border-radius: 8px; 
+      overflow: hidden; border: 1px solid var(--border); background: var(--input-bg);
+    }
+    .survey-tab {
+      flex: 1; padding: 12px; font-size: 0.9rem; font-weight: 600;
+      background: transparent; color: var(--muted);
+      border: none; cursor: pointer; text-align: center;
+      font-family: 'Inter', sans-serif; transition: all 0.2s;
+    }
+    .survey-tab:not(:last-child) { border-right: 1px solid var(--border); }
+    .survey-tab:hover { color: var(--text); }
+    .survey-tab.active { background: var(--primary-bg); color: var(--primary); }
+    .survey-panel { display: none; animation: fadeUp 0.3s ease; }
+    .survey-panel.active { display: block; }
+
+    /* ── Footer actions ── */
+    .footer-actions {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: rgba(30, 41, 59, 0.9); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      border-top: 1px solid var(--border);
+      padding: 16px 32px; display: flex; justify-content: center;
+      z-index: 100; box-shadow: 0 -4px 12px rgba(0,0,0,0.1);
+    }
+    .footer-actions .footer-inner { max-width: 900px; width: 100%; display: flex; justify-content: space-between; }
+    .btn {
+      padding: 12px 28px; border-radius: 8px; border: none;
+      cursor: pointer; font-size: 0.95rem; font-weight: 600;
+      font-family: 'Inter', sans-serif; transition: all 0.2s; text-decoration: none;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .btn-secondary { background: var(--input-bg); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { border-color: var(--muted); background: var(--panel); }
+    .btn-primary {
+      background: var(--primary); color: white;
+      box-shadow: 0 4px 12px rgba(59,130,246,0.3);
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(59,130,246,0.4); background: var(--primary-hover); }
+    .btn-primary:disabled { background: var(--dim); box-shadow: none; transform: none; cursor: not-allowed; }
+    .btn-group { display: flex; gap: 12px; }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed; bottom: 90px; right: 32px;
+      padding: 14px 24px; border-radius: 8px;
+      font-size: 0.9rem; font-weight: 500; color: white;
+      transform: translateY(100px); opacity: 0;
+      transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); z-index: 999;
+      box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);
+    }
+    .toast.success { background: var(--success); }
+    .toast.error { background: var(--danger); }
+    .toast.show { transform: translateY(0); opacity: 1; }
+
+    /* ── Review list ── */
+    .review-grid { display: grid; grid-template-columns: 180px 1fr; gap: 12px 20px; font-size: 0.95rem; }
+    .review-grid dt { color: var(--muted); font-weight: 500; }
+    .review-grid dd { color: var(--text); word-break: break-word; font-weight: 500;}
+    .review-grid dd span { font-weight: 400; color: var(--dim); }
+
+    /* Utilities */
+    .info-box {
+      background: var(--primary-bg); border: 1px solid rgba(59,130,246,0.2);
+      border-radius: 8px; padding: 16px 20px; margin-bottom: 20px;
+    }
+    .info-box label { font-size: 0.9rem; font-weight: 600; color: var(--primary); display: block; margin-bottom: 8px; }
+    .inline-input-group { display: flex; align-items: center; gap: 12px; }
+    .inline-input-group input { width: 100px; padding: 10px; }
+    .inline-input-group span { color: var(--muted); font-size: 0.85rem; }
+
+    /* ── Toggle switch ── */
+    .toggle-row { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 20px; }
+    .toggle-item { display: flex; align-items: center; gap: 10px; }
+    .toggle-item span { font-size: 0.9rem; font-weight: 500; color: var(--muted); }
+    .toggle-item span.active-label { color: var(--text); }
+    .toggle-switch {
+      position: relative; width: 44px; height: 24px; cursor: pointer;
+    }
+    .toggle-switch input { display: none; }
+    .toggle-slider {
+      position: absolute; inset: 0; border-radius: 12px;
+      background: var(--border); transition: all 0.25s;
+    }
+    .toggle-slider::after {
+      content: ''; position: absolute; top: 3px; left: 3px;
+      width: 18px; height: 18px; border-radius: 50%;
+      background: var(--muted); transition: all 0.25s;
+    }
+    .toggle-switch input:checked + .toggle-slider { background: var(--primary); }
+    .toggle-switch input:checked + .toggle-slider::after { transform: translateX(20px); background: #fff; }
+
+  </style>
+</head>
+<body>
+
+<div class="navbar">
+  <h1>{% if edit_mode %}Edit{% else %}Create{% endif %} Quiz</h1>
+  <a href="/instructor/dashboard" class="nav-link">Back to Dashboard</a>
+</div>
+
+<div class="steps-bar" id="stepsBar">
+  <div class="step-item active" data-step="0" onclick="goToStep(0)">
+    <span class="step-num">1</span> <span>Info</span>
+  </div>
+  <span class="step-divider">›</span>
+  <div class="step-item" data-step="1" onclick="goToStep(1)">
+    <span class="step-num">2</span> <span>Conditions</span>
+  </div>
+  <span class="step-divider">›</span>
+  <div class="step-item" data-step="2" onclick="goToStep(2)">
+    <span class="step-num">3</span> <span>Problems</span>
+  </div>
+  <span class="step-divider">›</span>
+  <div class="step-item" data-step="3" onclick="goToStep(3)">
+    <span class="step-num">4</span> <span>Review</span>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- ═══════════════════ STEP 1: Info & Settings ═══════════════════ -->
+<div class="step-panel active" data-step="0">
+
+  <div class="card">
+    <h2>Quiz Information</h2>
+    <p class="subtitle">Optional teaser shown to students when they start the quiz.</p>
+
+    <div class="fg">
+      <label for="teaser">Teaser</label>
+      <textarea id="teaser" rows="4" placeholder="Optional intro text or instructions shown when students start the quiz...">{{ quiz.teaser if quiz and quiz.teaser else '' }}</textarea>
+      <p class="hint">Leave empty to skip the teaser overlay. If provided, students will see this before they begin coding.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Configuration</h2>
+    <p class="subtitle">Set up languages, timing, and availability.</p>
+
+    <div class="fg">
+      <label>Allowed Languages</label>
+      <div class="chip-group" id="langChips">
+        {% set langs = quiz.allowed_languages if quiz and quiz.allowed_languages else ['python', 'javascript', 'c'] %}
+        <label class="chip {% if 'python' in langs %}selected{% endif %}" onclick="toggleChip(this)">
+          <input type="checkbox" value="python" {% if 'python' in langs %}checked{% endif %}> 🐍 Python
+        </label>
+        <label class="chip {% if 'javascript' in langs %}selected{% endif %}" onclick="toggleChip(this)">
+          <input type="checkbox" value="javascript" {% if 'javascript' in langs %}checked{% endif %}> 🟨 JavaScript
+        </label>
+        <label class="chip {% if 'c' in langs %}selected{% endif %}" onclick="toggleChip(this)">
+          <input type="checkbox" value="c" {% if 'c' in langs %}checked{% endif %}> ⚙️ C
+        </label>
+      </div>
+    </div>
+
+    <div class="fg">
+      <label for="time_limit">Time Limit (minutes)</label>
+      <input type="number" id="time_limit" min="0" placeholder="0 = unlimited" value="{{ quiz.time_limit_minutes if quiz else 0 }}">
+      <p class="hint">Leave as 0 if you don't want a strict timer.</p>
+    </div>
+
+    <div class="fg" style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
+      <div>
+        <label for="avail_start">Available From</label>
+        <input type="datetime-local" id="avail_start" value="{{ quiz.availability_start if quiz and quiz.availability_start else '' }}">
+      </div>
+      <div>
+        <label for="avail_end">Available Until</label>
+        <input type="datetime-local" id="avail_end" value="{{ quiz.availability_end if quiz and quiz.availability_end else '' }}">
+      </div>
+    </div>
+
+    <div class="fg" style="margin-top: 24px;">
+      <div class="toggle-item">
+        <label class="toggle-switch">
+          <input type="checkbox" id="paste_allowed" {% if not quiz or quiz.paste_allowed|default(True) %}checked{% endif %}>
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="active-label">Allow copy/paste</span>
+      </div>
+      <p class="hint">When disabled, students must type all code manually.</p>
+    </div>
+    <div class="fg">
+      <div class="toggle-item">
+        <label class="toggle-switch">
+          <input type="checkbox" id="tab_tracking_enabled" {% if not quiz or quiz.tab_tracking_enabled|default(True) %}checked{% endif %}>
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="active-label">Track tab switches</span>
+      </div>
+      <p class="hint">Log when students switch away from or return to the tab. Students will see a warning when they return.</p>
+    </div>
+
+    <div class="fg" style="margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border);">
+      <label class="chip {% if quiz and quiz.published %}selected{% endif %}" onclick="toggleChip(this)" style="display:inline-flex; border-color:var(--success-light); background:rgba(16,185,129,0.05);">
+        <input type="checkbox" id="published" {% if quiz and quiz.published %}checked{% endif %}> 🚀 Publish immediately
+      </label>
+      <p class="hint">Published quizzes can be accessed by students via the share link.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ STEP 2: Condition Selection ═══════════════════ -->
+<div class="step-panel" data-step="1">
+  <div class="card">
+    <h2>Experimental Conditions</h2>
+    <p class="subtitle">Select the AI assistance levels you want to test. If multiple are chosen, students will be randomly assigned to one.</p>
+
+    {% set current_conds = quiz.conditions if quiz and quiz.conditions else [1] %}
+    <div class="cond-grid">
+      <div class="cond-card {% if 1 in current_conds %}selected{% endif %}" onclick="toggleCondition(1, this)">
+        <div class="cond-num">1</div>
+        <h3>No AI</h3>
+        <p>Students receive <strong>no AI assistance</strong>. Pure coding environment without autocomplete or explanations.</p>
+      </div>
+      <div class="cond-card {% if 2 in current_conds %}selected{% endif %}" onclick="toggleCondition(2, this)">
+        <div class="cond-num">2</div>
+        <h3>Explanation + Suggestion</h3>
+        <p>Students see an <strong>AI explanation</strong> of their code context along with a <strong>next-line code suggestion</strong>.</p>
+      </div>
+      <div class="cond-card {% if 3 in current_conds %}selected{% endif %}" onclick="toggleCondition(3, this)">
+        <div class="cond-num">3</div>
+        <h3>Suggestion Only</h3>
+        <p>Students see a <strong>next-line code suggestion</strong> only, similar to standard GitHub Copilot.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ STEP 3: Problems ═══════════════════ -->
+<div class="step-panel" data-step="2">
+
+  <div class="problem-tabs-container">
+    <div class="problem-tabs" id="problemTabBar">
+      <!-- Problem tabs rendered by JS -->
+    </div>
+  </div>
+
+  <!-- Problem details (rendered dynamically) -->
+  <div id="problemDetailsContainer">
+
+    <div class="card">
+      <h2 id="problemCardTitle">Problem 1</h2>
+      <p class="subtitle">Define what the student needs to solve.</p>
+      
+      <div class="fg">
+        <label for="currentProblemTitle">Problem Title <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="currentProblemTitle" placeholder="e.g., Intro to Variables, Loops Practice" required>
+        <p class="hint">Shown in the student's Problem panel and problem tabs. Required for each problem.</p>
+      </div>
+      <div class="fg">
+        <label>Problem Statement <span style="color:var(--danger)">*</span></label>
+        <textarea id="currentProblemStatement" rows="6" placeholder="Describe the problem, input formats, and expected outputs..."></textarea>
+      </div>
+      <div class="fg">
+        <label>Test Cases</label>
+        <textarea id="currentTestCases" rows="4" placeholder="Optional example input/output test cases for students..."></textarea>
+      </div>
+      <div class="fg">
+        <label>Constraints</label>
+        <textarea id="currentConstraints" rows="3" placeholder="e.g., 1 <= N <= 10^5"></textarea>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Starter Code (Boilerplate)</h2>
+      <p class="subtitle">Provide the initial files for each allowed language.</p>
+      <div class="code-tabs" id="codeTabs"></div>
+      <div class="starter-files-wrap">
+        <div id="starterFilesContainer"></div>
+        <button class="add-btn" id="addFileBtn" onclick="addStarterFile()" style="margin-top:16px;">+ Add File</button>
+      </div>
+    </div>
+
+    <div class="card" id="problemSurveysCard">
+      <h2 id="surveysCardTitle">Surveys for Problem 1</h2>
+      <p class="subtitle">Enable/disable and customize surveys shown to participants for this problem.</p>
+
+      <div class="toggle-row">
+        <div class="toggle-item">
+          <label class="toggle-switch">
+            <input type="checkbox" id="togglePreSurvey" checked onchange="onSurveyToggle()">
+            <span class="toggle-slider"></span>
+          </label>
+          <span id="labelPreSurvey" class="active-label">Pre-Survey</span>
+        </div>
+        <div class="toggle-item">
+          <label class="toggle-switch">
+            <input type="checkbox" id="togglePostSurvey" checked onchange="onSurveyToggle()">
+            <span class="toggle-slider"></span>
+          </label>
+          <span id="labelPostSurvey" class="active-label">Post-Survey</span>
+        </div>
+        <div class="toggle-item">
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggleRecurrentSurvey" checked onchange="onSurveyToggle()">
+            <span class="toggle-slider"></span>
+          </label>
+          <span id="labelRecurrentSurvey" class="active-label">Recurrent Survey</span>
+        </div>
+      </div>
+
+      <div class="survey-tabs" id="problemSurveyTabs">
+        <button class="survey-tab active" onclick="switchProblemSurveyTab('pre', this)">Pre-Survey</button>
+        <button class="survey-tab" onclick="switchProblemSurveyTab('post', this)">Post-Survey</button>
+        <button class="survey-tab" onclick="switchProblemSurveyTab('recurrent', this)">Recurrent (In-Task)</button>
+      </div>
+
+      <div class="survey-panel active" id="panel-prob-pre">
+        <div id="probPreSurveyList"></div>
+        <button class="add-btn" onclick="addSurveyQuestion('probPreSurveyList')">+ Add Pre-Survey Question</button>
+      </div>
+
+      <div class="survey-panel" id="panel-prob-post">
+        <div id="probPostSurveyList"></div>
+        <button class="add-btn" onclick="addSurveyQuestion('probPostSurveyList')">+ Add Post-Survey Question</button>
+      </div>
+
+      <div class="survey-panel" id="panel-prob-recurrent">
+        <div class="info-box">
+          <label>Survey Trigger Logic</label>
+          <div class="inline-input-group" style="margin-bottom: 12px;">
+            <span style="width:200px; font-weight:500; color:var(--text);">First survey appears after</span>
+            <input type="number" id="probRecurrentStart" min="1" max="100" value="5">
+            <span>AI interactions</span>
+          </div>
+          <div class="inline-input-group">
+            <span style="width:200px; font-weight:500; color:var(--text);">Subsequently show every</span>
+            <input type="number" id="probRecurrentInterval" min="1" max="100" value="4">
+            <span>AI interactions</span>
+          </div>
+        </div>
+        <div id="probRecurrentSurveyList"></div>
+        <button class="add-btn" onclick="addSurveyQuestion('probRecurrentSurveyList')">+ Add Recurrent Question</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════ STEP 4: Review ═══════════════════ -->
+<div class="step-panel" data-step="3">
+  <div class="card">
+    <h2>Review Your Quiz</h2>
+    <p class="subtitle">Double-check settings before saving to the database.</p>
+    <div style="background:var(--input-bg); border:1px solid var(--border); border-radius:8px; padding:24px;">
+      <dl class="review-grid" id="reviewContent"></dl>
+    </div>
+  </div>
+</div>
+
+</div><!-- /container -->
+
+<!-- Footer -->
+<div class="footer-actions">
+  <div class="footer-inner">
+    <button class="btn btn-secondary" id="prevBtn" onclick="prevStep()" style="visibility:hidden;">Back</button>
+    <div class="btn-group">
+      <a href="/instructor/dashboard" class="btn btn-secondary" style="background:transparent; border:none; color:var(--muted);">Cancel</a>
+      <button class="btn btn-primary" id="nextBtn" onclick="nextStep()">Next Step</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+{% if quiz and quiz.problems %}
+<script type="application/json" id="quiz-form-bootstrap">{{ {
+  'edit_mode': edit_mode,
+  'quiz_id': quiz.id if quiz else '',
+  'draft_upload_id': draft_upload_id or '',
+  'selected_conditions': quiz.conditions if quiz and quiz.conditions else [1],
+  'problems_payload': {
+    'problems': quiz.problems,
+    'pre_survey': quiz.pre_survey or [],
+    'post_survey': quiz.post_survey or [],
+    'recurrent_survey': quiz.recurrent_survey or [],
+    'recurrent_survey_start': quiz.recurrent_survey_start if quiz and quiz.recurrent_survey_start else 5,
+    'recurrent_survey_interval': quiz.recurrent_survey_interval if quiz and quiz.recurrent_survey_interval else 4,
+  }
+} | tojson | safe }}</script>
+{% else %}
+<script type="application/json" id="quiz-form-bootstrap">{{ {
+  'edit_mode': edit_mode,
+  'quiz_id': quiz.id if quiz else '',
+  'draft_upload_id': draft_upload_id or '',
+  'selected_conditions': quiz.conditions if quiz and quiz.conditions else [1],
+  'problems_payload': None,
+} | tojson | safe }}</script>
+{% endif %}
+
+<script>
+const bootstrap = JSON.parse(document.getElementById('quiz-form-bootstrap').textContent);
+const EDIT_MODE = bootstrap.edit_mode;
+const QUIZ_ID = bootstrap.quiz_id;
+const DRAFT_UPLOAD_ID = bootstrap.draft_upload_id;
+const TOTAL_STEPS = 4;
+let currentStep = 0;
+let selectedConditions = bootstrap.selected_conditions;
+
+// Per-problem data store
+let problemsData = [];
+let currentProblemIndex = 0;
+let problemRendered = false; // true after first switchProblem completes
+
+// Starter code storage
+let starterCodeStore = {};
+let activeCodeLang = null;
+
+// ─── Default survey templates: loaded from `surveys/instructor_default_*.json` via API ───
+let DEFAULT_PRE_SURVEY = [];
+let DEFAULT_POST_SURVEY = [];
+let DEFAULT_RECURRENT_SURVEY = [];
+
+async function loadDefaultSurveyTemplates() {
+  const base = '/instructor/default-survey-templates';
+  const opts = { credentials: 'same-origin' };
+  const [pre, post, rec] = await Promise.all([
+    fetch(`${base}/pre`, opts).then(r => { if (!r.ok) throw new Error('pre template'); return r.json(); }),
+    fetch(`${base}/post`, opts).then(r => { if (!r.ok) throw new Error('post template'); return r.json(); }),
+    fetch(`${base}/recurrent`, opts).then(r => { if (!r.ok) throw new Error('recurrent template'); return r.json(); }),
+  ]);
+  DEFAULT_PRE_SURVEY = Array.isArray(pre) ? pre : [];
+  DEFAULT_POST_SURVEY = Array.isArray(post) ? post : [];
+  DEFAULT_RECURRENT_SURVEY = Array.isArray(rec) ? rec : [];
+}
+
+function surveyQuestionImageUrl(src) {
+  if (!src || typeof src !== 'string') return '';
+  const t = src.trim();
+  if (t.indexOf('/') !== -1) {
+    const i = t.indexOf('/');
+    return '/quiz-images/' + encodeURIComponent(t.slice(0, i)) + '/' + t.slice(i + 1).split('/').map(encodeURIComponent).join('/');
+  }
+  return '/survey-images/' + encodeURIComponent(t);
+}
+
+function refreshSqImagePreview(card) {
+  const txt = card.querySelector('.sq-image-src');
+  const row = txt && txt.closest('.sq-image-row');
+  if (!txt || !row) return;
+  const v = (txt.value || '').trim();
+  const prev = row.querySelector('.sq-image-preview');
+  if (prev) prev.remove();
+  if (!v) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'sq-image-preview';
+  wrap.style.marginTop = '6px';
+  const img = document.createElement('img');
+  img.src = surveyQuestionImageUrl(v);
+  img.alt = '';
+  img.style.cssText = 'max-width:100%;max-height:120px;border-radius:6px;border:1px solid var(--border);';
+  img.loading = 'lazy';
+  img.onerror = () => { wrap.style.display = 'none'; };
+  wrap.appendChild(img);
+  row.appendChild(wrap);
+}
+
+function wireSurveyImageUpload(card) {
+  const btn = card.querySelector('.sq-upload-img-btn');
+  const finp = card.querySelector('.sq-image-file');
+  const txt = card.querySelector('.sq-image-src');
+  if (!btn || !finp || !txt) return;
+  btn.onclick = () => finp.click();
+  finp.onchange = async () => {
+    const f = finp.files && finp.files[0];
+    finp.value = '';
+    if (!f) return;
+    if (!QUIZ_ID && !DRAFT_UPLOAD_ID) {
+      showToast('Cannot upload: reload the create-quiz page.', 'error');
+      return;
+    }
+    const fd = new FormData();
+    fd.append('file', f);
+    if (QUIZ_ID) fd.append('quiz_id', QUIZ_ID);
+    else fd.append('draft_upload_id', DRAFT_UPLOAD_ID);
+    btn.disabled = true;
+    try {
+      const res = await fetch('/instructor/upload-survey-image', { method: 'POST', body: fd, credentials: 'same-origin' });
+      const data = await res.json();
+      if (data.success && data.src) {
+        txt.value = data.src;
+        refreshSqImagePreview(card);
+        showToast('Image uploaded for this quiz', 'success');
+      } else {
+        showToast(data.error || 'Upload failed', 'error');
+      }
+    } catch (e) {
+      showToast('Upload failed', 'error');
+    }
+    btn.disabled = false;
+  };
+  txt.addEventListener('input', () => refreshSqImagePreview(card));
+}
+
+// Helper: build default survey fields for a new problem
+function defaultSurveyFields() {
+  return {
+    _has_surveys: true,
+    pre_survey_enabled: true,
+    pre_survey: JSON.parse(JSON.stringify(DEFAULT_PRE_SURVEY)),
+    post_survey_enabled: true,
+    post_survey: JSON.parse(JSON.stringify(DEFAULT_POST_SURVEY)),
+    recurrent_survey_enabled: true,
+    recurrent_survey: JSON.parse(JSON.stringify(DEFAULT_RECURRENT_SURVEY)),
+    recurrent_survey_interval: 4,
+    recurrent_survey_start: 5,
+  };
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    await loadDefaultSurveyTemplates();
+  } catch (e) {
+    console.error('Default survey templates failed to load:', e);
+    showToast('Could not load default survey templates from server. Check surveys/instructor_default_*.json', 'error');
+  }
+
+  if (bootstrap.problems_payload) {
+  const rawProblems = bootstrap.problems_payload.problems;
+  const quizPre = bootstrap.problems_payload.pre_survey;
+  const quizPost = bootstrap.problems_payload.post_survey;
+  const quizRec = bootstrap.problems_payload.recurrent_survey;
+  const quizRecStart = bootstrap.problems_payload.recurrent_survey_start;
+  const quizRecInterval = bootstrap.problems_payload.recurrent_survey_interval;
+
+  rawProblems.forEach(prob => {
+    const sc = prob.starter_code || {};
+    const normalizedSC = {};
+    for (const [lang, val] of Object.entries(sc)) {
+      if (typeof val === 'string') {
+        const extMap = { python: 'py', javascript: 'js', c: 'c' };
+        normalizedSC[lang] = [{ filename: 'main.' + (extMap[lang] || 'txt'), content: val }];
+      } else if (Array.isArray(val)) {
+        normalizedSC[lang] = val;
+      }
+    }
+    const hasSurveys = prob._has_surveys === true;
+    const defaults = defaultSurveyFields();
+    problemsData.push({
+      title: (prob.title || '').trim(),
+      problem_statement: prob.problem_statement || '',
+      constraints: prob.constraints || '',
+      test_cases: prob.test_cases || '',
+      starter_code: normalizedSC,
+      pre_survey_enabled: hasSurveys ? (prob.pre_survey_enabled !== false) : (quizPre.length ? true : defaults.pre_survey_enabled),
+      pre_survey: hasSurveys ? (prob.pre_survey || []) : (quizPre.length ? quizPre : defaults.pre_survey),
+      post_survey_enabled: hasSurveys ? (prob.post_survey_enabled !== false) : (quizPost.length ? true : defaults.post_survey_enabled),
+      post_survey: hasSurveys ? (prob.post_survey || []) : (quizPost.length ? quizPost : defaults.post_survey),
+      recurrent_survey_enabled: hasSurveys ? (prob.recurrent_survey_enabled !== false) : (quizRec.length ? true : defaults.recurrent_survey_enabled),
+      recurrent_survey: hasSurveys ? (prob.recurrent_survey || []) : (quizRec.length ? quizRec : defaults.recurrent_survey),
+      recurrent_survey_interval: hasSurveys ? (prob.recurrent_survey_interval || 4) : (quizRec.length ? quizRecInterval : defaults.recurrent_survey_interval),
+      recurrent_survey_start: hasSurveys ? (prob.recurrent_survey_start || 5) : (quizRec.length ? quizRecStart : defaults.recurrent_survey_start),
+    });
+  });
+  } else {
+  problemsData.push(Object.assign({
+    title: '',
+    problem_statement: '',
+    constraints: '',
+    test_cases: '',
+    starter_code: {},
+  }, defaultSurveyFields()));
+  }
+
+  switchProblem(0);
+  renderProblemTabs();
+});
+
+// Toast
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast ' + type + ' show';
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// Chips
+function toggleChip(el) {
+  const cb = el.querySelector('input');
+  cb.checked = !cb.checked;
+  el.classList.toggle('selected', cb.checked);
+  updateCodeTabs();
+}
+
+// Conditions
+function toggleCondition(n, el) {
+  const idx = selectedConditions.indexOf(n);
+  if (idx >= 0) {
+    if (selectedConditions.length <= 1) { showToast('At least one condition is required.', 'error'); return; }
+    selectedConditions.splice(idx, 1);
+    el.classList.remove('selected');
+  } else {
+    selectedConditions.push(n);
+    selectedConditions.sort();
+    el.classList.add('selected');
+  }
+}
+
+// Problem Tabs
+function renderProblemTabs() {
+  const bar = document.getElementById('problemTabBar');
+  bar.innerHTML = '';
+  problemsData.forEach((_, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'prob-tab' + (i === currentProblemIndex ? ' active' : '');
+    btn.textContent = (problemsData[i].title || '').trim() || ('Problem ' + (i + 1));
+    btn.onclick = () => switchProblem(i);
+    bar.appendChild(btn);
+  });
+  
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'action-btn-sm';
+  addBtn.textContent = '+ Add Problem';
+  addBtn.onclick = addProblem;
+  bar.appendChild(addBtn);
+
+  if (problemsData.length > 1) {
+    const rmBtn = document.createElement('button');
+    rmBtn.type = 'button';
+    rmBtn.className = 'action-btn-sm';
+    rmBtn.style.color = 'var(--danger-light)';
+    rmBtn.style.marginLeft = 'auto';
+    rmBtn.textContent = 'Delete Current Problem';
+    rmBtn.onclick = removeCurrentProblem;
+    bar.appendChild(rmBtn);
+  }
+}
+
+function saveCurrentProblem() {
+  saveCurrentFiles();
+  problemsData[currentProblemIndex] = {
+    title: (document.getElementById('currentProblemTitle').value || '').trim(),
+    problem_statement: document.getElementById('currentProblemStatement').value,
+    constraints: document.getElementById('currentConstraints').value,
+    test_cases: document.getElementById('currentTestCases').value,
+    starter_code: { ...starterCodeStore },
+    _has_surveys: true,  // sentinel: survives Firebase even if arrays are empty
+    pre_survey_enabled: document.getElementById('togglePreSurvey').checked,
+    pre_survey: collectSurvey('probPreSurveyList'),
+    post_survey_enabled: document.getElementById('togglePostSurvey').checked,
+    post_survey: collectSurvey('probPostSurveyList'),
+    recurrent_survey_enabled: document.getElementById('toggleRecurrentSurvey').checked,
+    recurrent_survey: collectSurvey('probRecurrentSurveyList'),
+    recurrent_survey_interval: parseInt(document.getElementById('probRecurrentInterval').value) || 4,
+    recurrent_survey_start: parseInt(document.getElementById('probRecurrentStart').value) || 5,
+  };
+}
+
+function switchProblem(idx) {
+  if (problemRendered && problemsData[currentProblemIndex] && document.getElementById('currentProblemStatement')) {
+    saveCurrentProblem();
+  }
+  currentProblemIndex = idx;
+  const prob = problemsData[idx];
+
+  document.getElementById('currentProblemStatement').value = prob.problem_statement || '';
+  document.getElementById('currentConstraints').value = prob.constraints || '';
+  document.getElementById('currentTestCases').value = prob.test_cases || '';
+  document.getElementById('currentProblemTitle').value = prob.title || '';
+  document.getElementById('problemCardTitle').textContent = (prob.title || '').trim() || ('Problem ' + (idx + 1));
+
+  starterCodeStore = {};
+  if (prob.starter_code) {
+    for (const [lang, val] of Object.entries(prob.starter_code)) {
+      starterCodeStore[lang] = Array.isArray(val) ? [...val.map(f => ({...f}))] : val;
+    }
+  }
+  activeCodeLang = null;
+  updateCodeTabs();
+
+  // Render per-problem surveys
+  document.getElementById('surveysCardTitle').textContent = 'Surveys for ' + ((prob.title || '').trim() || ('Problem ' + (idx + 1)));
+  document.getElementById('togglePreSurvey').checked = prob.pre_survey_enabled !== false;
+  document.getElementById('togglePostSurvey').checked = prob.post_survey_enabled !== false;
+  document.getElementById('toggleRecurrentSurvey').checked = prob.recurrent_survey_enabled !== false;
+  document.getElementById('probRecurrentStart').value = prob.recurrent_survey_start || 5;
+  document.getElementById('probRecurrentInterval').value = prob.recurrent_survey_interval || 4;
+  renderSurveyList('probPreSurveyList', prob.pre_survey || []);
+  renderSurveyList('probPostSurveyList', prob.post_survey || []);
+  renderSurveyList('probRecurrentSurveyList', prob.recurrent_survey || []);
+  onSurveyToggle();
+
+  // Reset survey tab to first enabled
+  const firstTab = document.querySelector('#problemSurveyTabs .survey-tab');
+  if (firstTab) switchProblemSurveyTab('pre', firstTab);
+
+  problemRendered = true;
+  renderProblemTabs();
+}
+
+function addProblem() {
+  saveCurrentProblem();
+  problemsData.push(Object.assign({
+    title: '',
+    problem_statement: '',
+    constraints: '',
+    test_cases: '',
+    starter_code: {},
+  }, defaultSurveyFields()));
+  switchProblem(problemsData.length - 1);
+}
+
+function removeCurrentProblem() {
+  if (problemsData.length <= 1) { showToast('At least one problem is required.', 'error'); return; }
+  problemsData.splice(currentProblemIndex, 1);
+  const newIdx = Math.min(currentProblemIndex, problemsData.length - 1);
+  currentProblemIndex = newIdx;
+  switchProblem(newIdx);
+}
+
+// Starter Code
+function updateCodeTabs() {
+  const langs = getSelectedLanguages();
+  const tabBar = document.getElementById('codeTabs');
+  tabBar.innerHTML = '';
+  langs.forEach((lang, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'code-tab' + ((activeCodeLang === lang || (!activeCodeLang && i === 0)) ? ' active' : '');
+    btn.textContent = lang.charAt(0).toUpperCase() + lang.slice(1);
+    btn.onclick = () => switchCodeTab(lang, btn);
+    tabBar.appendChild(btn);
+  });
+  if (langs.length > 0 && (!activeCodeLang || !langs.includes(activeCodeLang))) {
+    switchCodeTab(langs[0], tabBar.firstChild);
+  } else if (activeCodeLang) {
+    renderStarterFiles();
+  }
+}
+
+function switchCodeTab(lang, btn) {
+  saveCurrentFiles();
+  activeCodeLang = lang;
+  document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderStarterFiles();
+}
+
+function saveCurrentFiles() {
+  if (!activeCodeLang) return;
+  const container = document.getElementById('starterFilesContainer');
+  const cards = container.querySelectorAll('.starter-file-card');
+  const files = [];
+  cards.forEach(card => {
+    const fn = card.querySelector('.starter-filename').value.trim();
+    const content = card.querySelector('.starter-file-content').value;
+    if (fn) files.push({ filename: fn, content: content });
+  });
+  starterCodeStore[activeCodeLang] = files;
+}
+
+function renderStarterFiles() {
+  const container = document.getElementById('starterFilesContainer');
+  container.innerHTML = '';
+  const files = starterCodeStore[activeCodeLang] || [];
+  if (files.length === 0) {
+    const extMap = { python: 'py', javascript: 'js', c: 'c' };
+    const ext = extMap[activeCodeLang] || 'txt';
+    files.push({ filename: 'main.' + ext, content: '' });
+    starterCodeStore[activeCodeLang] = files;
+  }
+  files.forEach((f, i) => {
+    container.appendChild(createFileCard(f, i));
+  });
+}
+
+function createFileCard(file, idx) {
+  const card = document.createElement('div');
+  card.className = 'starter-file-card';
+  card.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+      <input type="text" class="starter-filename" value="${escHtml(file.filename || '')}" placeholder="filename.ext" style="flex:1;font-family:'Fira Code',monospace;">
+      <button class="remove-btn" onclick="this.closest('.starter-file-card').remove()" title="Remove file">✕</button>
+    </div>
+    <textarea class="starter-file-content code-area" placeholder="// Write starter code here...">${escHtml(file.content || '')}</textarea>
+  `;
+  return card;
+}
+
+function addStarterFile() {
+  if (!activeCodeLang) return;
+  const extMap = { python: 'py', javascript: 'js', c: 'c' };
+  const ext = extMap[activeCodeLang] || 'txt';
+  const container = document.getElementById('starterFilesContainer');
+  const idx = container.children.length;
+  container.appendChild(createFileCard({ filename: 'file' + (idx + 1) + '.' + ext, content: '' }, idx));
+}
+
+function getSelectedLanguages() {
+  return Array.from(document.querySelectorAll('#langChips input:checked')).map(c => c.value);
+}
+
+// Surveys
+function switchProblemSurveyTab(name, btn) {
+  document.querySelectorAll('#problemSurveysCard .survey-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('#problemSurveysCard .survey-panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('panel-prob-' + name).classList.add('active');
+}
+
+function onSurveyToggle() {
+  const preOn = document.getElementById('togglePreSurvey').checked;
+  const postOn = document.getElementById('togglePostSurvey').checked;
+  const recOn = document.getElementById('toggleRecurrentSurvey').checked;
+
+  document.getElementById('labelPreSurvey').className = preOn ? 'active-label' : '';
+  document.getElementById('labelPostSurvey').className = postOn ? 'active-label' : '';
+  document.getElementById('labelRecurrentSurvey').className = recOn ? 'active-label' : '';
+
+  // Show/hide survey tabs based on toggles
+  const tabs = document.querySelectorAll('#problemSurveyTabs .survey-tab');
+  if (tabs.length >= 3) {
+    tabs[0].style.display = preOn ? '' : 'none';
+    tabs[1].style.display = postOn ? '' : 'none';
+    tabs[2].style.display = recOn ? '' : 'none';
+  }
+
+  // If active tab was hidden, switch to first visible
+  const activeTab = document.querySelector('#problemSurveyTabs .survey-tab.active');
+  if (activeTab && activeTab.style.display === 'none') {
+    const firstVisible = document.querySelector('#problemSurveyTabs .survey-tab:not([style*="display: none"])');
+    if (firstVisible) {
+      switchProblemSurveyTab(firstVisible.textContent.includes('Pre') ? 'pre' : firstVisible.textContent.includes('Post') ? 'post' : 'recurrent', firstVisible);
+    } else {
+      // All disabled — hide all panels
+      document.querySelectorAll('#problemSurveysCard .survey-panel').forEach(p => p.classList.remove('active'));
+    }
+  }
+}
+
+function renderSurveyList(containerId, questions) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = '';
+  questions.forEach((q, i) => {
+    el.appendChild(createSurveyCard(q, i));
+  });
+}
+
+function createSurveyCard(q, idx) {
+  const card = document.createElement('div');
+  card.className = 'sq-card';
+  card.dataset.idx = idx;
+  card.dataset.meta = JSON.stringify(q);
+
+  const typeOptions = ['likert','likert_7_with_na','multiple_choice','open_ended','slider','info_block']
+    .map(t => `<option value="${t}" ${q.type===t?'selected':''}>${t.replace(/_/g,' ')}</option>`).join('');
+
+  const isRequired = q.required !== false;
+  const minLen = q.min_length || 0;
+
+  let html = `
+    <div class="sq-top">
+      <span class="sq-badge">Question ${idx+1}</span>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem;color:var(--muted);cursor:pointer;">
+          <input type="checkbox" class="sq-required" ${isRequired ? 'checked' : ''}> Required
+        </label>
+        <button class="remove-btn" style="width:28px;height:28px;font-size:0.9rem;" title="Remove Question" onclick="this.closest('.sq-card').remove()">✕</button>
+      </div>
+    </div>
+    <div class="sq-fields">
+      <div class="sq-row-inline">
+        <input type="text" class="sq-question" placeholder="Enter question text" value="${escHtml(q.question || '')}">
+        <select class="sq-type" onchange="onTypeChange(this)">${typeOptions}</select>
+      </div>
+      <div class="sq-image-row" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);">
+        <label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:6px;">Optional image — <strong>Upload</strong> (stored with this quiz) or type a shared file name from <code>surveys/images/</code></label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
+          <input type="text" class="sq-image-src" placeholder="quiz asset id/filename.png or shared image.png" value="${q.image && q.image.src ? escHtml(q.image.src) : ''}" style="flex:1;min-width:160px;padding:8px;">
+          <input type="file" class="sq-image-file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" style="display:none">
+          <button type="button" class="action-btn-sm sq-upload-img-btn">Upload image</button>
+        </div>
+      </div>`;
+
+  if (q.type === 'open_ended') {
+    html += `<div class="sq-minlen-row" style="margin-top:4px;display:flex;align-items:center;gap:12px;">
+      <label style="font-size:0.85rem;color:var(--muted);margin:0;">Minimum characters:</label>
+      <input type="number" class="sq-min-length" min="0" max="5000" value="${minLen}" style="width:100px;padding:8px;">
+    </div>`;
+  }
+
+  if (q.type === 'multiple_choice' && q.options && q.options.length) {
+    html += '<div class="sq-options">';
+    q.options.forEach((opt, oi) => {
+      html += `<div class="sq-option-row"><span style="color:var(--dim);font-size:0.9rem;min-width:24px;font-weight:600;">${String.fromCharCode(65+oi)}.</span><input type="text" class="sq-opt-input" value="${escHtml(opt)}"><button class="remove-btn" style="width:28px;height:28px;font-size:0.9rem;" onclick="this.parentElement.remove()">✕</button></div>`;
+    });
+    html += `<button class="action-btn-sm" onclick="addOption(this)" style="margin-top:8px;">+ Add Option</button></div>`;
+  } else if (q.type === 'multiple_choice') {
+    html += `<div class="sq-options"><button class="action-btn-sm" onclick="addOption(this)">+ Add Option</button></div>`;
+  }
+
+  html += '</div>';
+  card.innerHTML = html;
+  wireSurveyImageUpload(card);
+  refreshSqImagePreview(card);
+  return card;
+}
+
+function onTypeChange(sel) {
+  const card = sel.closest('.sq-card');
+  let optDiv = card.querySelector('.sq-options');
+  if (sel.value === 'multiple_choice') {
+    if (!optDiv) {
+      optDiv = document.createElement('div');
+      optDiv.className = 'sq-options';
+      optDiv.innerHTML = '<button class="action-btn-sm" onclick="addOption(this)">+ Add Option</button>';
+      card.querySelector('.sq-fields').appendChild(optDiv);
+    }
+  } else {
+    if (optDiv) optDiv.remove();
+  }
+  
+  let minRow = card.querySelector('.sq-minlen-row');
+  if (sel.value === 'open_ended') {
+    if (!minRow) {
+      minRow = document.createElement('div');
+      minRow.className = 'sq-minlen-row';
+      minRow.style.cssText = 'margin-top:4px;display:flex;align-items:center;gap:12px;';
+      minRow.innerHTML = '<label style="font-size:0.85rem;color:var(--muted);margin:0;">Minimum characters:</label><input type="number" class="sq-min-length" min="0" max="5000" value="0" style="width:100px;padding:8px;">';
+      const rowInline = card.querySelector('.sq-row-inline');
+      rowInline.parentNode.insertBefore(minRow, rowInline.nextSibling);
+    }
+  } else {
+    if (minRow) minRow.remove();
+  }
+}
+
+function addOption(btn) {
+  const container = btn.closest('.sq-options');
+  const count = container.querySelectorAll('.sq-option-row').length;
+  const row = document.createElement('div');
+  row.className = 'sq-option-row';
+  row.innerHTML = `<span style="color:var(--dim);font-size:0.9rem;min-width:24px;font-weight:600;">${String.fromCharCode(65+count)}.</span><input type="text" class="sq-opt-input" placeholder="Option ${String.fromCharCode(65+count)}"><button class="remove-btn" style="width:28px;height:28px;font-size:0.9rem;" onclick="this.parentElement.remove()">✕</button>`;
+  container.insertBefore(row, btn);
+}
+
+function addSurveyQuestion(containerId) {
+  const el = document.getElementById(containerId);
+  const count = el.children.length;
+  el.appendChild(createSurveyCard({ question: '', type: 'likert', required: true, options: [] }, count));
+}
+
+function collectSurvey(containerId) {
+  return Array.from(document.querySelectorAll('#' + containerId + ' .sq-card')).map((card, i) => {
+    let base = {};
+    try { base = JSON.parse(card.dataset.meta || '{}'); } catch(e) {}
+    const q = card.querySelector('.sq-question').value.trim();
+    const t = card.querySelector('.sq-type').value;
+    const opts = Array.from(card.querySelectorAll('.sq-opt-input')).map(inp => inp.value.trim()).filter(Boolean);
+    const reqCb = card.querySelector('.sq-required');
+    const isRequired = reqCb ? reqCb.checked : true;
+    const minLenInput = card.querySelector('.sq-min-length');
+    const minLen = minLenInput ? parseInt(minLenInput.value) || 0 : (base.min_length || 0);
+    
+    const result = Object.assign(base, { id: base.id || `q_${i}`, question: q, type: t, required: isRequired, options: opts });
+    if (t === 'open_ended') {
+      result.min_length = minLen;
+    }
+    const imgSrcInp = card.querySelector('.sq-image-src');
+    if (imgSrcInp && imgSrcInp.value.trim()) {
+      result.image = { src: imgSrcInp.value.trim() };
+    } else {
+      delete result.image;
+    }
+    return result;
+  }).filter(sq => sq.question);
+}
+
+function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// Steps Navigation
+function goToStep(n) {
+  if (n < 0 || n >= TOTAL_STEPS) return;
+  if (currentStep === 2) {
+    saveCurrentProblem();
+  }
+  if (n === 3) buildReview();
+
+  document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.step-panel[data-step="${n}"]`).classList.add('active');
+
+  document.querySelectorAll('.step-item').forEach(s => {
+    const si = parseInt(s.dataset.step);
+    s.classList.remove('active','completed');
+    if (si === n) s.classList.add('active');
+    else if (si < n) s.classList.add('completed');
+  });
+
+  currentStep = n;
+  document.getElementById('prevBtn').style.visibility = n === 0 ? 'hidden' : 'visible';
+  const nextBtn = document.getElementById('nextBtn');
+  if (n === TOTAL_STEPS - 1) {
+    nextBtn.textContent = EDIT_MODE ? 'Update Quiz' : 'Save Quiz';
+  } else {
+    nextBtn.textContent = 'Next Step';
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function nextStep() {
+  if (currentStep === 0) {
+    if (getSelectedLanguages().length === 0) { showToast('Select at least one language.', 'error'); return; }
+  }
+  if (currentStep === 1) {
+    if (selectedConditions.length === 0) { showToast('Select at least one condition.', 'error'); return; }
+  }
+  if (currentStep === 2) {
+    saveCurrentProblem();
+    for (let i = 0; i < problemsData.length; i++) {
+      if (!(problemsData[i].title || '').trim()) {
+        showToast(`Problem ${i+1} requires a title.`, 'error'); return;
+      }
+      if (!(problemsData[i].problem_statement || '').trim()) {
+        showToast(`Problem ${i+1} requires a problem statement.`, 'error'); return;
+      }
+    }
+  }
+  if (currentStep === TOTAL_STEPS - 1) {
+    saveQuiz();
+  } else {
+    goToStep(currentStep + 1);
+  }
+}
+function prevStep() { goToStep(currentStep - 1); }
+
+// Review
+function buildReview() {
+  saveCurrentProblem();
+  const langs = getSelectedLanguages();
+  const condLabels = { 1: '1. No AI', 2: '2. Explanation + Suggestion', 3: '3. Suggestion Only' };
+
+  const condStr = selectedConditions.map(c => condLabels[c]).join('<br>');
+  let problemsSummary = problemsData.map((p, i) => {
+    const probLabel = (p.title || '').trim() || `Problem ${i+1}`;
+    const stmt = (p.problem_statement || '').substring(0, 60);
+    const surveys = [];
+    if (p.pre_survey_enabled && (p.pre_survey || []).length) surveys.push('Pre');
+    if (p.post_survey_enabled && (p.post_survey || []).length) surveys.push('Post');
+    if (p.recurrent_survey_enabled && (p.recurrent_survey || []).length) surveys.push(`Recurrent (start: ${p.recurrent_survey_start}, every: ${p.recurrent_survey_interval})`);
+    const surveyStr = surveys.length ? surveys.join(', ') : '<span style="color:var(--muted)">No surveys</span>';
+    return `<div style="margin-bottom:8px;"><span style="color:var(--primary);font-weight:600;">${escHtml(probLabel)}:</span> ${escHtml(stmt)}${stmt.length >= 60 ? '...' : ''}<br><span style="font-size:0.85rem;color:var(--muted);">Surveys: ${surveyStr}</span></div>`;
+  }).join('');
+
+  document.getElementById('reviewContent').innerHTML = `
+    <dt>Teaser</dt><dd>${escHtml(document.getElementById('teaser').value) || '<em>None</em>'}</dd>
+    <dt>Problems (${problemsData.length})</dt><dd>${problemsSummary}</dd>
+    <dt>Languages</dt><dd>${langs.join(', ').toUpperCase()}</dd>
+    <dt>Time Limit</dt><dd>${document.getElementById('time_limit').value || '0'} min</dd>
+    <dt>Conditions (${selectedConditions.length})</dt><dd>${condStr}</dd>
+    <dt>Published</dt><dd>${document.getElementById('published').checked ? '<span style="color:var(--success)">Yes</span>' : 'No (Draft)'}</dd>
+  `;
+}
+
+// Save
+async function saveQuiz() {
+  saveCurrentProblem();
+
+  const btn = document.getElementById('nextBtn');
+  saveCurrentProblem();
+  for (let i = 0; i < problemsData.length; i++) {
+    if (!(problemsData[i].title || '').trim()) {
+      showToast(`Problem ${i+1} requires a title.`, 'error'); return;
+    }
+    if (!(problemsData[i].problem_statement || '').trim()) {
+      showToast(`Problem ${i+1} requires a problem statement.`, 'error'); return;
+    }
+  }
+
+  btn.disabled = true; btn.textContent = 'Saving...';
+
+  const payload = {
+    teaser: (document.getElementById('teaser').value || '').trim(),
+    problems: problemsData,
+    allowed_languages: getSelectedLanguages(),
+    time_limit_minutes: parseInt(document.getElementById('time_limit').value) || 0,
+    conditions: selectedConditions,
+    published: document.getElementById('published').checked,
+    availability_start: document.getElementById('avail_start').value || null,
+    availability_end: document.getElementById('avail_end').value || null,
+    paste_allowed: document.getElementById('paste_allowed').checked,
+    tab_tracking_enabled: document.getElementById('tab_tracking_enabled').checked,
+  };
+  if (!EDIT_MODE && DRAFT_UPLOAD_ID) {
+    payload.draft_upload_id = DRAFT_UPLOAD_ID;
+  }
+
+  const url = EDIT_MODE ? '/instructor/update-quiz/' + QUIZ_ID : '/instructor/save-quiz';
+  try {
+    const res = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Quiz saved successfully!', 'success');
+      setTimeout(() => window.location.href = '/instructor/dashboard', 1000);
+    } else {
+      showToast(data.error || 'Failed to save.', 'error');
+      btn.disabled = false;
+      btn.textContent = EDIT_MODE ? 'Update Quiz' : 'Save Quiz';
+    }
+  } catch (e) {
+    showToast('Network error.', 'error');
+    btn.disabled = false;
+    btn.textContent = EDIT_MODE ? 'Update Quiz' : 'Save Quiz';
+  }
+}
+</script>
+</body>
+</html>

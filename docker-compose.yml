@@ -1,0 +1,52 @@
+services:
+  guessing_ide:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: guessing_ide
+    image: rahadarmannabid/codeoracle:latest
+    ports:
+      - "8000:8000"
+    
+    env_file:
+      - .env
+    
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - LOG_LEVEL=info
+    
+    volumes:
+      # ONLY mount directories for OUTPUT/RUNTIME DATA
+      - ./submissions:/app/submissions
+      - ./session_logs:/app/session_logs
+      - ./logs:/app/logs
+      
+      # ❌ REMOVED - These will come from Docker image:
+      # - ./starter_code:/app/starter_code:ro
+      # - ./surveys:/app/surveys:ro
+      # - ./assignment:/app/assignment:ro
+      # - ./templates:/app/templates:ro
+    
+    networks:
+      - guessing_ide_network
+    
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  guessing_ide_network:
+    driver: bridge
+    name: guessing_ide_network
