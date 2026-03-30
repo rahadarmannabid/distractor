@@ -39,8 +39,106 @@ from instructor import router as instructor_router
 from firebase_utils import fb_dict
 
 import logging
+import html as html_std
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Instructor quiz problem fields may contain HTML from the rich-text editor (Quill).
+_HTML_TAG_RE = re.compile(r"<[a-zA-Z][\w:-]*(?:\s[^>]*)?>")
+
+
+def _field_looks_like_html(s: str) -> bool:
+    return bool(_HTML_TAG_RE.search(s))
+
+
+def sanitize_instructor_rich_html(raw: Optional[str]) -> str:
+    """Strip unsafe tags/scripts; allow Quill-like formatting (bold, color, hr, lists, links)."""
+    if raw is None or not str(raw).strip():
+        return ""
+    try:
+        import bleach
+        from bleach.css_sanitizer import CSSSanitizer
+    except ImportError:
+        logger.warning("bleach not installed; escaping problem HTML instead")
+        return html_std.escape(str(raw))
+    css_sanitizer = CSSSanitizer(
+        allowed_css_properties=[
+            "color",
+            "background-color",
+            "text-align",
+            "font-weight",
+            "font-style",
+            "text-decoration",
+            "margin",
+            "margin-left",
+            "padding",
+            "white-space",
+        ]
+    )
+    allowed_tags = [
+        "p",
+        "br",
+        "strong",
+        "b",
+        "em",
+        "i",
+        "u",
+        "s",
+        "strike",
+        "sub",
+        "sup",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "ul",
+        "ol",
+        "li",
+        "a",
+        "blockquote",
+        "pre",
+        "code",
+        "hr",
+        "span",
+        "div",
+    ]
+    allowed_attrs = {
+        "a": ["href", "title", "target", "rel"],
+        "p": ["class", "style"],
+        "span": ["class", "style"],
+        "div": ["class", "style"],
+        "ol": ["class", "style"],
+        "ul": ["class", "style"],
+        "li": ["class", "style"],
+        "h1": ["class", "style"],
+        "h2": ["class", "style"],
+        "h3": ["class", "style"],
+        "h4": ["class", "style"],
+        "blockquote": ["class", "style"],
+        "pre": ["class", "style", "spellcheck"],
+        "code": ["class", "style"],
+    }
+    return bleach.clean(
+        str(raw),
+        tags=allowed_tags,
+        attributes=allowed_attrs,
+        css_sanitizer=css_sanitizer,
+        strip=True,
+    )
+
+
+def format_instructor_problem_html_field(raw: Optional[str]) -> tuple[str, bool]:
+    """
+    Returns (safe_html_fragment, is_rich_html).
+    Legacy plain text is escaped; HTML from the instructor editor is sanitized.
+    """
+    if raw is None or not str(raw).strip():
+        return "", False
+    s = str(raw)
+    if not _field_looks_like_html(s):
+        return html_std.escape(s), False
+    return sanitize_instructor_rich_html(s), True
 def initialize_firebase():
     """Initialize Firebase Admin SDK using environment variables"""
     try:
@@ -3804,26 +3902,37 @@ async def get_assignment_text(assignment_key: str, problem_index: int = 0):
                     if prob_title:
                         parts.append(f'<div class="problem-title">{html_mod.escape(prob_title)}</div>')
                     if problem.get("problem_statement"):
-                        parts.append(
-                            '<div class="problem-section">'
-                            '<span class="section-label">Problem Description</span>'
-                            f'<div class="section-content">{html_mod.escape(problem["problem_statement"])}</div>'
-                            "</div>"
-                        )
+                        body, is_rich = format_instructor_problem_html_field(problem["problem_statement"])
+                        if body:
+                            cls = "section-content section-content--rich" if is_rich else "section-content"
+                            parts.append(
+                                '<div class="problem-section">'
+                                '<span class="section-label">Problem Description</span>'
+                                f'<div class="{cls}">{body}</div>'
+                                "</div>"
+                            )
                     if problem.get("test_cases"):
-                        parts.append(
-                            '<div class="problem-section">'
-                            '<span class="section-label">Test Cases</span>'
-                            f'<div class="section-content section-content--mono">{html_mod.escape(problem["test_cases"])}</div>'
-                            "</div>"
-                        )
+                        body, is_rich = format_instructor_problem_html_field(problem["test_cases"])
+                        if body:
+                            cls = "section-content section-content--mono"
+                            if is_rich:
+                                cls += " section-content--rich"
+                            parts.append(
+                                '<div class="problem-section">'
+                                '<span class="section-label">Test Cases</span>'
+                                f'<div class="{cls}">{body}</div>'
+                                "</div>"
+                            )
                     if problem.get("constraints"):
-                        parts.append(
-                            '<div class="problem-section">'
-                            '<span class="section-label">Constraints</span>'
-                            f'<div class="section-content">{html_mod.escape(problem["constraints"])}</div>'
-                            "</div>"
-                        )
+                        body, is_rich = format_instructor_problem_html_field(problem["constraints"])
+                        if body:
+                            cls = "section-content section-content--rich" if is_rich else "section-content"
+                            parts.append(
+                                '<div class="problem-section">'
+                                '<span class="section-label">Constraints</span>'
+                                f'<div class="{cls}">{body}</div>'
+                                "</div>"
+                            )
                     html_out = "".join(parts)
                     return {"html": html_out if html_out else None, "text": "No problem description provided." if not html_out else None}
             raise HTTPException(status_code=404, detail="Quiz not found")

@@ -8,9 +8,7 @@
       "Freshman",
       "Sophomore",
       "Junior",
-      "Senior",
-      "Graduate Student",
-      "Other"
+      "Senior"
     ],
     "help_text": ""
   },
@@ -20,17 +18,17 @@
     "type": "multiple_choice",
     "required": true,
     "options": [
-      "No experience",
-      "Beginner (< 6 months)",
-      "Intermediate (6-24 months)",
-      "Advanced (2-4 years)",
-      "Expert (4+ years or professional)"
+      "No prior programming experience",
+      "Novice (less than 6 months)",
+      "Intermediate (6–24 months)",
+      "Advanced (2–4 years)",
+      "Expert (4+ years)"
     ],
     "help_text": ""
   },
   {
     "id": "pre_demo_q3",
-    "question": "How frequently do you use AI coding assistants like GitHub Copilot, Cursor, or other coding agents?",
+    "question": "How frequently do you use AI autocompletion tools like GitHub Copilot to increase productivity?",
     "type": "multiple_choice",
     "required": true,
     "options": [
@@ -46,8 +44,61 @@
     }
   },
   {
+    "id": "pre_trust_open",
+    "question": "Please describe why you trust or distrust GitHub Copilot. Give some examples.",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Describe your trust or distrust with examples...",
+    "min_length": 30,
+    "max_length": 1000
+  },
+  {
     "id": "pre_trust_q1",
-    "question": "I can trust this AI assistant to solve programming problems.",
+    "question": "GitHub Copilot is very reliable. I can trust it to be correct all the time.",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Strongly disagree",
+      "maxLabel": "Strongly agree"
+    },
+    "help_text": ""
+  },
+  {
+    "id": "pre_trust_q2",
+    "question": "I am confident in GitHub Copilot. I feel that it works well.",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Strongly disagree",
+      "maxLabel": "Strongly agree"
+    },
+    "help_text": ""
+  },
+  {
+    "id": "pre_trust_q3",
+    "question": "The outputs of GitHub Copilot are very predictable.",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Strongly disagree",
+      "maxLabel": "Strongly agree"
+    },
+    "help_text": ""
+  },
+  {
+    "id": "pre_trust_q4",
+    "question": "I feel safe that when I rely on GitHub Copilot I will get the right answers.",
     "type": "likert",
     "required": true,
     "options": [],
@@ -61,18 +112,63 @@
   },
   {
     "id": "pre_trust_q5",
-    "question": "Please describe why you trust or distrust AI for use in coding in your own words.",
-    "type": "open_ended",
+    "question": "GitHub Copilot is efficient and works very quickly.",
+    "type": "likert",
     "required": true,
     "options": [],
-    "help_text": "",
-    "placeholder": "Describe the factors that influence your trust or distrust...",
-    "min_length": 30,
-    "max_length": 1000
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Strongly disagree",
+      "maxLabel": "Strongly agree"
+    },
+    "help_text": ""
+  },
+  {
+    "id": "pre_trust_q6",
+    "question": "I am wary of GitHub Copilot.",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Strongly disagree",
+      "maxLabel": "Strongly agree"
+    },
+    "help_text": ""
+  },
+  {
+    "id": "pre_trust_q7",
+    "question": "GitHub Copilot can perform the task better than a novice human user.",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Strongly disagree",
+      "maxLabel": "Strongly agree"
+    },
+    "help_text": ""
+  },
+  {
+    "id": "pre_trust_q8",
+    "question": "I like using GitHub Copilot for decision making.",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Strongly disagree",
+      "maxLabel": "Strongly agree"
+    },
+    "help_text": ""
   },
   {
     "id": "pre_mental_q1",
-    "question": "Please describe in your own words, how you think AI Coding Assistants generate code suggestions?",
+    "question": "Please describe in your own words, how GitHub Copilot generates code suggestions.",
     "type": "open_ended",
     "required": true,
     "options": [],
@@ -82,8 +178,41 @@
     "max_length": 1000
   },
   {
+    "id": "pre_mental_q2",
+    "question": "How do you think GitHub Copilot obtains contextual information to generate next lines?",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Describe how you think context is used...",
+    "min_length": 30,
+    "max_length": 1000
+  },
+  {
+    "id": "pre_mental_q3",
+    "question": "Please describe what might cause GitHub Copilot's code suggestions to be incorrect.",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Describe potential causes...",
+    "min_length": 30,
+    "max_length": 1000
+  },
+  {
+    "id": "pre_mental_q4",
+    "question": "Why does GitHub Copilot generate solutions that do not match your intention?",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Describe possible reasons...",
+    "min_length": 30,
+    "max_length": 1000
+  },
+  {
     "id": "pre_accuracy_q1",
-    "question": "How accurate do you believe AI-generated code suggestions are?",
+    "question": "How accurate do you believe GitHub Copilot generated code suggestions are?",
     "type": "slider",
     "required": true,
     "options": [],
@@ -97,14 +226,31 @@
     "help_text": "0% = completely inaccurate, 100% = perfectly accurate"
   },
   {
-    "id": "pre_accuracy_q2",
-    "question": "Please describe what you believe might cause AI-generated code to be incorrect.",
-    "type": "open_ended",
+    "id": "pre_impact_q1",
+    "question": "How do you think GitHub Copilot generated code suggestions affect your ability to correctly complete programming assignments?",
+    "type": "likert",
     "required": true,
     "options": [],
-    "help_text": "",
-    "placeholder": "Describe potential causes...",
-    "min_length": 30,
-    "max_length": 1000
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Hinder greatly",
+      "maxLabel": "Help greatly"
+    },
+    "help_text": ""
+  },
+  {
+    "id": "pre_impact_q2",
+    "question": "GitHub Copilot appeared to understand my goals really well.",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Strongly disagree",
+      "maxLabel": "Strongly agree"
+    },
+    "help_text": ""
   }
 ]
