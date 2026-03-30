@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://cdn.quilljs.com/1.3.7/quill.snow.css" rel="stylesheet">
   <style>
     :root {
       --bg: #0f172a;
@@ -117,6 +118,49 @@
     }
     textarea { resize: vertical; min-height: 100px; line-height: 1.5; }
     textarea.code-area { font-family: 'Fira Code', monospace; font-size: 0.85rem; min-height: 200px; tab-size: 4; background: #0b1120; }
+
+    /* Quill rich text (problem statement, test cases, constraints) */
+    .rich-editor-wrap {
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--input-bg);
+    }
+    .rich-editor-wrap .ql-toolbar.ql-snow {
+      background: var(--panel);
+      border: none;
+      border-bottom: 1px solid var(--border);
+      padding: 8px;
+    }
+    .rich-editor-wrap .ql-container.ql-snow {
+      border: none;
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 0.95rem;
+      min-height: 120px;
+    }
+    .rich-editor-wrap .ql-editor {
+      min-height: 100px;
+      color: var(--text);
+      line-height: 1.55;
+    }
+    .rich-editor-wrap .ql-editor.ql-blank::before {
+      color: var(--dim);
+      font-style: normal;
+    }
+    .rich-editor-wrap .ql-stroke { stroke: var(--muted); }
+    .rich-editor-wrap .ql-fill { fill: var(--muted); }
+    .rich-editor-wrap .ql-picker { color: var(--text); }
+    .rich-editor-wrap .ql-picker-options {
+      background: var(--panel);
+      border-color: var(--border);
+    }
+    .rich-editor-wrap .ql-snow .ql-picker.ql-expanded .ql-picker-label {
+      border-color: var(--border);
+    }
+    .rich-editor-wrap--mono .ql-editor {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.85rem;
+    }
 
     /* ── Checkbox / radio groups ── */
     .chip-group { display: flex; flex-wrap: wrap; gap: 12px; }
@@ -481,15 +525,16 @@
       </div>
       <div class="fg">
         <label>Problem Statement <span style="color:var(--danger)">*</span></label>
-        <textarea id="currentProblemStatement" rows="6" placeholder="Describe the problem, input formats, and expected outputs..."></textarea>
+        <p class="hint" style="margin-bottom:8px;">Use the toolbar for bold, italic, colors, lists, links, and horizontal rules. Shown to students as formatted text.</p>
+        <div class="rich-editor-wrap" id="wrapProblemStatement"><div id="editorProblemStatement"></div></div>
       </div>
       <div class="fg">
         <label>Test Cases</label>
-        <textarea id="currentTestCases" rows="4" placeholder="Optional example input/output test cases for students..."></textarea>
+        <div class="rich-editor-wrap rich-editor-wrap--mono" id="wrapTestCases"><div id="editorTestCases"></div></div>
       </div>
       <div class="fg">
         <label>Constraints</label>
-        <textarea id="currentConstraints" rows="3" placeholder="e.g., 1 <= N <= 10^5"></textarea>
+        <div class="rich-editor-wrap" id="wrapConstraints"><div id="editorConstraints"></div></div>
       </div>
     </div>
 
@@ -620,6 +665,7 @@
 } | tojson | safe }}</script>
 {% endif %}
 
+<script src="https://cdn.quilljs.com/1.3.7/quill.min.js"></script>
 <script>
 const bootstrap = JSON.parse(document.getElementById('quiz-form-bootstrap').textContent);
 const EDIT_MODE = bootstrap.edit_mode;
@@ -633,6 +679,114 @@ let selectedConditions = bootstrap.selected_conditions;
 let problemsData = [];
 let currentProblemIndex = 0;
 let problemRendered = false; // true after first switchProblem completes
+
+window._quillProblemStatement = null;
+window._quillTestCases = null;
+window._quillConstraints = null;
+
+function initQuillEditors() {
+  if (window._quillProblemStatement || typeof Quill === 'undefined') return;
+  var BlockEmbed = Quill.import('blots/block/embed');
+  function HrBlot() {
+    BlockEmbed.apply(this, arguments);
+  }
+  HrBlot.prototype = Object.create(BlockEmbed.prototype);
+  HrBlot.prototype.constructor = HrBlot;
+  HrBlot.create = function () {
+    var node = document.createElement('hr');
+    node.setAttribute('contenteditable', 'false');
+    return node;
+  };
+  HrBlot.blotName = 'hr';
+  HrBlot.tagName = 'hr';
+  try {
+    Quill.register(HrBlot);
+  } catch (e) { /* already registered */ }
+
+  var toolbarOptions = [
+    [{ header: [1, 2, 3, false] }],
+    ['bold', 'italic', 'underline', 'strike'],
+    [{ color: [] }, { background: [] }],
+    [{ list: 'ordered' }, { list: 'bullet' }],
+    ['blockquote', 'code-block'],
+    ['link'],
+    ['hr'],
+  ];
+  var icons = Quill.import('ui/icons');
+  icons.hr = '<svg viewBox="0 0 18 18" width="18" height="18"><line x1="2" y1="9" x2="16" y2="9" stroke="currentColor" stroke-width="2"/></svg>';
+  var handlers = {
+    hr: function () {
+      var q = this.quill;
+      var range = q.getSelection(true);
+      if (!range) return;
+      q.insertEmbed(range.index, 'hr', true, Quill.sources.USER);
+      q.setSelection(range.index + 1, Quill.sources.SILENT);
+    },
+  };
+  var baseOpts = {
+    theme: 'snow',
+    modules: {
+      toolbar: {
+        container: toolbarOptions,
+        handlers: handlers,
+      },
+    },
+  };
+  window._quillProblemStatement = new Quill('#editorProblemStatement', Object.assign({}, baseOpts, {
+    placeholder: 'Describe the problem, input formats, and expected outputs...',
+  }));
+  window._quillTestCases = new Quill('#editorTestCases', Object.assign({}, baseOpts, {
+    placeholder: 'Optional example input/output test cases for students...',
+  }));
+  window._quillConstraints = new Quill('#editorConstraints', Object.assign({}, baseOpts, {
+    placeholder: 'e.g., 1 <= N <= 10^5',
+  }));
+}
+
+function setQuillHtml(quill, htmlOrText) {
+  if (!quill) return;
+  var s = htmlOrText || '';
+  if (!String(s).trim()) {
+    quill.setText('');
+    return;
+  }
+  if (/<[a-z][\s\S]*>/i.test(s)) {
+    quill.clipboard.dangerouslyPasteHTML(s);
+  } else {
+    quill.setText(s);
+  }
+}
+
+function getQuillHtml(quill) {
+  if (!quill) return '';
+  var t = (quill.getText() || '').replace(/\u200b/g, '').trim();
+  var hasHr = quill.root && quill.root.querySelector && quill.root.querySelector('hr');
+  if (!t && !hasHr) return '';
+  return (quill.root.innerHTML || '').trim();
+}
+
+function isQuillEmpty(quill) {
+  if (!quill) return true;
+  var t = (quill.getText() || '').replace(/\u200b/g, '').trim();
+  var hasHr = quill.root && quill.root.querySelector && quill.root.querySelector('hr');
+  return !t && !hasHr;
+}
+
+function htmlPlainPreview(html, maxLen) {
+  if (!html) return '';
+  var d = document.createElement('div');
+  d.innerHTML = html;
+  var t = (d.textContent || '').trim();
+  if (t.length <= maxLen) return t;
+  return t.substring(0, maxLen);
+}
+
+function isProblemStatementEmpty(stmt) {
+  if (!stmt || !String(stmt).trim()) return true;
+  var d = document.createElement('div');
+  d.innerHTML = stmt;
+  return !d.textContent.replace(/\u200b/g, '').trim();
+}
 
 // Starter code storage
 let starterCodeStore = {};
@@ -746,6 +900,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.error('Default survey templates failed to load:', e);
     showToast('Could not load default survey templates from server. Check surveys/instructor_default_*.json', 'error');
   }
+
+  initQuillEditors();
 
   if (bootstrap.problems_payload) {
   const rawProblems = bootstrap.problems_payload.problems;
@@ -863,9 +1019,9 @@ function saveCurrentProblem() {
   saveCurrentFiles();
   problemsData[currentProblemIndex] = {
     title: (document.getElementById('currentProblemTitle').value || '').trim(),
-    problem_statement: document.getElementById('currentProblemStatement').value,
-    constraints: document.getElementById('currentConstraints').value,
-    test_cases: document.getElementById('currentTestCases').value,
+    problem_statement: getQuillHtml(window._quillProblemStatement),
+    constraints: getQuillHtml(window._quillConstraints),
+    test_cases: getQuillHtml(window._quillTestCases),
     starter_code: { ...starterCodeStore },
     _has_surveys: true,  // sentinel: survives Firebase even if arrays are empty
     pre_survey_enabled: document.getElementById('togglePreSurvey').checked,
@@ -880,15 +1036,15 @@ function saveCurrentProblem() {
 }
 
 function switchProblem(idx) {
-  if (problemRendered && problemsData[currentProblemIndex] && document.getElementById('currentProblemStatement')) {
+  if (problemRendered && problemsData[currentProblemIndex] && window._quillProblemStatement) {
     saveCurrentProblem();
   }
   currentProblemIndex = idx;
   const prob = problemsData[idx];
 
-  document.getElementById('currentProblemStatement').value = prob.problem_statement || '';
-  document.getElementById('currentConstraints').value = prob.constraints || '';
-  document.getElementById('currentTestCases').value = prob.test_cases || '';
+  setQuillHtml(window._quillProblemStatement, prob.problem_statement || '');
+  setQuillHtml(window._quillConstraints, prob.constraints || '');
+  setQuillHtml(window._quillTestCases, prob.test_cases || '');
   document.getElementById('currentProblemTitle').value = prob.title || '';
   document.getElementById('problemCardTitle').textContent = (prob.title || '').trim() || ('Problem ' + (idx + 1));
 
@@ -1243,7 +1399,7 @@ function nextStep() {
       if (!(problemsData[i].title || '').trim()) {
         showToast(`Problem ${i+1} requires a title.`, 'error'); return;
       }
-      if (!(problemsData[i].problem_statement || '').trim()) {
+      if (isProblemStatementEmpty(problemsData[i].problem_statement)) {
         showToast(`Problem ${i+1} requires a problem statement.`, 'error'); return;
       }
     }
@@ -1265,7 +1421,7 @@ function buildReview() {
   const condStr = selectedConditions.map(c => condLabels[c]).join('<br>');
   let problemsSummary = problemsData.map((p, i) => {
     const probLabel = (p.title || '').trim() || `Problem ${i+1}`;
-    const stmt = (p.problem_statement || '').substring(0, 60);
+    const stmt = htmlPlainPreview(p.problem_statement || '', 60);
     const surveys = [];
     if (p.pre_survey_enabled && (p.pre_survey || []).length) surveys.push('Pre');
     if (p.post_survey_enabled && (p.post_survey || []).length) surveys.push('Post');
@@ -1294,7 +1450,7 @@ async function saveQuiz() {
     if (!(problemsData[i].title || '').trim()) {
       showToast(`Problem ${i+1} requires a title.`, 'error'); return;
     }
-    if (!(problemsData[i].problem_statement || '').trim()) {
+    if (isProblemStatementEmpty(problemsData[i].problem_statement)) {
       showToast(`Problem ${i+1} requires a problem statement.`, 'error'); return;
     }
   }
