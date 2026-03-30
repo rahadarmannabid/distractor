@@ -2633,8 +2633,28 @@ const ACTIVITY_BATCH_SIZE = 10;
     const minFontSize = 10;
     const maxFontSize = 24;
     let isAnalyzing = false;
-    /** Idle delay (ms) before triggering /analyze after a newline or blank-line idle. */
+    /** Base idle delay (ms) before blank-line idle can trigger /analyze (after rejects use longer delays). */
     var AI_SUGGESTION_IDLE_MS = 3000;
+    /** Blank-line idle backoff after rejecting without editing: tier 1 → 15s, tier 2+ → 45s. */
+    var BLANK_IDLE_MS_AFTER_REJECT_TIER1 = 15000;
+    var BLANK_IDLE_MS_AFTER_REJECT_TIER2 = 45000;
+    /** 0 = 3s; 1 = first reject; 2 = second+ reject (blank-line idle path only; reset on any edit). */
+    var _blankIdleRejectBackoffTier = 0;
+
+    function getBlankLineIdleMs() {
+        if (_blankIdleRejectBackoffTier === 0) return AI_SUGGESTION_IDLE_MS;
+        if (_blankIdleRejectBackoffTier === 1) return BLANK_IDLE_MS_AFTER_REJECT_TIER1;
+        return BLANK_IDLE_MS_AFTER_REJECT_TIER2;
+    }
+
+    function resetBlankIdleRejectBackoff() {
+        _blankIdleRejectBackoffTier = 0;
+    }
+
+    function bumpRejectIdleBackoff() {
+        if (_blankIdleRejectBackoffTier === 0) _blankIdleRejectBackoffTier = 1;
+        else _blankIdleRejectBackoffTier = 2;
+    }
 
     let surveyData = {
     analysisCount: 0,
@@ -3748,6 +3768,7 @@ async function initializeEditor() {
                 // Enhanced Monaco Editor event handlers with time tracking
                 window.editor.onDidChangeModelContent((e) => {
                     _lastActivityForBlankIdle = Date.now();
+                    resetBlankIdleRejectBackoff();
                     updateUserInteraction();
                     onEditorChange();
                     
@@ -3803,19 +3824,20 @@ async function initializeEditor() {
                     }
                 });
 
-                // 2) User idles 3s on a blank line → start suggestion
+                // 2) Blank-line idle: 3s default; 15s / 45s after repeated rejects (until user edits)
                 setInterval(function() {
                     if (aiDisabled || !window.editor || isAnalyzing) return;
                     if (isCopilotPopupPending()) return;
                     if (!currentSession || !currentSession.sessionId) return;
-                    if (Date.now() - _lastActivityForBlankIdle < AI_SUGGESTION_IDLE_MS) return;
+                    var idleNeedMs = getBlankLineIdleMs();
+                    if (Date.now() - _lastActivityForBlankIdle < idleNeedMs) return;
                     var pos = window.editor.getPosition();
                     var lineNum = pos.lineNumber;
                     var ln = window.editor.getModel().getLineContent(lineNum);
                     if (ln.trim() !== '') return;
                     var codeProbe = window.editor.getValue().replace(/^\s+/, '');
                     if (!codeProbe || codeProbe === '// Start coding here...' || codeProbe === '# Start coding here...') return;
-                    if (Date.now() - _lastBlankIdleAnalyzeAt < AI_SUGGESTION_IDLE_MS) return;
+                    if (Date.now() - _lastBlankIdleAnalyzeAt < idleNeedMs) return;
                     _lastBlankIdleAnalyzeAt = Date.now();
                     analyzeCurrentCode({ skipPreviousCodeCheck: true, triggerReason: 'blank_line_idle' });
                 }, 300);
@@ -3972,7 +3994,7 @@ function showTabReturnNotification() {
 }
 
 let previousCode = ''
-// Blank-line idle: AI_SUGGESTION_IDLE_MS with no edits and no line change (column moves on same line do not reset)
+// Blank-line idle: getBlankLineIdleMs() (3s / 15s / 45s after rejects) with no edits and no line change (column moves on same line do not reset)
 var _lastActivityForBlankIdle = Date.now();
 var _prevCursorLineBlankIdle = 1;
 var _lastBlankIdleAnalyzeAt = 0;
@@ -4504,6 +4526,7 @@ function _copilotHandleReject() {
         });
         currentSession.suggestionClickCount++;
         checkSuggestionBasedPeriodicSurvey();
+        bumpRejectIdleBackoff();
     } catch (e) {
         console.warn('Copilot popup reject error:', e);
     }

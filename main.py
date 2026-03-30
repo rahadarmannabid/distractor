@@ -1200,7 +1200,7 @@ def _clamp_problem_description_to_lines(text: str, max_lines: int = 3) -> str:
 
 
 _LEADING_GUESS = re.compile(
-    r"^\s*this\s+code\s+is\s+trying\s+(?:to\s+)?",
+    r"^\s*(?:this\s+code\s+is\s+trying\s+(?:to\s+)?|you\s+are\s+trying\s+(?:to\s+)?)",
     re.IGNORECASE,
 )
 
@@ -1208,7 +1208,7 @@ _LEADING_GUESS = re.compile(
 def _ensure_problem_guess_framing(text: str) -> str:
     """
     Make it obvious the AI is guessing the programmer's intent: first line reads
-    'This code is trying to …'.
+    'You are trying to …' (second person; legacy 'This code is trying to' is normalized away).
     """
     if not text or not str(text).strip():
         return text
@@ -1224,7 +1224,7 @@ def _ensure_problem_guess_framing(text: str) -> str:
         remainder = "infer what programming task you are solving from the code so far."
     elif remainder[0].isupper():
         remainder = remainder[0].lower() + remainder[1:]
-    raw_lines[0] = "This code is trying to " + remainder
+    raw_lines[0] = "You are trying to " + remainder
     return "\n".join(raw_lines)
 
 
@@ -1246,8 +1246,8 @@ def analyze_problem_statement(existing_code, language=None):
     Write a short description so the reader knows this is the AI's guess about their goal (not a fact about the assignment).
 
     Format:
-    - Line 1 MUST begin with these exact words: This code is trying to
-      (then continue on the same line with a short phrase: what the code seems to be solving or building.)
+    - Line 1 MUST begin with these exact words: You are trying to
+      (then continue on the same line with a short phrase: what you seem to be solving or building.)
     - Optional lines 2–3: extra LeetCode-style detail (goal, constraint, or edge case) in plain English.
     - No markdown, bullets, "Example:", code fences, or solution steps.
 
