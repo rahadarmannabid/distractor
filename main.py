@@ -1037,6 +1037,10 @@ class ActiveSessionMap:
     def __len__(self) -> int:
         return len(list(self.keys()))
 
+    def session_store_backend(self) -> str:
+        """Return 'redis' or 'memory' for health/metrics."""
+        return "redis" if self._redis is not None else "memory"
+
 
 # Global session storage (Redis if REDIS_URL, else in-memory; sent to Firebase on submit)
 active_sessions: ActiveSessionMap = ActiveSessionMap()
@@ -2712,6 +2716,7 @@ async def health_check():
         "status": "healthy",
         "service": "AI Code Assistant with Firebase Integration",
         "firebase_status": firebase_status,
+        "session_store": active_sessions.session_store_backend(),
         "active_sessions": len(active_sessions),
         "environment": {
             "openai_configured": bool(os.getenv("OPENAI_API_KEY")),

@@ -1,4 +1,19 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: codeoracle_redis
+    restart: unless-stopped
+    networks:
+      - guessing_ide_network
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   guessing_ide:
     build:
       context: .
@@ -7,15 +22,20 @@ services:
     image: rahadarmannabid/codeoracle:latest
     ports:
       - "8000:8000"
-    
+    depends_on:
+      redis:
+        condition: service_healthy
+
     env_file:
       - .env
-    
+
     environment:
       - API_HOST=0.0.0.0
       - API_PORT=8000
       - LOG_LEVEL=info
-    
+      # Default to bundled Redis; set REDIS_URL in .env to use managed Redis instead.
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+
     volumes:
       # ONLY mount directories for OUTPUT/RUNTIME DATA
       - ./submissions:/app/submissions
@@ -45,6 +65,9 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  redis_data:
 
 networks:
   guessing_ide_network:
