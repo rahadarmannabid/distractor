@@ -62,6 +62,14 @@ docker run -d --name codeoracle -p 8000:8000 --env-file /path/to/.env rahadarman
 
 Or use **`docker-compose.yml`** locally with a `.env` next to it (same as before).
 
+### Redis (sessions across Gunicorn workers)
+
+Compose starts a **`redis:7-alpine`** service and sets **`REDIS_URL=redis://redis:6379/0`** by default so `active_sessions` uses Redis (safe with multiple workers). Data is persisted under the **`redis_data`** volume (AOF).
+
+- Override **`REDIS_URL`** in `.env` if you use **managed Redis** (e.g. cloud) instead of the bundled container.
+- **`GET /health`** includes **`session_store`**: `"redis"` or `"memory"` so you can confirm the app connected to Redis.
+- For **`docker run`** without Compose, run Redis separately and pass **`-e REDIS_URL=redis://host:6379/0`**.
+
 ---
 
 ## Troubleshooting
