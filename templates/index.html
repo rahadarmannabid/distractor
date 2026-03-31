@@ -2565,6 +2565,33 @@ function handleDismissRestore() {
     clearProgress();
 }
 
+function showResumedSessionBanner() {
+    const existing = document.getElementById('resumedSessionBanner');
+    if (existing) return;
+
+    const banner = document.createElement('div');
+    banner.className = 'restore-banner';
+    banner.id = 'resumedSessionBanner';
+    banner.innerHTML = `
+        <div class="restore-banner-content">
+            <span style="font-size: 20px;">🔄</span>
+            <div>
+                <strong>Session Resumed</strong><br>
+                <small>Your previous work has been restored. You can continue from where you left off.</small>
+            </div>
+        </div>
+        <div class="restore-banner-buttons">
+            <button class="restore-btn" onclick="document.getElementById('resumedSessionBanner').remove()">Got it</button>
+        </div>
+    `;
+    document.body.insertBefore(banner, document.body.firstChild);
+    // Auto-dismiss after 8 seconds
+    setTimeout(() => {
+        const b = document.getElementById('resumedSessionBanner');
+        if (b) b.remove();
+    }, 8000);
+}
+
 function clearProgress() {
     const key = getAutosaveKey();
     if (key) {
@@ -3151,7 +3178,7 @@ function clearCachedSubmissionData() {
 function clearAllSessionCodes() {
     try {
         if (currentSession && currentSession.sessionId) {
-            sessionStorage.removeItem(`perProblemCodes_${currentSession.sessionId}`);
+            localStorage.removeItem(`perProblemCodes_${currentSession.sessionId}`);
         }
     } catch (error) {
         console.error('❌ Failed to clear per-problem codes:', error);
@@ -3396,6 +3423,9 @@ async function initializeFromURL() {
             nextPeriodicSurveyAt: authData.periodicSurveyStart ?? null,
             periodicSurveysCompleted: 0,
             finalSurveyDisabled: authData.finalSurveyDisabled === true,
+            // Session-resume fields
+            resumed: authData.resumed === true,
+            editorDraftCode: authData.editorDraftCode || null,
             guessLogCount: 0,
             descLogCount: 0,
             suggestionsLogCount: 0,
@@ -3676,9 +3706,14 @@ async function initializeFromURL() {
         initProblemPanelTabs();
         refreshProblemPanelAiHistory();
         
-        // Check for saved progress (skip on non-first problems — starter code is already set)
+        // Check for saved progress / resumed session
         setTimeout(() => {
-            if (currentSession.currentProblemIndex === 0) {
+            if (currentSession.resumed) {
+                // Server returned the same session with the last saved editor draft.
+                // The code was already loaded into the editor as `initialCode`; just
+                // show a non-blocking banner so the user knows they are continuing.
+                showResumedSessionBanner();
+            } else if (currentSession.currentProblemIndex === 0) {
                 const savedProgress = restoreProgress();
                 if (savedProgress) {
                     const ageMinutes = (Date.now() - savedProgress.timestamp) / (1000 * 60);
@@ -3791,9 +3826,14 @@ async function initializeEditor() {
 
                 const selectedLanguage = currentSession.programmingLanguage || 'javascript';
                 
-                // Check if starter code is available from session
+                // Determine initial editor content.
+                // Priority: (1) server-side editor draft from a resumed session,
+                //           (2) starter code for the assignment,
+                //           (3) language default placeholder.
                 let initialCode;
-                if (currentSession.starterCode) {
+                if (currentSession.editorDraftCode) {
+                    initialCode = currentSession.editorDraftCode;
+                } else if (currentSession.starterCode) {
                     initialCode = currentSession.starterCode;
                 } else {
                     initialCode = languageDefaults[selectedLanguage] || '// Start coding here...\n';
@@ -5259,7 +5299,8 @@ function collectDownloadEntriesForIde(userId, assignmentKey, timestampSeg, ext) 
     var perProblemKey = 'perProblemCodes_' + currentSession.sessionId;
     var stored = [];
     try {
-        var raw = sessionStorage.getItem(perProblemKey);
+        // localStorage so codes survive tab closes / crashes
+        var raw = localStorage.getItem(perProblemKey);
         if (raw) stored = JSON.parse(raw);
     } catch (e) {}
     stored.sort(function(a, b) { return a.problemIndex - b.problemIndex; });
@@ -6243,11 +6284,12 @@ async function checkAndShowPostSurvey() {
             if (nextData.status === 'complete') {
                 // All done — fall through to final submission
             } else {
-                // Store current problem's code for combined download at final submission
+                // Store current problem's code for combined download at final submission.
+                // Use localStorage so the codes survive a tab close / crash.
                 const perProblemKey = `perProblemCodes_${currentSession.sessionId}`;
                 let stored = [];
                 try {
-                    const raw = sessionStorage.getItem(perProblemKey);
+                    const raw = localStorage.getItem(perProblemKey);
                     if (raw) stored = JSON.parse(raw);
                 } catch (e) {}
                 stored.push({
@@ -6255,7 +6297,7 @@ async function checkAndShowPostSurvey() {
                     title: nextData.completed_problem_title || `Problem ${currentProbIdx + 1}`,
                     code: code
                 });
-                sessionStorage.setItem(perProblemKey, JSON.stringify(stored));
+                localStorage.setItem(perProblemKey, JSON.stringify(stored));
 
                 // Update authData with next problem info
                 authData.currentProblemIndex = nextData.problem_index;

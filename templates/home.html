@@ -1012,6 +1012,8 @@
                         timeLimitMinutes: data.time_limit_minutes || 0,
                         totalProblems: data.total_problems || 1,
                         currentProblemIndex: data.current_problem_index || 0,
+                        resumed: data.resumed === true,
+                        editorDraftCode: data.editor_draft_code || null,
                     }));
 
                     loginButton.innerHTML = 'Authenticated! Redirecting...';
@@ -1051,7 +1053,9 @@
                     periodicSurveyStart: data.periodic_survey_start || 5,
                     finalSurveyDisabled: data.final_survey_disabled === true,
                     currentProblemIndex: typeof data.current_problem_index === 'number' ? data.current_problem_index : 0,
-                    totalProblems: typeof data.total_problems === 'number' ? data.total_problems : 1
+                    totalProblems: typeof data.total_problems === 'number' ? data.total_problems : 1,
+                    resumed: data.resumed === true,
+                    editorDraftCode: data.editor_draft_code || null,
                 }));
 
                 // Download assignment PDF

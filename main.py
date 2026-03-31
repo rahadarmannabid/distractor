@@ -873,6 +873,9 @@ class AuthResponse(BaseModel):
     final_survey_disabled: bool = False
     current_problem_index: int = 0
     total_problems: int = 1
+    # Session-resume fields: set when an incomplete prior session is found
+    resumed: bool = False
+    editor_draft_code: Optional[str] = None
 
 class ActivityEntry(BaseModel):
     timestamp: str
@@ -1155,6 +1158,43 @@ def quiz_resume_write(
         firebase_rtdb_set_with_retry(ref, payload, max_attempts=3)
     except Exception as e:
         logger.warning("quiz_resume_write failed: %s", e)
+
+
+# ── Regular-assignment resume pointer (mirrors quiz_resume_write) ─────────────
+
+def assignment_resume_ref(assignment_key: str, user_id: str):
+    """Firebase ref: assignment_resume/{sanitized_key}/{sanitized_user_id}"""
+    if not firebase_db:
+        return None
+    safe_key = _sanitize_firebase_key_segment(assignment_key)
+    safe_uid = _sanitize_firebase_key_segment(user_id)
+    return firebase_db.child("assignment_resume").child(safe_key).child(safe_uid)
+
+
+def assignment_resume_write(
+    assignment_key: str,
+    user_id: str,
+    session_id: str,
+    *,
+    completed: bool = False,
+) -> None:
+    """Persist/update a resume pointer for a regular (non-quiz) assignment session."""
+    if not firebase_db:
+        return
+    try:
+        ref = assignment_resume_ref(assignment_key, user_id)
+        if ref is None:
+            return
+        payload = {
+            "session_id": session_id,
+            "completed": completed,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "user_id": user_id,
+            "assignment_key": assignment_key,
+        }
+        firebase_rtdb_set_with_retry(ref, payload, max_attempts=3)
+    except Exception as e:
+        logger.warning("assignment_resume_write failed: %s", e)
 
 
 def firebase_rtdb_update_with_retry(ref, value: Dict[str, Any], *, max_attempts: int = 3) -> bool:
@@ -2375,7 +2415,17 @@ async def submit_code(request: SubmitRequest):
 
                 # Update local backup with final data
                 save_session_to_local(session_log)
-                
+
+                # Mark the resume pointer as completed so re-login starts fresh
+                if not session_log.quiz_id:
+                    try:
+                        assignment_resume_write(
+                            session_log.assignment_id, session_log.user_id,
+                            session_id, completed=True,
+                        )
+                    except Exception as _rw_err:
+                        logger.warning("assignment_resume_write completed=True failed: %s", _rw_err)
+
                 # Remove from active sessions - FORCE LOGOUT
                 if session_id:
                     del active_sessions[session_id]
@@ -3457,6 +3507,101 @@ async def submit_pre_post_survey(request: PrePostSurveySubmission):
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Survey submission failed: {str(e)}")
     
+def find_incomplete_session_for_assignment(user_id: str, assignment_key: str) -> Optional[SessionLog]:
+    """
+    Find the most recent incomplete (non-submitted) session for a
+    user + assignment_key combination.
+
+    Strategy (local-first, Firebase fallback):
+    1. Scan session_logs/ for files matching {user_id}_{assignment_key}_*.json.
+       Return the most recent one that has not been submitted.
+    2. If nothing found on disk AND Firebase is available, check the
+       assignment_resume pointer.  If the pointer points to an incomplete
+       session, try to reconstruct the SessionLog from:
+       a. Local disk (by session_id)  — in case the file exists but wasn't
+          matched by the prefix scan (e.g. different casing).
+       b. Firebase sessions/{session_id}/checkpoint/session.
+    """
+    # ── Step 1: local disk scan ───────────────────────────────────────────
+    logs_dir = Path(os.getenv("SUBMISSIONS_DIR", "session_logs"))
+    if logs_dir.is_dir():
+        prefix = f"{user_id}_{assignment_key}_"
+        candidates = [
+            p for p in logs_dir.iterdir()
+            if p.is_file() and p.suffix == ".json" and p.name.startswith(prefix)
+        ]
+        candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        for p in candidates:
+            sl = load_session_log_from_disk(p.stem)
+            if sl is None:
+                continue
+            if sl.code_submit_timestamp or sl.submitted_full_code:
+                continue
+            logger.info(
+                "Resume (disk): found incomplete session %s for user %s / assignment %s",
+                sl.session_id, user_id, assignment_key,
+            )
+            return sl
+
+    # ── Step 2: Firebase fallback ────────────────────────────────────────
+    if not firebase_db:
+        return None
+    try:
+        ref = assignment_resume_ref(assignment_key, user_id)
+        if ref is None:
+            return None
+        pointer = ref.get()
+        if not isinstance(pointer, dict):
+            return None
+        if pointer.get("completed"):
+            return None  # session was fully submitted
+
+        session_id = (pointer.get("session_id") or "").strip()
+        if not session_id:
+            return None
+
+        # 2a: try to load from disk by explicit session_id
+        sl = load_session_log_from_disk(session_id)
+        if sl is not None and not sl.code_submit_timestamp and not sl.submitted_full_code:
+            logger.info(
+                "Resume (disk by Firebase pointer): session %s for user %s / assignment %s",
+                session_id, user_id, assignment_key,
+            )
+            return sl
+
+        # 2b: reconstruct from Firebase sessions/{session_id}/checkpoint/session
+        chk = firebase_db.child("sessions").child(session_id).child("checkpoint").get()
+        if not isinstance(chk, dict):
+            return None
+        session_dict = chk.get("session")
+        if not isinstance(session_dict, dict):
+            return None
+
+        # Validate ownership and submission status
+        if session_dict.get("user_id") != user_id:
+            return None
+        if session_dict.get("code_submit_timestamp") or session_dict.get("submitted_full_code"):
+            return None
+
+        try:
+            sl = SessionLog.model_validate(session_dict)
+        except Exception as val_err:
+            logger.warning("Firebase checkpoint SessionLog validation failed for %s: %s", session_id, val_err)
+            return None
+
+        # Persist to disk so future lookups are local
+        save_session_to_local(sl)
+        logger.info(
+            "Resume (Firebase checkpoint): session %s for user %s / assignment %s",
+            session_id, user_id, assignment_key,
+        )
+        return sl
+
+    except Exception as e:
+        logger.warning("find_incomplete_session_for_assignment Firebase fallback failed: %s", e)
+        return None
+
+
 @app.post("/authenticate", response_model=AuthResponse)
 async def authenticate_user(request: AuthRequest):
     """
@@ -3478,7 +3623,54 @@ async def authenticate_user(request: AuthRequest):
         
         if condition is None:
             raise HTTPException(status_code=400, detail="Invalid assignment key. Please check your credentials and try again.")
-        
+
+        # ── Resume detection ────────────────────────────────────────────────
+        # Before creating a brand-new session, look for an incomplete one on
+        # disk for this user + assignment.  If found, return the same session
+        # ID so the client can restore the saved editor state.
+        existing_sl = find_incomplete_session_for_assignment(user_id, assignment_key)
+        if existing_sl:
+            active_sessions[existing_sl.session_id] = existing_sl
+            save_session_to_local(existing_sl)
+
+            # Rebuild survey flags from persisted statuses
+            _pre_done  = existing_sl.pre_survey_status  in ("completed", "not_required")
+            _post_done = existing_sl.post_survey_status in ("completed", "not_required")
+
+            # Rebuild periodic / final-survey flags (reuse the config helpers)
+            _base_key_ex     = get_assignment_base_key(assignment_key)
+            _periodic_cfg_ex = get_periodic_survey_config()
+            _periodic_en_ex  = _base_key_ex.lower() in _periodic_cfg_ex["enabled_prefixes"] if _base_key_ex else False
+            _final_dis_ex    = is_final_survey_disabled(_base_key_ex)
+
+            logger.info(
+                "Resuming existing session %s for user %s / assignment %s (problem_index=%s)",
+                existing_sl.session_id, user_id, assignment_key,
+                existing_sl.current_problem_index,
+            )
+
+            return AuthResponse(
+                status="success",
+                message="Resumed existing session",
+                condition=existing_sl.condition,
+                problem_description=existing_sl.problem_description,
+                session_id=existing_sl.session_id,
+                paste_allowed=1,
+                tab_tracking_enabled=True,
+                has_pre_survey=not _pre_done,
+                has_post_survey=not _post_done,
+                programming_language=programming_language,
+                starter_code=get_starter_code(get_assignment_base_key(assignment_key), programming_language),
+                periodic_survey_enabled=_periodic_en_ex,
+                periodic_survey_start=_periodic_cfg_ex["start_after_suggestions"],
+                final_survey_disabled=_final_dis_ex,
+                current_problem_index=existing_sl.current_problem_index,
+                total_problems=existing_sl.total_problems,
+                resumed=True,
+                editor_draft_code=existing_sl.editor_draft_checkpoint,
+            )
+        # ── End resume detection ─────────────────────────────────────────────
+
         session_id = f"{user_id}_{assignment_key}_{uuid.uuid4().hex[:8]}"
         
         problem_description = None
@@ -3549,6 +3741,14 @@ async def authenticate_user(request: AuthRequest):
             )
         except Exception as fb_e:
             logger.warning("Firebase checkpoint at auth failed: %s", fb_e)
+
+        # Write a resume pointer so Firebase can be used as fallback on re-login
+        try:
+            await asyncio.to_thread(
+                lambda: assignment_resume_write(assignment_key, user_id, session_id)
+            )
+        except Exception as fb_e:
+            logger.warning("assignment_resume_write at auth failed: %s", fb_e)
         
         logger.info(f"Authentication successful: {user_id} -> Condition {condition}, Session: {session_id}, Language: {programming_language}")
         
