@@ -2077,7 +2077,7 @@
                         <button class="copilot-popup__icon-btn copilot-popup__icon-btn--reject" id="copilotRejectBtn" title="Reject (Esc)">
                             <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                         </button>
-                        <span class="copilot-popup__hint"><kbd>Tab</kbd> accept · <kbd>Esc</kbd> reject</span>
+                        <span class="copilot-popup__hint"><kbd>Tab</kbd> accept · <kbd>Esc</kbd> reject · typing dismisses</span>
                     </div>
                 </div>
 
@@ -2718,6 +2718,28 @@ const ACTIVITY_BATCH_SIZE = 10;
     const minFontSize = 10;
     const maxFontSize = 24;
     let isAnalyzing = false;
+    /** After user inserts a newline, wait this long with no further edits before /analyze (reading mode). */
+    var NEWLINE_IDLE_MS = 2000;
+    var _newlineIdleTimer = null;
+
+    function clearNewlineIdleTimer() {
+        if (_newlineIdleTimer) {
+            clearTimeout(_newlineIdleTimer);
+            _newlineIdleTimer = null;
+        }
+    }
+
+    /** Schedule /analyze after NEWLINE_IDLE_MS if not already waiting for a suggestion. */
+    function scheduleNewlineIdleAnalyze() {
+        clearNewlineIdleTimer();
+        if (aiDisabled || !currentSession || !currentSession.sessionId) return;
+        if (isAnalyzing) return;
+        _newlineIdleTimer = setTimeout(function() {
+            _newlineIdleTimer = null;
+            analyzeCurrentCode({ skipPreviousCodeCheck: true, triggerReason: 'newline_idle_2s' });
+        }, NEWLINE_IDLE_MS);
+    }
+
     /** Base idle delay (ms) before blank-line idle can trigger /analyze (after rejects use longer delays). */
     var AI_SUGGESTION_IDLE_MS = 3000;
     /** Blank-line idle backoff after rejecting without editing: tier 1 → 15s, tier 2+ → 45s. */
@@ -3915,6 +3937,9 @@ async function initializeEditor() {
 
                 // Enhanced Monaco Editor event handlers with time tracking
                 window.editor.onDidChangeModelContent((e) => {
+                    if (isCopilotPopupPending() && !_copilotSuppressTypingReject) {
+                        _copilotHandleReject('typing');
+                    }
                     _lastActivityForBlankIdle = Date.now();
                     resetBlankIdleRejectBackoff();
                     updateUserInteraction();
@@ -3923,7 +3948,8 @@ async function initializeEditor() {
                     const changes = e.changes;
                     const model = window.editor.getModel();
                     const currentContent = model.getValue();
-                    
+                    var eventHasNewline = false;
+
                     for (const change of changes) {
                         const isInsertion = change.text.length > 0;
                         const isDeletion = change.rangeLength > 0;
@@ -3963,16 +3989,25 @@ async function initializeEditor() {
                             scheduleCodeEditingEnd();
                         }
 
-                        // 1) User goes to next line (Enter / inserted newline) → start suggestion
                         if (change.text.includes('\n')) {
-                            _lastBlankIdleAnalyzeAt = Date.now();
-                            analyzeCurrentCode({ skipPreviousCodeCheck: true, triggerReason: 'newline' });
-                            break;
+                            eventHasNewline = true;
                         }
+                    }
+
+                    // 1) Newline → wait NEWLINE_IDLE_MS idle (reading mode); no immediate /analyze.
+                    // While isAnalyzing, do not schedule (no API until current suggestion finishes).
+                    if (eventHasNewline) {
+                        _lastBlankIdleAnalyzeAt = Date.now();
+                        if (!isAnalyzing) {
+                            scheduleNewlineIdleAnalyze();
+                        }
+                    } else {
+                        clearNewlineIdleTimer();
                     }
                 });
 
-                // 2) Blank-line idle: 3s default; 15s / 45s after repeated rejects (until user edits)
+                // 2) Blank-line idle: cursor on an empty line + no typing for AI_SUGGESTION_IDLE_MS (3s default;
+                //    15s / 45s after repeated rejects) → /analyze. Independent of newline+2s above.
                 setInterval(function() {
                     if (aiDisabled || !window.editor || isAnalyzing) return;
                     if (isCopilotPopupPending()) return;
@@ -4189,6 +4224,8 @@ async function analyzeCurrentCode(opts) {
     // Don't start new analysis if code hasn't changed
     if (!opts.skipPreviousCodeCheck && code === previousCode) return;
 
+    clearNewlineIdleTimer();
+
     // Set analyzing flag
     isAnalyzing = true;
     previousCode = code;
@@ -4371,8 +4408,13 @@ var _copilotOriginPosition = null;   // cursor pos when suggestion was generated
 var _copilotDismissAttached = false;
 /** Set when a suggestion is shown; cleared on accept/reject or forced dismiss. */
 var _pendingSuggestionMeta = null;
+/** True while popup is being torn down so nested handlers do not treat it as still open. */
+var _copilotPopupDismissedByUser = false;
+/** True during accept() programmatic executeEdits — do not treat as typing-reject. */
+var _copilotSuppressTypingReject = false;
 
 function isCopilotPopupPending() {
+    if (_copilotPopupDismissedByUser) return false;
     var popup = document.getElementById('copilotPopup');
     return !!(popup && popup.style.display === 'block');
 }
@@ -4512,9 +4554,11 @@ function showCopilotPopup(explanation, suggestionCode, suggestionType, suggestio
 
         popup.classList.remove('closing');
         popup.style.display = 'block';
+        _copilotPopupDismissedByUser = false;
         _copilotPositionAtCursor();
+        // Keep editor editable so typing counts as reject (explicit dismiss); teaser stays read-only.
         if (window.editor && !(typeof teaserActive !== 'undefined' && teaserActive)) {
-            window.editor.updateOptions({ readOnly: true, readOnlyMessage: { value: '' } });
+            window.editor.updateOptions({ readOnly: false, readOnlyMessage: { value: '' } });
         }
         _copilotAttachKeyboard();
         return true;
@@ -4528,6 +4572,7 @@ function hideCopilotPopup() {
     try {
         var popup = document.getElementById('copilotPopup');
         if (!popup || popup.style.display === 'none') return;
+        _copilotPopupDismissedByUser = true;
         _copilotDetachKeyboard();
         _copilotRestoreEditorAfterPopup();
         popup.classList.add('closing');
@@ -4596,32 +4641,37 @@ function _copilotHandleAccept() {
         var insertColumn;
         var text;
 
-        if (lineContent.trim() === '') {
-            insertColumn = 1;
-            var endColumn = lineContent.length + 1;
-            text = reindented.join('\n');
-            window.editor.executeEdits('copilot-popup-accept', [{
-                range: {
-                    startLineNumber: insertLine,
-                    startColumn:     insertColumn,
-                    endLineNumber:   insertLine,
-                    endColumn:       endColumn
-                },
-                text: text
-            }]);
-        } else {
-            insertColumn = lineContent.length + 1;
-            text = '\n' + reindented.join('\n');
+        _copilotSuppressTypingReject = true;
+        try {
+            if (lineContent.trim() === '') {
+                insertColumn = 1;
+                var endColumn = lineContent.length + 1;
+                text = reindented.join('\n');
+                window.editor.executeEdits('copilot-popup-accept', [{
+                    range: {
+                        startLineNumber: insertLine,
+                        startColumn:     insertColumn,
+                        endLineNumber:   insertLine,
+                        endColumn:       endColumn
+                    },
+                    text: text
+                }]);
+            } else {
+                insertColumn = lineContent.length + 1;
+                text = '\n' + reindented.join('\n');
 
-            window.editor.executeEdits('copilot-popup-accept', [{
-                range: {
-                    startLineNumber: insertLine,
-                    startColumn:     insertColumn,
-                    endLineNumber:   insertLine,
-                    endColumn:       insertColumn
-                },
-                text: text
-            }]);
+                window.editor.executeEdits('copilot-popup-accept', [{
+                    range: {
+                        startLineNumber: insertLine,
+                        startColumn:     insertColumn,
+                        endLineNumber:   insertLine,
+                        endColumn:       insertColumn
+                    },
+                    text: text
+                }]);
+            }
+        } finally {
+            _copilotSuppressTypingReject = false;
         }
 
         var inserted = text.split('\n');
@@ -4658,7 +4708,7 @@ function _copilotHandleAccept() {
     resetBlankIdleAfterSuggestionDismiss();
 }
 
-function _copilotHandleReject() {
+function _copilotHandleReject(dismissReason) {
     try {
         recordSuggestionResponse(false);
         var codeAtReject = '';
@@ -4670,7 +4720,8 @@ function _copilotHandleReject() {
         logActivity('copilot_popup_reject', {
             suggestion_type: _copilotPopupType,
             suggestion_text: _copilotPopupText.substring(0, 80),
-            user_code_snapshot: codeAtReject
+            user_code_snapshot: codeAtReject,
+            dismiss_reason: dismissReason || 'explicit'
         });
         currentSession.suggestionClickCount++;
         checkSuggestionBasedPeriodicSurvey();
@@ -4683,7 +4734,7 @@ function _copilotHandleReject() {
 }
 
 function _copilotEnsureDismissListener() {
-    // Intentionally empty: suggestions are dismissed only via accept/reject (editor is read-only).
+    // Typing/paste while popup is open dismisses via onDidChangeModelContent → _copilotHandleReject('typing').
 }
 
 function _copilotBindButtons() {
@@ -4691,7 +4742,7 @@ function _copilotBindButtons() {
         var btnAccept = document.getElementById('copilotAcceptBtn');
         var btnReject = document.getElementById('copilotRejectBtn');
         if (btnAccept) btnAccept.addEventListener('click', _copilotHandleAccept);
-        if (btnReject) btnReject.addEventListener('click', _copilotHandleReject);
+        if (btnReject) btnReject.addEventListener('click', function() { _copilotHandleReject('button'); });
     } catch (e) {
         console.warn('Copilot button binding error:', e);
     }
@@ -4710,7 +4761,7 @@ function _copilotOnKeyDown(e) {
     } else if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        _copilotHandleReject();
+        _copilotHandleReject('escape');
     }
 }
 
