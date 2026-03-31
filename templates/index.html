@@ -2221,7 +2221,9 @@ async function postActivityBatchToServer(activities) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             activities: activities,
-            session_id: currentSession.sessionId
+            session_id: currentSession.sessionId,
+            user_id: currentSession.userId,
+            assignment_key: currentSession.assignmentKey,
         })
     });
     return response.ok;
@@ -2985,6 +2987,10 @@ function logActivity(activityType, activityDetails = {}, sessionContext = {}) {
         console.warn('No session ID available for activity logging');
         return;
     }
+    if (!currentSession.userId || String(currentSession.userId).trim().length < 3) {
+        console.warn('No participant user ID — skipping activity log');
+        return;
+    }
     var t = String(activityType || '');
     if (!ALLOWED_ACTIVITY_TYPES[t]) {
         return;
@@ -3021,7 +3027,7 @@ function logActivity(activityType, activityDetails = {}, sessionContext = {}) {
             current_analysis_count: Number(surveyData.analysisCount) || 0,
             time_since_start: Number(timeSinceStart) || 0,
             session_id: String(currentSession.sessionId),
-            user_id: String(currentSession.userId || 'unknown'),
+            user_id: String(currentSession.userId),
             condition: Number(currentSession.condition) || 0,
             problem_index: typeof currentSession.currentProblemIndex === 'number' ? currentSession.currentProblemIndex : 0,
             ...Object.fromEntries(
@@ -5323,8 +5329,8 @@ function extensionForProgrammingLanguage(language) {
 
 /** Safe segment for user_id / assignment_key (filename-safe). */
 function sanitizeDownloadPart(s) {
-    var t = String(s || 'unknown').replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80);
-    return t || 'unknown';
+    var t = String(s || '').replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80);
+    return t || 'participant';
 }
 
 /** ISO timestamp safe for filenames (no : or .). */
@@ -6860,7 +6866,9 @@ window.addEventListener('beforeunload', (e) => {
         if (activityBuffer.length > 0) {
             var actPayload = JSON.stringify({
                 activities: activityBuffer,
-                session_id: currentSession.sessionId
+                session_id: currentSession.sessionId,
+                user_id: currentSession.userId,
+                assignment_key: currentSession.assignmentKey,
             });
             var actBlob = new Blob([actPayload], { type: 'application/json' });
             navigator.sendBeacon('/log-activities', actBlob);
