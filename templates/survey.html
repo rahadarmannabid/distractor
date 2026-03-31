@@ -889,10 +889,12 @@
                 this.sessionId = authData.sessionId;
                 this.userId = authData.userId;
                 this.assignmentKey = authData.assignmentKey;
-                
+                this.problemIndex = authData.currentProblemIndex || 0;
+
                 this.surveyConfig = null;
                 this.responses = {};
                 this.startTime = Date.now();
+                this._surveyDraftSaveTimer = null;
                 
                 if (!this.sessionId || !this.userId || !this.assignmentKey) {
                     this.showError('Session expired. Please log in again.');
@@ -908,12 +910,113 @@
                     await this.loadSurveyConfig();
                     await this.updateSurveyStatus('in_progress');
                     this.renderSurvey();
+                    this.applySurveyDraftFromStorage();
                     this.setupEventListeners();
                     document.getElementById('infoSection').style.display = 'block';
                 } catch (error) {
                     console.error('Survey initialization error:', error);
                     this.showError('Failed to load survey. Please try again.');
                 }
+            }
+
+            /** localStorage key: one draft per session + survey type + problem index */
+            getSurveyDraftStorageKey() {
+                return `surveyDraft_${this.sessionId}_${this.surveyType}_p${this.problemIndex}`;
+            }
+
+            persistSurveyDraft() {
+                if (!this.sessionId || !this.surveyType || !this.surveyConfig) return;
+                try {
+                    const out = { ...this.responses };
+                    // Open-ended: save textarea text even when below min_length (not yet in responses)
+                    for (const q of this.surveyConfig.questions) {
+                        if (q.type !== 'open_ended') continue;
+                        const wrap = this.findQuestionElement(q.id);
+                        const ta = wrap && wrap.querySelector('textarea.text-input');
+                        if (ta && ta.value.length) out[q.id] = ta.value;
+                    }
+                    localStorage.setItem(
+                        this.getSurveyDraftStorageKey(),
+                        JSON.stringify({ v: 1, savedAt: Date.now(), responses: out })
+                    );
+                } catch (e) {
+                    console.warn('Survey draft save failed:', e);
+                }
+            }
+
+            schedulePersistSurveyDraft() {
+                if (this._surveyDraftSaveTimer) clearTimeout(this._surveyDraftSaveTimer);
+                this._surveyDraftSaveTimer = setTimeout(() => {
+                    this._surveyDraftSaveTimer = null;
+                    this.persistSurveyDraft();
+                }, 300);
+            }
+
+            clearSurveyDraft() {
+                try {
+                    localStorage.removeItem(this.getSurveyDraftStorageKey());
+                } catch (e) { /* ignore */ }
+            }
+
+            /** Resolve question container without fragile CSS escaping on ids */
+            findQuestionElement(questionId) {
+                const nodes = document.querySelectorAll('#surveyContent [data-question-id]');
+                for (const n of nodes) {
+                    if (n.getAttribute('data-question-id') === String(questionId)) return n;
+                }
+                return null;
+            }
+
+            applySurveyDraftFromStorage() {
+                if (!this.surveyConfig || !this.surveyConfig.questions) return;
+                let raw;
+                try {
+                    raw = localStorage.getItem(this.getSurveyDraftStorageKey());
+                } catch (e) { return; }
+                if (!raw) return;
+                let data;
+                try {
+                    data = JSON.parse(raw);
+                } catch (e) { return; }
+                if (!data || !data.responses || typeof data.responses !== 'object') return;
+
+                const saved = data.responses;
+                Object.assign(this.responses, saved);
+
+                for (const q of this.surveyConfig.questions) {
+                    if (q.type === 'info_block') continue;
+                    const val = saved[q.id];
+                    if (val === undefined || val === null) continue;
+
+                    const el = this.findQuestionElement(q.id);
+                    if (!el) continue;
+
+                    if (q.type === 'likert' || q.type === 'likert_7_with_na' || q.type === 'multiple_choice') {
+                        el.querySelectorAll('input[type="radio"]').forEach((radio) => {
+                            if (radio.name === q.id && String(radio.value) === String(val)) radio.checked = true;
+                        });
+                    } else if (q.type === 'slider') {
+                        const slider = el.querySelector('input[type="range"]');
+                        if (slider) {
+                            slider.value = String(val);
+                            const sliderValue = el.querySelector('.slider-value');
+                            const scale = q.scale || { unit: '%' };
+                            if (sliderValue) {
+                                sliderValue.textContent = `${slider.value}${scale.unit || ''}`;
+                            }
+                        }
+                    } else if (q.type === 'open_ended') {
+                        const textarea = el.querySelector('textarea.text-input');
+                        if (textarea) {
+                            textarea.value = typeof val === 'string' ? val : String(val);
+                            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+                    }
+
+                    el.classList.add('answered');
+                }
+
+                this.updateProgress();
             }
 
             async loadSurveyConfig() {
@@ -1258,6 +1361,7 @@
                         // Remove from responses if doesn't meet minimum
                         delete this.responses[question.id];
                         this.updateProgress();
+                        this.schedulePersistSurveyDraft();
                     }
                 });
                 
@@ -1410,12 +1514,13 @@
                 this.responses[questionId] = answer;
                 
                 // Add visual feedback - mark question as answered
-                const questionElement = document.querySelector(`[data-question-id="${questionId}"]`);
+                const questionElement = this.findQuestionElement(questionId);
                 if (questionElement) {
                     questionElement.classList.add('answered');
                 }
                 
                 this.updateProgress();
+                this.schedulePersistSurveyDraft();
             }
 
             updateProgress() {
@@ -1560,6 +1665,7 @@
                     }
                 }
                     await this.updateSurveyStatus('completed');
+                    this.clearSurveyDraft();
 
                     const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
                     const sessionToken = authData.sessionToken;
@@ -1604,11 +1710,12 @@
                                     throw new Error('__ALL_DONE__');
                                 }
 
-                                // Store current problem's code for combined download at final submission
+                                // Store current problem's code for combined download at final submission.
+                                // Use localStorage so the codes survive a tab close / crash.
                                 const perProblemKey = `perProblemCodes_${authData.sessionId}`;
                                 let stored = [];
                                 try {
-                                    const raw = sessionStorage.getItem(perProblemKey);
+                                    const raw = localStorage.getItem(perProblemKey);
                                     if (raw) stored = JSON.parse(raw);
                                 } catch (e) {}
                                 stored.push({
@@ -1616,7 +1723,7 @@
                                     title: nextData.completed_problem_title || `Problem ${currentProbIdx + 1}`,
                                     code: code
                                 });
-                                sessionStorage.setItem(perProblemKey, JSON.stringify(stored));
+                                localStorage.setItem(perProblemKey, JSON.stringify(stored));
 
                                 // Update authData with next problem info
                                 authData.currentProblemIndex = nextData.problem_index;
@@ -1716,6 +1823,7 @@
                                 const result = await codeResponse.json();
 
                                 this.clearCachedSubmissionData();
+                                this.clearAllSessionCodes();
                                 this.clearPeriodicSurveysFromStorage();
                                 sessionStorage.removeItem('authData');
 
@@ -1764,12 +1872,24 @@
             clearCachedSubmissionData() {
                 try {
                     sessionStorage.removeItem('pendingSubmissionData');
-                    const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
-                    if (authData.sessionId) {
-                        sessionStorage.removeItem(`perProblemCodes_${authData.sessionId}`);
-                    }
+                    // perProblemCodes_ is intentionally NOT cleared here — it accumulates codes
+                    // across all problems and must survive until the final post-quiz download + submit.
                 } catch (error) {
                     console.error('Failed to clear cached data:', error);
+                }
+            }
+
+            clearAllSessionCodes() {
+                try {
+                    const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
+                    const cachedData = this.retrieveCachedSubmissionData();
+                    const sessionId = (cachedData && cachedData.session && cachedData.session.sessionId)
+                        || authData.sessionId;
+                    if (sessionId) {
+                        localStorage.removeItem(`perProblemCodes_${sessionId}`);
+                    }
+                } catch (error) {
+                    console.error('Failed to clear per-problem codes:', error);
                 }
             }
 
@@ -1787,7 +1907,8 @@
                     const perProblemKey = `perProblemCodes_${cachedData.session.sessionId}`;
                     let stored = [];
                     try {
-                        const raw = sessionStorage.getItem(perProblemKey);
+                        // localStorage so codes survive tab closes / crashes
+                        const raw = localStorage.getItem(perProblemKey);
                         if (raw) stored = JSON.parse(raw);
                     } catch (e) {}
                     stored.sort((a, b) => a.problemIndex - b.problemIndex);

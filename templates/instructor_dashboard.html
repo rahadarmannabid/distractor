@@ -141,6 +141,8 @@
     .btn-delete:hover { color: var(--danger); background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.2); }
     .btn-analytics { background: rgba(59,130,246,0.12); color: var(--primary); border-color: rgba(59,130,246,0.35); }
     .btn-analytics:hover { background: rgba(59,130,246,0.22); border-color: var(--primary); }
+    .btn-duplicate { background: rgba(148,163,184,0.12); color: #cbd5e1; border-color: rgba(148,163,184,0.35); }
+    .btn-duplicate:hover { background: rgba(148,163,184,0.22); border-color: #94a3b8; }
 
     .empty-state {
       text-align: center; padding: 80px 20px;
@@ -246,6 +248,7 @@
 
         <div class="card-actions">
           <a href="/instructor/edit-quiz/{{ q.id }}" class="btn-edit">Edit</a>
+          <button type="button" class="btn-duplicate" onclick="duplicateQuiz('{{ q.id }}')" title="Duplicate quiz">Duplicate</button>
           <a href="/instructor/quiz/{{ q.id }}/analytics" class="btn-analytics">Analytics</a>
           {% if q.published %}
             <button class="btn-unpublish" onclick="togglePublish('{{ q.id }}')">Unpublish</button>
@@ -292,6 +295,16 @@
       const res = await fetch('/instructor/delete-quiz/' + quizId, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) location.reload();
+    }
+
+    async function duplicateQuiz(quizId) {
+      const res = await fetch('/instructor/duplicate-quiz/' + quizId, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        window.location.href = '/instructor/edit-quiz/' + data.quiz_id;
+      } else {
+        alert(data.error || 'Could not duplicate quiz.');
+      }
     }
   </script>
 </body>

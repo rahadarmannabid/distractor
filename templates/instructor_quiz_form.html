@@ -922,7 +922,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         normalizedSC[lang] = val;
       }
     }
-    const hasSurveys = prob._has_surveys === true;
+    const hasSurveys = prob._has_surveys === true
+      || (Array.isArray(prob.pre_survey) && prob.pre_survey.length > 0)
+      || (Array.isArray(prob.post_survey) && prob.post_survey.length > 0)
+      || (Array.isArray(prob.recurrent_survey) && prob.recurrent_survey.length > 0);
     const defaults = defaultSurveyFields();
     problemsData.push({
       title: (prob.title || '').trim(),

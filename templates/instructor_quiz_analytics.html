@@ -82,6 +82,38 @@
     .kpi .value { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1.2; }
     .kpi .hint { font-size: 0.65rem; color: #64748b; margin-top: 4px; line-height: 1.3; }
 
+    .status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .status-completed {
+      background: #d1fae5;
+      color: #065f46;
+    }
+    .status-incomplete {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    .col-status { text-align: center; min-width: 80px; }
+    .col-condition { text-align: center; min-width: 50px; }
+    .condition-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .condition-1 { background: #dbeafe; color: #1e40af; }
+    .condition-2 { background: #ede9fe; color: #5b21b6; }
+    .condition-3 { background: #fce7f3; color: #9d174d; }
+
     .chart-grid {
       display: grid;
       grid-template-columns: 1fr;
@@ -510,7 +542,7 @@
 
       <div class="kpi-grid" id="kpi-strip"></div>
 
-      <div class="chart-grid cols-2" style="margin-bottom:14px;">
+      <div class="chart-grid cols-3" style="margin-bottom:14px;">
         <div class="chart-card">
           <div class="chart-card-head">
             <div>
@@ -530,6 +562,16 @@
             <div class="chart-overlay-stat" id="overlay-completion"></div>
           </div>
           <div class="chart-card-body" id="chart-completion"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-head">
+            <div>
+              <h3>Sessions by condition</h3>
+              <p>Total, completed, and incomplete per condition.</p>
+            </div>
+            <div class="chart-overlay-stat" id="overlay-condition"></div>
+          </div>
+          <div class="chart-card-body" id="chart-condition-breakdown"></div>
         </div>
       </div>
 
@@ -614,6 +656,8 @@
               <thead>
                 <tr>
                   <th class="col-user">User</th>
+                  <th class="col-status">Status</th>
+                  <th class="col-condition">Condition</th>
                   <th class="col-time">Time</th>
                   <th class="col-per-problem">Per problem</th>
                   <th>AI gen</th>
@@ -802,6 +846,7 @@
           '<div class="kpi live"><div class="label">Active now</div><div class="value">' + liveTotal + '</div><div class="hint">This server</div></div>',
           '<div class="kpi"><div class="label">Avg. compilation</div><div class="value">' + fmtNum(avgCompilation) + '</div><div class="hint">Mean code runs per session</div></div>',
           '<div class="kpi success"><div class="label">Completed</div><div class="value">' + (data.completed_assignments || 0) + '</div><div class="hint">Final submit</div></div>',
+          '<div class="kpi' + ((data.incomplete_sessions || 0) > 0 ? ' warn' : '') + '"><div class="label">Incomplete</div><div class="value">' + (data.incomplete_sessions || 0) + '</div><div class="hint">Left without submitting</div></div>',
           '<div class="kpi"><div class="label">Med. session time</div><div class="value">' + fmtNum(summary.median_session_time_seconds) + '</div><div class="hint">sec · completed (focus if logged)</div></div>',
           '<div class="kpi warn"><div class="label">Med. AI gen</div><div class="value">' + fmtNum(summary.median_ai_generations) + '</div><div class="hint">per session</div></div>',
           '<div class="kpi"><div class="label">Accepted</div><div class="value">' + totalAccepts + '</div><div class="hint">Σ all · med ' + fmtNum(medAccept) + '/session</div></div>',
@@ -831,7 +876,8 @@
         var comp = data.completion_by_problem || [];
         var compCats = ['Total'].concat(labels.map(function(_, i) { return 'P' + (i + 1); }));
         var compData = [data.completed_assignments || 0].concat(comp);
-        document.getElementById('overlay-completion').innerHTML = '<strong>' + (data.completed_assignments || 0) + '</strong> completed\n' + n + ' sessions';
+        var incompleteN = data.incomplete_sessions || 0;
+        document.getElementById('overlay-completion').innerHTML = '<strong>' + (data.completed_assignments || 0) + '</strong> completed' + (incompleteN > 0 ? ' · <strong>' + incompleteN + '</strong> incomplete' : '') + '\n' + n + ' sessions';
         initChart('chart-completion', Object.assign(baseOption(), {
           grid: { left: 40, right: 12, top: 20, bottom: 36 },
           xAxis: { type: 'category', data: compCats, axisLine: { lineStyle: { color: THEME.border } }, axisLabel: { color: THEME.text, fontSize: 10, interval: 0 } },
@@ -847,6 +893,66 @@
             ]), borderRadius: [4, 4, 0, 0] },
           }],
         }));
+
+        // --- Condition breakdown grouped bar chart ---
+        var cb = data.condition_breakdown || {};
+        var condLabels = (cb.conditions || []).map(function(c) { return c === 'unknown' ? 'Unknown' : 'Condition ' + c; });
+        var condTotals = cb.totals || [];
+        var condCompleted = cb.completed || [];
+        var condIncomplete = cb.incomplete || [];
+        if (condLabels.length > 0) {
+          var overlayParts = [];
+          for (var ci = 0; ci < condLabels.length; ci++) {
+            overlayParts.push(condLabels[ci] + ': ' + condTotals[ci]);
+          }
+          document.getElementById('overlay-condition').innerHTML = overlayParts.join(' · ');
+          initChart('chart-condition-breakdown', Object.assign(baseOption(), {
+            grid: { left: 40, right: 12, top: 30, bottom: 36 },
+            legend: {
+              data: ['Total', 'Completed', 'Incomplete'],
+              top: 2, right: 8,
+              textStyle: { color: THEME.text, fontSize: 10 },
+              itemWidth: 12, itemHeight: 8, itemGap: 10
+            },
+            xAxis: { type: 'category', data: condLabels, axisLine: { lineStyle: { color: THEME.border } }, axisLabel: { color: THEME.text, fontSize: 10, interval: 0 } },
+            yAxis: { type: 'value', min: 0, minInterval: 1, scale: false, splitLine: { lineStyle: { color: THEME.grid } }, axisLabel: { color: THEME.text, fontSize: 10 } },
+            series: [
+              {
+                name: 'Total',
+                type: 'bar',
+                data: condTotals,
+                barMaxWidth: 28,
+                itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                  { offset: 0, color: '#60a5fa' },
+                  { offset: 1, color: '#2563eb' },
+                ]), borderRadius: [4, 4, 0, 0] },
+              },
+              {
+                name: 'Completed',
+                type: 'bar',
+                data: condCompleted,
+                barMaxWidth: 28,
+                itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                  { offset: 0, color: '#34d399' },
+                  { offset: 1, color: '#059669' },
+                ]), borderRadius: [4, 4, 0, 0] },
+              },
+              {
+                name: 'Incomplete',
+                type: 'bar',
+                data: condIncomplete,
+                barMaxWidth: 28,
+                itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                  { offset: 0, color: '#fbbf24' },
+                  { offset: 1, color: '#d97706' },
+                ]), borderRadius: [4, 4, 0, 0] },
+              }
+            ],
+          }));
+        } else {
+          document.getElementById('overlay-condition').innerHTML = 'No condition data';
+          document.getElementById('chart-condition-breakdown').innerHTML = '<div style="text-align:center;color:#64748b;padding:32px 12px;font-size:0.8rem;">No condition data available.</div>';
+        }
 
         var tt = sumBox.total_time_seconds || [];
         var tpm = sumBox.time_per_problem_seconds || [];
@@ -1252,6 +1358,7 @@
 
             var uidEnc = encodeURIComponent(String(row.user_id || ''));
             var uidRaw = String(row.user_id || '');
+            var isCompleted = !!row.completed_assignment;
             return {
               user:
                 '<a class="user-log-link" href="/instructor/quiz/' +
@@ -1261,6 +1368,12 @@
                 '" title="Open AI activity log for this user">' +
                 escHtml(uidRaw) +
                 '</a>',
+              status: isCompleted
+                ? '<span class="status-badge status-completed">Completed</span>'
+                : '<span class="status-badge status-incomplete">Incomplete</span>',
+              condition: row.condition != null
+                ? '<span class="condition-badge condition-' + row.condition + '">C' + row.condition + '</span>'
+                : '<span class="cell-muted">—</span>',
               time: formatTimeCell(row),
               perProblem: '<div class="cell-multi per-problem-mini-wrap">' + perProblemHtml + '</div>',
               aiGen: formatNum(row.ai_generated_total, 0),
@@ -1306,6 +1419,8 @@
               var tr = document.createElement('tr');
               tr.innerHTML =
                 '<td class="col-user">' + cols.user + '</td>' +
+                '<td class="col-status">' + cols.status + '</td>' +
+                '<td class="col-condition">' + cols.condition + '</td>' +
                 '<td class="col-time">' + cols.time + '</td>' +
                 '<td class="col-per-problem">' + cols.perProblem + '</td>' +
                 '<td class="col-ai">' + escHtml(cols.aiGen) + '</td>' +

@@ -207,14 +207,32 @@ def _normalize_quiz_data(quiz_data: dict) -> dict:
                 prob["test_cases"] = ""
             if not prob.get("_has_surveys"):
                 prob["_has_surveys"] = True
-                prob["pre_survey_enabled"] = bool(quiz_pre)
-                prob["pre_survey"] = quiz_pre
-                prob["post_survey_enabled"] = bool(quiz_post)
-                prob["post_survey"] = quiz_post
-                prob["recurrent_survey_enabled"] = bool(quiz_rec)
-                prob["recurrent_survey"] = quiz_rec
-                prob["recurrent_survey_interval"] = quiz_rec_interval
-                prob["recurrent_survey_start"] = quiz_rec_start
+                # If this problem already has its own survey question lists, do not replace them
+                # with quiz-level copies (often empty) — that wiped problem 2+ on duplicate / load.
+                has_own_surveys = any(
+                    len(prob.get(k) or []) > 0
+                    for k in ("pre_survey", "post_survey", "recurrent_survey")
+                )
+                if has_own_surveys:
+                    if "pre_survey_enabled" not in prob:
+                        prob["pre_survey_enabled"] = bool(prob.get("pre_survey"))
+                    if "post_survey_enabled" not in prob:
+                        prob["post_survey_enabled"] = bool(prob.get("post_survey"))
+                    if "recurrent_survey_enabled" not in prob:
+                        prob["recurrent_survey_enabled"] = bool(prob.get("recurrent_survey"))
+                    if "recurrent_survey_interval" not in prob:
+                        prob["recurrent_survey_interval"] = quiz_rec_interval
+                    if "recurrent_survey_start" not in prob:
+                        prob["recurrent_survey_start"] = quiz_rec_start
+                else:
+                    prob["pre_survey_enabled"] = bool(quiz_pre)
+                    prob["pre_survey"] = quiz_pre
+                    prob["post_survey_enabled"] = bool(quiz_post)
+                    prob["post_survey"] = quiz_post
+                    prob["recurrent_survey_enabled"] = bool(quiz_rec)
+                    prob["recurrent_survey"] = quiz_rec
+                    prob["recurrent_survey_interval"] = quiz_rec_interval
+                    prob["recurrent_survey_start"] = quiz_rec_start
 
     return quiz_data
 
@@ -467,6 +485,99 @@ async def save_quiz(request: Request, payload: dict = Body(...)):
         db.reference(f"instructors/{sanitize_key(email)}/quizzes/{quiz_id}").set(True)
 
     return JSONResponse({"success": True, "quiz_id": quiz_id, "access_code": access_code})
+
+
+@router.post("/duplicate-quiz/{quiz_id}")
+async def duplicate_quiz(request: Request, quiz_id: str):
+    """Copy an existing quiz to a new draft (new id, access code, and asset folder)."""
+    email = _require_instructor(request)
+    if not email:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    fb = _get_firebase()
+    if not fb:
+        return JSONResponse({"success": False, "error": "Database unavailable"}, status_code=503)
+
+    from firebase_admin import db
+
+    existing = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
+    if not existing:
+        return JSONResponse({"success": False, "error": "Quiz not found"}, status_code=404)
+    if existing.get("created_by") != email:
+        return JSONResponse({"success": False, "error": "Not authorised"}, status_code=403)
+
+    src_quiz = _normalize_quiz_data(copy.deepcopy(existing))
+    problems = copy.deepcopy(src_quiz.get("problems", []))
+    if not problems or not isinstance(problems, list):
+        return JSONResponse({"success": False, "error": "Quiz has no problems to copy."}, status_code=400)
+
+    first_prob_title = (problems[0].get("title") or "").strip() if problems else ""
+    base_teaser = (src_quiz.get("teaser") or "").strip()
+    if base_teaser:
+        teaser = base_teaser + " (Copy)"
+    elif first_prob_title:
+        teaser = first_prob_title + " (Copy)"
+    else:
+        teaser = "Quiz (Copy)"
+    title = teaser or first_prob_title or "Quiz"
+
+    raw_conds = src_quiz.get("conditions") or [1]
+    conditions: List[int] = []
+    for c in raw_conds:
+        try:
+            ic = int(c)
+        except (TypeError, ValueError):
+            continue
+        if ic in (1, 2, 3):
+            conditions.append(ic)
+    if not conditions:
+        conditions = [1]
+
+    new_id = str(uuid.uuid4())
+    access_code = _generate_access_code()
+    now = datetime.utcnow().isoformat()
+
+    src_dir = QUIZ_ASSETS_DIR / quiz_id
+    dst_dir = QUIZ_ASSETS_DIR / new_id
+    if src_dir.exists() and src_dir.is_dir():
+        if dst_dir.exists():
+            shutil.rmtree(dst_dir, ignore_errors=True)
+        shutil.copytree(src_dir, dst_dir)
+
+    quiz_data = {
+        "id": new_id,
+        "title": title,
+        "description": "",
+        "teaser": teaser,
+        "problems": problems,
+        "allowed_languages": src_quiz.get("allowed_languages", ["python", "javascript", "c"]),
+        "time_limit_minutes": int(src_quiz.get("time_limit_minutes", 0)),
+        "conditions": conditions,
+        "recurrent_survey": copy.deepcopy(src_quiz.get("recurrent_survey", [])),
+        "recurrent_survey_interval": int(src_quiz.get("recurrent_survey_interval", 4)),
+        "recurrent_survey_start": int(src_quiz.get("recurrent_survey_start", 5)),
+        "pre_survey": copy.deepcopy(src_quiz.get("pre_survey", [])),
+        "post_survey": copy.deepcopy(src_quiz.get("post_survey", [])),
+        "published": False,
+        "availability_start": src_quiz.get("availability_start") or None,
+        "availability_end": src_quiz.get("availability_end") or None,
+        "paste_allowed": src_quiz.get("paste_allowed", True),
+        "tab_tracking_enabled": src_quiz.get("tab_tracking_enabled", True),
+        "access_code": access_code,
+        "created_by": email,
+        "created_at": now,
+        "updated_at": now,
+    }
+    _rewrite_quiz_image_ids(quiz_data, quiz_id, new_id)
+
+    db.reference(f"quizzes/{new_id}").set(quiz_data)
+    db.reference(f"quiz_access/{access_code}").set({
+        "quiz_id": new_id,
+        "created_at": now,
+    })
+    db.reference(f"instructors/{sanitize_key(email)}/quizzes/{new_id}").set(True)
+
+    return JSONResponse({"success": True, "quiz_id": new_id, "access_code": access_code})
 
 
 @router.get("/edit-quiz/{quiz_id}", response_class=HTMLResponse)
@@ -738,8 +849,10 @@ async def quiz_activity_log_page(
 
     sm = payload.get("session_metadata")
     prog_lang = ""
+    session_condition = None
     if isinstance(sm, dict):
         prog_lang = str(sm.get("programming_language") or "").strip()
+        session_condition = sm.get("condition")
 
     log = build_user_ai_activity_log(payload, labels)
     rows = log.get("rows") or []
@@ -754,6 +867,7 @@ async def quiz_activity_log_page(
             "user_id": log.get("user_id") or uid,
             "user_id_query": uid_q,
             "programming_language": prog_lang,
+            "condition": session_condition,
             "log_rows": rows,
             "problem_tables": problem_tables,
             "session_id": log.get("session_id"),

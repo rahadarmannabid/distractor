@@ -5,10 +5,10 @@
     "type": "multiple_choice",
     "required": true,
     "options": [
-      "Freshman",
-      "Sophomore",
-      "Junior",
-      "Senior"
+      "1st year",
+      "2nd year",
+      "3rd year",
+      "4th year"
     ],
     "help_text": ""
   },
@@ -42,6 +42,50 @@
     "image": {
       "src": "github-copilot-animation.gif"
     }
+  },
+  {
+    "id": "pre_mental_q1",
+    "question": "Please describe in your own words, how GitHub Copilot generates code suggestions.",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Explain your understanding...",
+    "min_length": 30,
+    "max_length": 1000
+  },
+  {
+    "id": "pre_mental_q2",
+    "question": "Where do you think GitHub Copilot obtains the contextual information it uses to generate the next lines of code?",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Describe how you think context is used...",
+    "min_length": 30,
+    "max_length": 1000
+  },
+  {
+    "id": "pre_mental_q3",
+    "question": "Please describe what might cause GitHub Copilot's code suggestions to be incorrect.",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Describe potential causes...",
+    "min_length": 30,
+    "max_length": 1000
+  },
+  {
+    "id": "pre_mental_q4",
+    "question": "Why might GitHub Copilot's interpretation of your goal differ from your original intention?",
+    "type": "open_ended",
+    "required": true,
+    "options": [],
+    "help_text": "",
+    "placeholder": "Describe possible reasons...",
+    "min_length": 30,
+    "max_length": 1000
   },
   {
     "id": "pre_trust_open",
@@ -165,50 +209,6 @@
       "maxLabel": "Strongly agree"
     },
     "help_text": ""
-  },
-  {
-    "id": "pre_mental_q1",
-    "question": "Please describe in your own words, how GitHub Copilot generates code suggestions.",
-    "type": "open_ended",
-    "required": true,
-    "options": [],
-    "help_text": "",
-    "placeholder": "Explain your understanding...",
-    "min_length": 30,
-    "max_length": 1000
-  },
-  {
-    "id": "pre_mental_q2",
-    "question": "How do you think GitHub Copilot obtains contextual information to generate next lines?",
-    "type": "open_ended",
-    "required": true,
-    "options": [],
-    "help_text": "",
-    "placeholder": "Describe how you think context is used...",
-    "min_length": 30,
-    "max_length": 1000
-  },
-  {
-    "id": "pre_mental_q3",
-    "question": "Please describe what might cause GitHub Copilot's code suggestions to be incorrect.",
-    "type": "open_ended",
-    "required": true,
-    "options": [],
-    "help_text": "",
-    "placeholder": "Describe potential causes...",
-    "min_length": 30,
-    "max_length": 1000
-  },
-  {
-    "id": "pre_mental_q4",
-    "question": "Why does GitHub Copilot generate solutions that do not match your intention?",
-    "type": "open_ended",
-    "required": true,
-    "options": [],
-    "help_text": "",
-    "placeholder": "Describe possible reasons...",
-    "min_length": 30,
-    "max_length": 1000
   },
   {
     "id": "pre_accuracy_q1",

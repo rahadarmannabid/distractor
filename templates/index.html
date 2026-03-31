@@ -2077,7 +2077,7 @@
                         <button class="copilot-popup__icon-btn copilot-popup__icon-btn--reject" id="copilotRejectBtn" title="Reject (Esc)">
                             <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                         </button>
-                        <span class="copilot-popup__hint"><kbd>Tab</kbd> accept · <kbd>Esc</kbd> reject</span>
+                        <span class="copilot-popup__hint"><kbd>Tab</kbd> accept · <kbd>Esc</kbd> reject · typing dismisses</span>
                     </div>
                 </div>
 
@@ -2194,6 +2194,7 @@ let lastSaveTime = null;
 var _lastServerEditorCheckpointAt = 0;
 var SERVER_EDITOR_CHECKPOINT_MIN_MS = 12000;
 var _serverEditorCheckpointTimer = null;
+var _savePending = false;
 
 function getPendingActivityStorageKey() {
     if (!currentSession.sessionId) return null;
@@ -2224,6 +2225,14 @@ async function postActivityBatchToServer(activities) {
         })
     });
     return response.ok;
+}
+
+/** Serialize activity uploads so many concurrent batches do not stampede the server. */
+var _activityUploadChain = Promise.resolve();
+function queueActivityBatchUpload() {
+    _activityUploadChain = _activityUploadChain.then(function() {
+        return uploadActivityBatch();
+    });
 }
 
 async function flushPendingActivityQueueFromStorage() {
@@ -2402,6 +2411,7 @@ function saveProgress() {
             addTerminalOutput('⚠️ Storage quota exceeded. Consider clearing browser cache.', 'warning');
         }
     }
+    return Promise.resolve();
 }
 
 function restoreProgress() {
@@ -2565,6 +2575,33 @@ function handleDismissRestore() {
     clearProgress();
 }
 
+function showResumedSessionBanner() {
+    const existing = document.getElementById('resumedSessionBanner');
+    if (existing) return;
+
+    const banner = document.createElement('div');
+    banner.className = 'restore-banner';
+    banner.id = 'resumedSessionBanner';
+    banner.innerHTML = `
+        <div class="restore-banner-content">
+            <span style="font-size: 20px;">🔄</span>
+            <div>
+                <strong>Session Resumed</strong><br>
+                <small>Your previous work has been restored. You can continue from where you left off.</small>
+            </div>
+        </div>
+        <div class="restore-banner-buttons">
+            <button class="restore-btn" onclick="document.getElementById('resumedSessionBanner').remove()">Got it</button>
+        </div>
+    `;
+    document.body.insertBefore(banner, document.body.firstChild);
+    // Auto-dismiss after 8 seconds
+    setTimeout(() => {
+        const b = document.getElementById('resumedSessionBanner');
+        if (b) b.remove();
+    }, 8000);
+}
+
 function clearProgress() {
     const key = getAutosaveKey();
     if (key) {
@@ -2582,8 +2619,13 @@ function startAutoSave() {
     }
     
     autosaveTimer = setInterval(() => {
-        if (currentSession.sessionId && editor) {
-            saveProgress();
+        if (currentSession.sessionId && editor && !_savePending) {
+            _savePending = true;
+            try {
+                saveProgress();
+            } finally {
+                _savePending = false;
+            }
         }
     }, AUTOSAVE_INTERVAL);
     
@@ -2604,7 +2646,13 @@ function onEditorChange() {
     }
     
     editorChangeTimeout = setTimeout(() => {
-        saveProgress();
+        if (_savePending) return;
+        _savePending = true;
+        try {
+            saveProgress();
+        } finally {
+            _savePending = false;
+        }
     }, 3000);
 }
 // END AUTO-SAVE FUNCTIONALITY
@@ -2670,6 +2718,28 @@ const ACTIVITY_BATCH_SIZE = 10;
     const minFontSize = 10;
     const maxFontSize = 24;
     let isAnalyzing = false;
+    /** After user inserts a newline, wait this long with no further edits before /analyze (reading mode). */
+    var NEWLINE_IDLE_MS = 2000;
+    var _newlineIdleTimer = null;
+
+    function clearNewlineIdleTimer() {
+        if (_newlineIdleTimer) {
+            clearTimeout(_newlineIdleTimer);
+            _newlineIdleTimer = null;
+        }
+    }
+
+    /** Schedule /analyze after NEWLINE_IDLE_MS if not already waiting for a suggestion. */
+    function scheduleNewlineIdleAnalyze() {
+        clearNewlineIdleTimer();
+        if (aiDisabled || !currentSession || !currentSession.sessionId) return;
+        if (isAnalyzing) return;
+        _newlineIdleTimer = setTimeout(function() {
+            _newlineIdleTimer = null;
+            analyzeCurrentCode({ skipPreviousCodeCheck: true, triggerReason: 'newline_idle_2s' });
+        }, NEWLINE_IDLE_MS);
+    }
+
     /** Base idle delay (ms) before blank-line idle can trigger /analyze (after rejects use longer delays). */
     var AI_SUGGESTION_IDLE_MS = 3000;
     /** Blank-line idle backoff after rejecting without editing: tier 1 → 15s, tier 2+ → 45s. */
@@ -2705,6 +2775,8 @@ const ACTIVITY_BATCH_SIZE = 10;
 
 // ADD submission state flag
 let isSubmissionInProgress = false;
+/** Prevents double submit while /analyze and download run before submitButton is disabled. */
+let _submitInflight = false;
 
     // UI Elements
     const loadingScreen = document.getElementById('loadingScreen');
@@ -2970,7 +3042,7 @@ function logActivity(activityType, activityDetails = {}, sessionContext = {}) {
     activityBuffer.push(activity);
     
     if (activityBuffer.length >= ACTIVITY_BATCH_SIZE) {
-        uploadActivityBatch();
+        queueActivityBatchUpload();
     }
 }
 
@@ -3141,11 +3213,20 @@ function retrieveCachedSubmissionData() {
 function clearCachedSubmissionData() {
     try {
         sessionStorage.removeItem('pendingSubmissionData');
-        if (currentSession && currentSession.sessionId) {
-            sessionStorage.removeItem(`perProblemCodes_${currentSession.sessionId}`);
-        }
+        // perProblemCodes_ is intentionally NOT cleared here — it accumulates codes
+        // across all problems and must survive until the final post-quiz download + submit.
     } catch (error) {
         console.error('❌ Failed to clear cached data:', error);
+    }
+}
+
+function clearAllSessionCodes() {
+    try {
+        if (currentSession && currentSession.sessionId) {
+            localStorage.removeItem(`perProblemCodes_${currentSession.sessionId}`);
+        }
+    } catch (error) {
+        console.error('❌ Failed to clear per-problem codes:', error);
     }
 }
 
@@ -3387,6 +3468,9 @@ async function initializeFromURL() {
             nextPeriodicSurveyAt: authData.periodicSurveyStart ?? null,
             periodicSurveysCompleted: 0,
             finalSurveyDisabled: authData.finalSurveyDisabled === true,
+            // Session-resume fields
+            resumed: authData.resumed === true,
+            editorDraftCode: authData.editorDraftCode || null,
             guessLogCount: 0,
             descLogCount: 0,
             suggestionsLogCount: 0,
@@ -3483,22 +3567,61 @@ async function initializeFromURL() {
                 }
             }
 
+            function assignmentPanelHtmlIsPresent(s) {
+                return typeof s === 'string' && s.trim().length > 0;
+            }
+            function assignmentTextLooksLikeHtml(s) {
+                if (typeof s !== 'string' || !s.trim()) return false;
+                if (/<[a-z][\s\S]*>/i.test(s)) return true;
+                if (/&lt;[a-z]/i.test(s)) return true;
+                return false;
+            }
+            function decodeHtmlEntities(str) {
+                var ta = document.createElement('textarea');
+                ta.innerHTML = str;
+                return ta.value;
+            }
+            function applyAssignmentPanelPayload(data) {
+                var htmlRaw = data.html;
+                if (htmlRaw == null && data && typeof data === 'object' && 'Html' in data) {
+                    htmlRaw = data.Html;
+                }
+                if (assignmentPanelHtmlIsPresent(htmlRaw)) {
+                    var toInsert = htmlRaw;
+                    // Double-encoded fragments (&amp;lt;p&amp;gt;) or entity-only bodies after wrappers (<div>…&lt;p&gt;…)
+                    if (/&amp;lt;[a-z]/i.test(toInsert)) {
+                        toInsert = decodeHtmlEntities(toInsert);
+                    } else if (/&lt;[a-z]/i.test(toInsert) && !/<[a-z]/i.test(toInsert.slice(0, Math.min(toInsert.length, 500)))) {
+                        toInsert = decodeHtmlEntities(toInsert);
+                    }
+                    problemBody.innerHTML = toInsert;
+                    applyHeadingFromDom();
+                    return;
+                }
+                if (typeof data.text === 'string' && data.text.trim()) {
+                    var t = data.text;
+                    if (assignmentTextLooksLikeHtml(t)) {
+                        if (/&lt;[a-z]/i.test(t) && !/<[a-z]/i.test(t.slice(0, Math.min(t.length, 500)))) {
+                            t = decodeHtmlEntities(t);
+                        }
+                        problemBody.innerHTML = t;
+                    } else {
+                        problemBody.textContent = t;
+                    }
+                    if (headingEl) headingEl.textContent = defaultProblemHeading();
+                    return;
+                }
+                problemBody.innerHTML = '<span class="problem-panel__placeholder">No problem description available for this assignment.</span>';
+                if (headingEl) headingEl.textContent = 'Problem Description';
+            }
+
             fetch('/assignment-text/' + encodeURIComponent(authData.assignmentKey) + '?problem_index=' + (currentSession.currentProblemIndex || 0))
                 .then(function(res) {
                     if (!res.ok) throw new Error(res.status);
                     return res.json();
                 })
                 .then(function(data) {
-                    if (data.html) {
-                        problemBody.innerHTML = data.html;
-                        applyHeadingFromDom();
-                    } else if (data.text) {
-                        problemBody.textContent = data.text;
-                        if (headingEl) headingEl.textContent = defaultProblemHeading();
-                    } else {
-                        problemBody.innerHTML = '<span class="problem-panel__placeholder">No problem description available for this assignment.</span>';
-                        if (headingEl) headingEl.textContent = 'Problem Description';
-                    }
+                    applyAssignmentPanelPayload(data);
                 })
                 .catch(function() {
                     problemBody.innerHTML = '<span class="problem-panel__placeholder">No problem description available for this assignment.</span>';
@@ -3628,9 +3751,14 @@ async function initializeFromURL() {
         initProblemPanelTabs();
         refreshProblemPanelAiHistory();
         
-        // Check for saved progress (skip on non-first problems — starter code is already set)
+        // Check for saved progress / resumed session
         setTimeout(() => {
-            if (currentSession.currentProblemIndex === 0) {
+            if (currentSession.resumed) {
+                // Server returned the same session with the last saved editor draft.
+                // The code was already loaded into the editor as `initialCode`; just
+                // show a non-blocking banner so the user knows they are continuing.
+                showResumedSessionBanner();
+            } else if (currentSession.currentProblemIndex === 0) {
                 const savedProgress = restoreProgress();
                 if (savedProgress) {
                     const ageMinutes = (Date.now() - savedProgress.timestamp) / (1000 * 60);
@@ -3665,7 +3793,7 @@ async function initializeFromURL() {
             // Set up periodic activity uploads
             setInterval(() => {
                 if (activityBuffer.length > 0) {
-                    uploadActivityBatch();
+                    queueActivityBatchUpload();
                 }
             }, 30000); // Upload every 30 seconds
 
@@ -3677,7 +3805,7 @@ async function initializeFromURL() {
 
             window.addEventListener('online', function() {
                 flushPendingActivityQueueFromStorage();
-                if (activityBuffer.length > 0) uploadActivityBatch();
+                if (activityBuffer.length > 0) queueActivityBatchUpload();
                 serverEditorCheckpoint();
             });
             setTimeout(function() { flushPendingActivityQueueFromStorage(); }, 2000);
@@ -3743,9 +3871,14 @@ async function initializeEditor() {
 
                 const selectedLanguage = currentSession.programmingLanguage || 'javascript';
                 
-                // Check if starter code is available from session
+                // Determine initial editor content.
+                // Priority: (1) server-side editor draft from a resumed session,
+                //           (2) starter code for the assignment,
+                //           (3) language default placeholder.
                 let initialCode;
-                if (currentSession.starterCode) {
+                if (currentSession.editorDraftCode) {
+                    initialCode = currentSession.editorDraftCode;
+                } else if (currentSession.starterCode) {
                     initialCode = currentSession.starterCode;
                 } else {
                     initialCode = languageDefaults[selectedLanguage] || '// Start coding here...\n';
@@ -3804,6 +3937,9 @@ async function initializeEditor() {
 
                 // Enhanced Monaco Editor event handlers with time tracking
                 window.editor.onDidChangeModelContent((e) => {
+                    if (isCopilotPopupPending() && !_copilotSuppressTypingReject) {
+                        _copilotHandleReject('typing');
+                    }
                     _lastActivityForBlankIdle = Date.now();
                     resetBlankIdleRejectBackoff();
                     updateUserInteraction();
@@ -3812,7 +3948,8 @@ async function initializeEditor() {
                     const changes = e.changes;
                     const model = window.editor.getModel();
                     const currentContent = model.getValue();
-                    
+                    var eventHasNewline = false;
+
                     for (const change of changes) {
                         const isInsertion = change.text.length > 0;
                         const isDeletion = change.rangeLength > 0;
@@ -3852,16 +3989,25 @@ async function initializeEditor() {
                             scheduleCodeEditingEnd();
                         }
 
-                        // 1) User goes to next line (Enter / inserted newline) → start suggestion
                         if (change.text.includes('\n')) {
-                            _lastBlankIdleAnalyzeAt = Date.now();
-                            analyzeCurrentCode({ skipPreviousCodeCheck: true, triggerReason: 'newline' });
-                            break;
+                            eventHasNewline = true;
                         }
+                    }
+
+                    // 1) Newline → wait NEWLINE_IDLE_MS idle (reading mode); no immediate /analyze.
+                    // While isAnalyzing, do not schedule (no API until current suggestion finishes).
+                    if (eventHasNewline) {
+                        _lastBlankIdleAnalyzeAt = Date.now();
+                        if (!isAnalyzing) {
+                            scheduleNewlineIdleAnalyze();
+                        }
+                    } else {
+                        clearNewlineIdleTimer();
                     }
                 });
 
-                // 2) Blank-line idle: 3s default; 15s / 45s after repeated rejects (until user edits)
+                // 2) Blank-line idle: cursor on an empty line + no typing for AI_SUGGESTION_IDLE_MS (3s default;
+                //    15s / 45s after repeated rejects) → /analyze. Independent of newline+2s above.
                 setInterval(function() {
                     if (aiDisabled || !window.editor || isAnalyzing) return;
                     if (isCopilotPopupPending()) return;
@@ -4078,6 +4224,8 @@ async function analyzeCurrentCode(opts) {
     // Don't start new analysis if code hasn't changed
     if (!opts.skipPreviousCodeCheck && code === previousCode) return;
 
+    clearNewlineIdleTimer();
+
     // Set analyzing flag
     isAnalyzing = true;
     previousCode = code;
@@ -4260,8 +4408,13 @@ var _copilotOriginPosition = null;   // cursor pos when suggestion was generated
 var _copilotDismissAttached = false;
 /** Set when a suggestion is shown; cleared on accept/reject or forced dismiss. */
 var _pendingSuggestionMeta = null;
+/** True while popup is being torn down so nested handlers do not treat it as still open. */
+var _copilotPopupDismissedByUser = false;
+/** True during accept() programmatic executeEdits — do not treat as typing-reject. */
+var _copilotSuppressTypingReject = false;
 
 function isCopilotPopupPending() {
+    if (_copilotPopupDismissedByUser) return false;
     var popup = document.getElementById('copilotPopup');
     return !!(popup && popup.style.display === 'block');
 }
@@ -4401,9 +4554,11 @@ function showCopilotPopup(explanation, suggestionCode, suggestionType, suggestio
 
         popup.classList.remove('closing');
         popup.style.display = 'block';
+        _copilotPopupDismissedByUser = false;
         _copilotPositionAtCursor();
+        // Keep editor editable so typing counts as reject (explicit dismiss); teaser stays read-only.
         if (window.editor && !(typeof teaserActive !== 'undefined' && teaserActive)) {
-            window.editor.updateOptions({ readOnly: true, readOnlyMessage: { value: '' } });
+            window.editor.updateOptions({ readOnly: false, readOnlyMessage: { value: '' } });
         }
         _copilotAttachKeyboard();
         return true;
@@ -4417,6 +4572,7 @@ function hideCopilotPopup() {
     try {
         var popup = document.getElementById('copilotPopup');
         if (!popup || popup.style.display === 'none') return;
+        _copilotPopupDismissedByUser = true;
         _copilotDetachKeyboard();
         _copilotRestoreEditorAfterPopup();
         popup.classList.add('closing');
@@ -4485,32 +4641,37 @@ function _copilotHandleAccept() {
         var insertColumn;
         var text;
 
-        if (lineContent.trim() === '') {
-            insertColumn = 1;
-            var endColumn = lineContent.length + 1;
-            text = reindented.join('\n');
-            window.editor.executeEdits('copilot-popup-accept', [{
-                range: {
-                    startLineNumber: insertLine,
-                    startColumn:     insertColumn,
-                    endLineNumber:   insertLine,
-                    endColumn:       endColumn
-                },
-                text: text
-            }]);
-        } else {
-            insertColumn = lineContent.length + 1;
-            text = '\n' + reindented.join('\n');
+        _copilotSuppressTypingReject = true;
+        try {
+            if (lineContent.trim() === '') {
+                insertColumn = 1;
+                var endColumn = lineContent.length + 1;
+                text = reindented.join('\n');
+                window.editor.executeEdits('copilot-popup-accept', [{
+                    range: {
+                        startLineNumber: insertLine,
+                        startColumn:     insertColumn,
+                        endLineNumber:   insertLine,
+                        endColumn:       endColumn
+                    },
+                    text: text
+                }]);
+            } else {
+                insertColumn = lineContent.length + 1;
+                text = '\n' + reindented.join('\n');
 
-            window.editor.executeEdits('copilot-popup-accept', [{
-                range: {
-                    startLineNumber: insertLine,
-                    startColumn:     insertColumn,
-                    endLineNumber:   insertLine,
-                    endColumn:       insertColumn
-                },
-                text: text
-            }]);
+                window.editor.executeEdits('copilot-popup-accept', [{
+                    range: {
+                        startLineNumber: insertLine,
+                        startColumn:     insertColumn,
+                        endLineNumber:   insertLine,
+                        endColumn:       insertColumn
+                    },
+                    text: text
+                }]);
+            }
+        } finally {
+            _copilotSuppressTypingReject = false;
         }
 
         var inserted = text.split('\n');
@@ -4547,7 +4708,7 @@ function _copilotHandleAccept() {
     resetBlankIdleAfterSuggestionDismiss();
 }
 
-function _copilotHandleReject() {
+function _copilotHandleReject(dismissReason) {
     try {
         recordSuggestionResponse(false);
         var codeAtReject = '';
@@ -4559,7 +4720,8 @@ function _copilotHandleReject() {
         logActivity('copilot_popup_reject', {
             suggestion_type: _copilotPopupType,
             suggestion_text: _copilotPopupText.substring(0, 80),
-            user_code_snapshot: codeAtReject
+            user_code_snapshot: codeAtReject,
+            dismiss_reason: dismissReason || 'explicit'
         });
         currentSession.suggestionClickCount++;
         checkSuggestionBasedPeriodicSurvey();
@@ -4572,7 +4734,7 @@ function _copilotHandleReject() {
 }
 
 function _copilotEnsureDismissListener() {
-    // Intentionally empty: suggestions are dismissed only via accept/reject (editor is read-only).
+    // Typing/paste while popup is open dismisses via onDidChangeModelContent → _copilotHandleReject('typing').
 }
 
 function _copilotBindButtons() {
@@ -4580,7 +4742,7 @@ function _copilotBindButtons() {
         var btnAccept = document.getElementById('copilotAcceptBtn');
         var btnReject = document.getElementById('copilotRejectBtn');
         if (btnAccept) btnAccept.addEventListener('click', _copilotHandleAccept);
-        if (btnReject) btnReject.addEventListener('click', _copilotHandleReject);
+        if (btnReject) btnReject.addEventListener('click', function() { _copilotHandleReject('button'); });
     } catch (e) {
         console.warn('Copilot button binding error:', e);
     }
@@ -4599,7 +4761,7 @@ function _copilotOnKeyDown(e) {
     } else if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        _copilotHandleReject();
+        _copilotHandleReject('escape');
     }
 }
 
@@ -5132,20 +5294,7 @@ async function submitFinalSurvey() {
         
         // Check if post-survey exists
         const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
-        const isLastProblem = (authData.currentProblemIndex || 0) >= (authData.totalProblems || 1) - 1;
-
-        if (!authData.hasPostSurvey && isLastProblem) {
-            // No post-survey and last problem — download code now
-            addTerminalOutput('📥 Downloading your code...', 'info');
-            const downloadSuccess = await downloadCodeFile();
-
-            if (downloadSuccess) {
-                addTerminalOutput('✅ Code file downloaded successfully!', 'success');
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            } else {
-                addTerminalOutput('⚠️ Code download encountered an issue, but submission will continue', 'warning');
-            }
-        }
+        // Code download happens once in proceedWithActualSubmission (all problems + current files / ZIP).
 
         // Check for post-survey or advance to next problem
         await checkAndShowPostSurvey();
@@ -5224,7 +5373,8 @@ function collectDownloadEntriesForIde(userId, assignmentKey, timestampSeg, ext) 
     var perProblemKey = 'perProblemCodes_' + currentSession.sessionId;
     var stored = [];
     try {
-        var raw = sessionStorage.getItem(perProblemKey);
+        // localStorage so codes survive tab closes / crashes
+        var raw = localStorage.getItem(perProblemKey);
         if (raw) stored = JSON.parse(raw);
     } catch (e) {}
     stored.sort(function(a, b) { return a.problemIndex - b.problemIndex; });
@@ -6135,25 +6285,8 @@ async function submitToDatabase() {
         addTerminalOutput('✅ Final Likert skipped (recurrent surveys not enabled for this problem)', 'info');
     }
     
-    // If no final periodic survey was shown, check if we need to download now
-    if ((surveyData.questions.length === 0 || surveyData.finalSurveyResponse || currentSession.finalSurveyDisabled)) {
-        const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
-        const isLastProblem = (authData.currentProblemIndex || 0) >= (authData.totalProblems || 1) - 1;
+    // Code download happens once in proceedWithActualSubmission (all problems + current files / ZIP).
 
-        if (!authData.hasPostSurvey && isLastProblem) {
-            // No post-survey and last problem — download code now
-            addTerminalOutput('📥 Downloading your code...', 'info');
-            const downloadSuccess = await downloadCodeFile();
-
-            if (downloadSuccess) {
-                addTerminalOutput('✅ Code file downloaded successfully!', 'success');
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            } else {
-                addTerminalOutput('⚠️ Code download encountered an issue, but submission will continue', 'warning');
-            }
-        }
-    }
-    
     // Check for post-survey
     await checkAndShowPostSurvey();
 }
@@ -6225,11 +6358,12 @@ async function checkAndShowPostSurvey() {
             if (nextData.status === 'complete') {
                 // All done — fall through to final submission
             } else {
-                // Store current problem's code for combined download at final submission
+                // Store current problem's code for combined download at final submission.
+                // Use localStorage so the codes survive a tab close / crash.
                 const perProblemKey = `perProblemCodes_${currentSession.sessionId}`;
                 let stored = [];
                 try {
-                    const raw = sessionStorage.getItem(perProblemKey);
+                    const raw = localStorage.getItem(perProblemKey);
                     if (raw) stored = JSON.parse(raw);
                 } catch (e) {}
                 stored.push({
@@ -6237,7 +6371,7 @@ async function checkAndShowPostSurvey() {
                     title: nextData.completed_problem_title || `Problem ${currentProbIdx + 1}`,
                     code: code
                 });
-                sessionStorage.setItem(perProblemKey, JSON.stringify(stored));
+                localStorage.setItem(perProblemKey, JSON.stringify(stored));
 
                 // Update authData with next problem info
                 authData.currentProblemIndex = nextData.problem_index;
@@ -6276,6 +6410,16 @@ async function checkAndShowPostSurvey() {
 
 // RENAME the original function
 async function proceedWithActualSubmission() {
+    if (_submitInflight) {
+        addTerminalOutput('Submission already in progress…', 'warning');
+        return;
+    }
+    _submitInflight = true;
+    var submitButtonEarly = document.getElementById('submitButton');
+    if (submitButtonEarly) {
+        submitButtonEarly.disabled = true;
+        submitButtonEarly.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Preparing…</div>';
+    }
     // This is the original submission code
     isSubmissionInProgress = true;
     
@@ -6292,10 +6436,29 @@ async function proceedWithActualSubmission() {
         addTerminalOutput('❌ No cached submission data found!', 'error');
         alert('Submission data was lost. Please try submitting again.');
         isSubmissionInProgress = false;
+        _submitInflight = false;
+        if (submitButtonEarly) {
+            submitButtonEarly.disabled = false;
+            submitButtonEarly.innerHTML = 'SUBMIT';
+        }
         return;
     }
 
     const code = cachedData.code;
+
+    // Local copy of all solutions: prior problems (sessionStorage) + current editor / multi-file → one file or ZIP
+    addTerminalOutput('📥 Downloading your code (all problems in this session)...', 'info');
+    try {
+        const downloadOk = await downloadCodeFile();
+        if (downloadOk) {
+            addTerminalOutput('✅ Your code was saved to your device.', 'success');
+        } else {
+            addTerminalOutput('⚠️ Could not start a code download (empty buffer or ZIP unavailable). Submission will still be sent.', 'warning');
+        }
+    } catch (dlErr) {
+        console.warn('downloadCodeFile', dlErr);
+        addTerminalOutput('⚠️ Code download failed; submission will still be sent.', 'warning');
+    }
     
     submitButton.disabled = true;
     submitButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Submitting...</div>';
@@ -6351,9 +6514,10 @@ async function proceedWithActualSubmission() {
         if (result.firebase_status === 'success') {
             addTerminalOutput(`Database save successful - logging out now...`, 'success');
             
-            // Clear both caches
+            // Clear all caches including accumulated per-problem codes (final submission done)
             clearPeriodicSurveysFromStorage();
-            clearCachedSubmissionData();  // ✅ ADD THIS LINE
+            clearCachedSubmissionData();
+            clearAllSessionCodes();
             
             setTimeout(() => {
                 showSuccessMessage(
@@ -6380,6 +6544,7 @@ async function proceedWithActualSubmission() {
         submitButton.disabled = false;
         submitButton.innerHTML = 'SUBMIT';
         isSubmissionInProgress = false;
+        _submitInflight = false;
     }
     
     clearProgress();

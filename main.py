@@ -20,17 +20,15 @@ import uuid
 import json
 import mimetypes 
 from datetime import datetime, timezone
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any, Iterator, Tuple
 import firebase_admin
 from firebase_admin import credentials, db
 from fastapi.responses import HTMLResponse, RedirectResponse
 import asyncio
 import shlex
-from typing import List, Dict, Optional, Any
 import smtplib
 from email.message import EmailMessage
 import traceback
-from typing import List, Dict, Optional, Any
 from enum import Enum
 import json
 from fastapi.responses import FileResponse
@@ -46,6 +44,11 @@ logger = logging.getLogger(__name__)
 
 # Instructor quiz problem fields may contain HTML from the rich-text editor (Quill).
 _HTML_TAG_RE = re.compile(r"<[a-zA-Z][\w:-]*(?:\s[^>]*)?>")
+# Quill-like tags when stored as entities only (no literal '<' yet) — avoid false positives on "&lt;3"
+_ENTITY_HTML_TAG_OPEN_RE = re.compile(
+    r"&lt;(?:p|br|strong|em|b|i|u|ul|ol|li|div|span|h[1-4]|blockquote|pre|code|a|hr)\b",
+    re.IGNORECASE,
+)
 
 
 def _field_looks_like_html(s: str) -> bool:
@@ -53,79 +56,77 @@ def _field_looks_like_html(s: str) -> bool:
 
 
 def sanitize_instructor_rich_html(raw: Optional[str]) -> str:
-    """Strip unsafe tags/scripts; allow Quill-like formatting (bold, color, hr, lists, links)."""
+    """Strip unsafe tags/scripts; allow Quill-like formatting (bold, color, hr, lists, links).
+
+    Uses nh3 (Rust ammonia) instead of bleach so production (e.g. Koyeb) does not depend on
+    bleach + tinycss2/css_sanitizer imports; a single binary wheel is sufficient.
+    """
     if raw is None or not str(raw).strip():
         return ""
     try:
-        import bleach
-        from bleach.css_sanitizer import CSSSanitizer
+        import nh3
     except ImportError:
-        logger.warning("bleach not installed; escaping problem HTML instead")
+        logger.warning("nh3 not installed; escaping problem HTML instead")
         return html_std.escape(str(raw))
-    css_sanitizer = CSSSanitizer(
-        allowed_css_properties=[
-            "color",
-            "background-color",
-            "text-align",
-            "font-weight",
-            "font-style",
-            "text-decoration",
-            "margin",
-            "margin-left",
-            "padding",
-            "white-space",
-        ]
-    )
-    allowed_tags = [
-        "p",
-        "br",
-        "strong",
-        "b",
-        "em",
-        "i",
-        "u",
-        "s",
-        "strike",
-        "sub",
-        "sup",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "ul",
-        "ol",
-        "li",
-        "a",
-        "blockquote",
-        "pre",
-        "code",
-        "hr",
-        "span",
-        "div",
-    ]
-    allowed_attrs = {
-        "a": ["href", "title", "target", "rel"],
-        "p": ["class", "style"],
-        "span": ["class", "style"],
-        "div": ["class", "style"],
-        "ol": ["class", "style"],
-        "ul": ["class", "style"],
-        "li": ["class", "style"],
-        "h1": ["class", "style"],
-        "h2": ["class", "style"],
-        "h3": ["class", "style"],
-        "h4": ["class", "style"],
-        "blockquote": ["class", "style"],
-        "pre": ["class", "style", "spellcheck"],
-        "code": ["class", "style"],
+
+    tags = frozenset({
+        "p", "br", "strong", "b", "em", "i", "u", "s", "strike",
+        "sub", "sup", "h1", "h2", "h3", "h4", "ul", "ol", "li", "a",
+        "blockquote", "pre", "code", "hr", "span", "div",
+    })
+    attributes = {
+        "a": frozenset({"href", "title", "target", "rel"}),
+        "p": frozenset({"class", "style"}),
+        "span": frozenset({"class", "style"}),
+        "div": frozenset({"class", "style"}),
+        "ol": frozenset({"class", "style"}),
+        "ul": frozenset({"class", "style"}),
+        "li": frozenset({"class", "style"}),
+        "h1": frozenset({"class", "style"}),
+        "h2": frozenset({"class", "style"}),
+        "h3": frozenset({"class", "style"}),
+        "h4": frozenset({"class", "style"}),
+        "blockquote": frozenset({"class", "style"}),
+        "pre": frozenset({"class", "style", "spellcheck"}),
+        "code": frozenset({"class", "style"}),
     }
-    return bleach.clean(
-        str(raw),
-        tags=allowed_tags,
-        attributes=allowed_attrs,
-        css_sanitizer=css_sanitizer,
-        strip=True,
-    )
+    filter_style_properties = frozenset({
+        "color", "background-color", "text-align", "font-weight", "font-style",
+        "text-decoration", "margin", "margin-left", "padding", "white-space",
+    })
+    try:
+        # link_rel=None: we whitelist rel on <a> so nh3 does not force-insert rel (see nh3 docs).
+        return nh3.clean(
+            str(raw),
+            tags=tags,
+            attributes=attributes,
+            filter_style_properties=filter_style_properties,
+            link_rel=None,
+        )
+    except Exception as e:
+        logger.warning("nh3.clean failed: %s; escaping problem HTML instead", e)
+        return html_std.escape(str(raw))
+
+
+def _maybe_unescape_stored_html_entities(s: str) -> str:
+    """
+    Firebase / JSON sometimes stores markup as HTML entities (&lt;p&gt;...).
+    Double-encoded payloads (&amp;lt;p&amp;gt;...) do not contain the literal
+    substring "&lt;", so a single guard missed them. Unescape repeatedly until
+    stable (capped) so the sanitizer sees real tags and the panel does not show &lt;p&gt; text.
+    """
+    if not s:
+        return s
+    prev = None
+    for _ in range(12):
+        if s == prev:
+            break
+        prev = s
+        u = html_std.unescape(s)
+        if u == s:
+            break
+        s = u
+    return s
 
 
 def format_instructor_problem_html_field(raw: Optional[str]) -> tuple[str, bool]:
@@ -135,10 +136,23 @@ def format_instructor_problem_html_field(raw: Optional[str]) -> tuple[str, bool]
     """
     if raw is None or not str(raw).strip():
         return "", False
-    s = str(raw)
+    s = str(raw).strip()
+    s = _maybe_unescape_stored_html_entities(s)
+    # If markup is only entity-encoded (&lt;p&gt;...) _field_looks_like_html misses (no literal '<'),
+    # we must not html.escape() that — it becomes &amp;lt; and the panel shows raw "<p>" as text.
+    if _ENTITY_HTML_TAG_OPEN_RE.search(s) and not _HTML_TAG_RE.search(s):
+        for _ in range(4):
+            s2 = html_std.unescape(s)
+            if s2 == s:
+                break
+            s = s2
+            if _HTML_TAG_RE.search(s):
+                break
     if not _field_looks_like_html(s):
         return html_std.escape(s), False
     return sanitize_instructor_rich_html(s), True
+
+
 def initialize_firebase():
     """Initialize Firebase Admin SDK using environment variables"""
     try:
@@ -857,6 +871,9 @@ class AuthResponse(BaseModel):
     final_survey_disabled: bool = False
     current_problem_index: int = 0
     total_problems: int = 1
+    # Session-resume fields: set when an incomplete prior session is found
+    resumed: bool = False
+    editor_draft_code: Optional[str] = None
 
 class ActivityEntry(BaseModel):
     timestamp: str
@@ -947,8 +964,92 @@ class SurveyConfig(BaseModel):
     questions: List[str]
     feedback_interval: int
 
-# Global session storage (in-memory, will be sent to Firebase on submit)
-active_sessions: Dict[str, SessionLog] = {}
+
+class ActiveSessionMap:
+    """Dict-like SessionLog storage. Use Redis when REDIS_URL is set (Koyeb multi-instance)."""
+
+    __slots__ = ("_redis", "_local", "_prefix", "_ttl")
+
+    def __init__(self) -> None:
+        self._local: Dict[str, SessionLog] = {}
+        self._redis = None
+        self._prefix = (os.getenv("SESSION_REDIS_KEY_PREFIX", "autosuggest:session:") or "autosuggest:session:").strip()
+        self._ttl = int(os.getenv("SESSION_REDIS_TTL_SECONDS", "172800"))
+        url = (os.getenv("REDIS_URL") or "").strip()
+        if url:
+            try:
+                import redis as redis_lib  # noqa: PLC0415
+
+                self._redis = redis_lib.from_url(url, decode_responses=True)
+                self._redis.ping()
+                logger.info("Session store: Redis enabled (safe across multiple workers)")
+            except Exception as exc:
+                logger.warning("REDIS_URL set but Redis unavailable (%s); using in-memory sessions", exc)
+                self._redis = None
+
+    def __getitem__(self, k: str) -> SessionLog:
+        if self._redis is None:
+            return self._local[k]
+        raw = self._redis.get(self._prefix + k)
+        if raw is None:
+            raise KeyError(k)
+        return SessionLog.model_validate_json(raw)
+
+    def __setitem__(self, k: str, v: SessionLog) -> None:
+        if self._redis is None:
+            self._local[k] = v
+            return
+        self._redis.setex(self._prefix + k, self._ttl, v.model_dump_json())
+
+    def __delitem__(self, k: str) -> None:
+        if self._redis is None:
+            del self._local[k]
+            return
+        self._redis.delete(self._prefix + k)
+
+    def __contains__(self, k: str) -> bool:
+        if self._redis is None:
+            return k in self._local
+        return bool(self._redis.exists(self._prefix + k))
+
+    def get(self, k: str, default: Any = None) -> Any:
+        try:
+            return self[k]
+        except KeyError:
+            return default
+
+    def keys(self) -> Iterator[str]:
+        if self._redis is None:
+            yield from self._local.keys()
+            return
+        p = self._prefix
+        for full in self._redis.scan_iter(match=f"{p}*"):
+            if isinstance(full, str) and full.startswith(p):
+                yield full[len(p) :]
+
+    def items(self) -> Iterator[Tuple[str, SessionLog]]:
+        for k in list(self.keys()):
+            try:
+                yield k, self[k]
+            except KeyError:
+                continue
+
+    def __len__(self) -> int:
+        return len(list(self.keys()))
+
+
+# Global session storage (Redis if REDIS_URL, else in-memory; sent to Firebase on submit)
+active_sessions: ActiveSessionMap = ActiveSessionMap()
+
+# Limit concurrent OpenAI calls to avoid rate-limit / 500 errors under heavy load.
+# Configurable via OPENAI_CONCURRENCY env var (default 5).
+_analyze_semaphore: asyncio.Semaphore = asyncio.Semaphore(
+    int(os.getenv("OPENAI_CONCURRENCY", "5"))
+)
+
+# Prevent duplicate /submit for the same session (double-click, retries, multiple tabs).
+_submit_gate = asyncio.Lock()
+_submitting_sessions: set = set()
 
 
 def get_active_quiz_session_counts(quiz_id: str) -> Dict[str, Any]:
@@ -1055,6 +1156,11 @@ def firebase_rtdb_set_with_retry(ref, value, *, max_attempts: int = 3) -> bool:
     return False
 
 
+async def firebase_rtdb_set_async(ref, value, *, max_attempts: int = 3) -> bool:
+    """Non-blocking: run blocking Firebase set() in a thread pool (keeps event loop responsive)."""
+    return await asyncio.to_thread(firebase_rtdb_set_with_retry, ref, value, max_attempts=max_attempts)
+
+
 def _sanitize_firebase_key_segment(s: str) -> str:
     """RTDB keys: avoid . # $ [ ] / and long paths."""
     t = "".join(c if (c.isalnum() or c in "-_") else "_" for c in (s or ""))
@@ -1139,6 +1245,43 @@ def quiz_resume_write(
         firebase_rtdb_set_with_retry(ref, payload, max_attempts=3)
     except Exception as e:
         logger.warning("quiz_resume_write failed: %s", e)
+
+
+# ── Regular-assignment resume pointer (mirrors quiz_resume_write) ─────────────
+
+def assignment_resume_ref(assignment_key: str, user_id: str):
+    """Firebase ref: assignment_resume/{sanitized_key}/{sanitized_user_id}"""
+    if not firebase_db:
+        return None
+    safe_key = _sanitize_firebase_key_segment(assignment_key)
+    safe_uid = _sanitize_firebase_key_segment(user_id)
+    return firebase_db.child("assignment_resume").child(safe_key).child(safe_uid)
+
+
+def assignment_resume_write(
+    assignment_key: str,
+    user_id: str,
+    session_id: str,
+    *,
+    completed: bool = False,
+) -> None:
+    """Persist/update a resume pointer for a regular (non-quiz) assignment session."""
+    if not firebase_db:
+        return
+    try:
+        ref = assignment_resume_ref(assignment_key, user_id)
+        if ref is None:
+            return
+        payload = {
+            "session_id": session_id,
+            "completed": completed,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "user_id": user_id,
+            "assignment_key": assignment_key,
+        }
+        firebase_rtdb_set_with_retry(ref, payload, max_attempts=3)
+    except Exception as e:
+        logger.warning("assignment_resume_write failed: %s", e)
 
 
 def firebase_rtdb_update_with_retry(ref, value: Dict[str, Any], *, max_attempts: int = 3) -> bool:
@@ -1282,6 +1425,34 @@ def get_response(prompt):
     except Exception as e:
         logger.error(f"OpenAI API error: {e}")
         return f"Error getting AI response: {str(e)}"
+
+def _code_slice_at_cursor(
+    code: str,
+    cursor_line: Optional[int],
+    cursor_column: Optional[int],
+) -> str:
+    """
+    Return editor text strictly before the cursor (prefix). Line and column are 1-based
+    (Monaco / VS Code). If cursor is missing or out of range, returns `code` unchanged.
+    """
+    if not code:
+        return code
+    if cursor_line is None or cursor_line < 1:
+        return code
+    lines = code.split("\n")
+    if cursor_line > len(lines):
+        return code
+    idx = cursor_line - 1
+    line = lines[idx]
+    if cursor_column is None or cursor_column < 1:
+        col0 = len(line)
+    else:
+        col0 = min(cursor_column - 1, len(line))
+    head = "\n".join(lines[:idx])
+    if head:
+        return head + "\n" + line[:col0]
+    return line[:col0]
+
 
 def _clamp_problem_description_to_lines(text: str, max_lines: int = 3) -> str:
     """Keep explanation short: at most `max_lines` non-empty lines (LeetCode-style brevity)."""
@@ -1790,7 +1961,7 @@ def predict_next_line(problem_description, existing_code, language=None):
     The last lines already written are:
     {last_lines_str}
     
-    The cursor is at the END of the code above, on a new blank line.
+    The fragment above ends where the user's cursor is (nothing below the cursor is visible).
     Generate ONLY the next single line of code that should logically follow AFTER the last line above.
     
     Rules:
@@ -1951,75 +2122,85 @@ async def analyze_code(request: CodeRequest):
     FIXED: Generate separate suggestions for AI guess and correct description
     """
     try:
-        code = request.code.strip()
+        code_full = request.code.replace("\r\n", "\n").replace("\r", "\n")
         session_id = request.session_id
         
         max_code_length = int(os.getenv("MAX_CODE_LENGTH", "10000"))
-        if len(code) > max_code_length:
+        if len(code_full) > max_code_length:
             raise HTTPException(status_code=400, detail=f"Code too long - please keep under {max_code_length} characters")
         
-        if not code:
+        if not code_full.strip():
             return CodeResponse(
                 analysis="Start typing code to get AI-powered problem analysis...",
                 next_line="",
                 suggestion_kind="next_line",
             )
+
+        # Prefix up to cursor so next-line / full-buffer suggestions match caret (Monaco: 1-based line/col).
+        code_for_suggestion = _code_slice_at_cursor(
+            code_full, request.cursor_line, request.cursor_column
+        )
+        if request.cursor_line is not None and request.cursor_line >= 1 and not str(code_for_suggestion).strip():
+            code_for_suggestion = code_full
         
-        language = request.programming_language or detect_programming_language(code)
+        language = request.programming_language or detect_programming_language(code_full)
 
         # Skip heavy suggestions only for tiny snippets (was 10 — too strict, blocked early edits)
         min_chars = int(os.getenv("MIN_CODE_CHARS_FOR_SUGGESTION", "3"))
-        if len(code.strip()) < min_chars:
+        if len(code_full.strip()) < min_chars:
             return CodeResponse(
-                analysis=f"Code snippet in progress: {code.strip()} (detected: {language})",
+                analysis=f"Code snippet in progress: {code_full.strip()} (detected: {language})",
                 next_line="",
                 suggestion_kind="next_line",
             )
 
-        # Step 1: Analyze what problem the code is trying to solve (thread pool — do not block event loop)
-        loop = asyncio.get_event_loop()
-        problem_description = await loop.run_in_executor(
-            None, lambda: analyze_problem_statement(code, language=language)
-        )
-        
-        # Clean problem description
-        problem_description = re.sub(r'^\*\*.*?\*\*:\s*', '', problem_description)
-        problem_description = re.sub(r'^Problem.*?:\s*', '', problem_description, flags=re.IGNORECASE)
-        problem_description = problem_description.strip()
-        problem_description = _clamp_problem_description_to_lines(problem_description, max_lines=3)
+        # All OpenAI calls go through this semaphore so we never fire more than
+        # OPENAI_CONCURRENCY requests at once (prevents 500 / rate-limit errors).
+        async with _analyze_semaphore:
+            # Step 1: Analyze what problem the code is trying to solve (thread pool — do not block event loop)
+            loop = asyncio.get_event_loop()
+            problem_description = await loop.run_in_executor(
+                None, lambda: analyze_problem_statement(code_for_suggestion, language=language)
+            )
 
-        # Always use next_line mode (suggestions only on new lines)
-        suggestion_kind = "next_line"
-        
-        # Step 2 & 3: Concurrent API calls for better performance
-        session_log = None
-        if session_id and session_id in active_sessions:
-            session_log = active_sessions[session_id]
-        
-        # Prepare concurrent tasks
-        tasks = []
-        
-        ai_next_line_task = get_ai_next_line_async(problem_description, code, language=language)
-        ai_full_code_task = get_full_code_suggestion_async(problem_description, code, is_correct_description=False, language=language)
-        tasks.extend([ai_next_line_task, ai_full_code_task])
+            # Clean problem description
+            problem_description = re.sub(r'^\*\*.*?\*\*:\s*', '', problem_description)
+            problem_description = re.sub(r'^Problem.*?:\s*', '', problem_description, flags=re.IGNORECASE)
+            problem_description = problem_description.strip()
+            problem_description = _clamp_problem_description_to_lines(problem_description, max_lines=3)
 
-        # For condition 1, also get correct description suggestions concurrently
-        correct_next_line_task = None
-        correct_full_code_task = None
-        if session_log and session_log.condition == 1 and session_log.problem_description:
-            correct_next_line_task = get_correct_next_line_async(session_log.problem_description, code, language=language)
-            correct_full_code_task = get_full_code_suggestion_async(session_log.problem_description, code, is_correct_description=True, language=language)
-            tasks.extend([correct_next_line_task, correct_full_code_task])
-        
-        # Execute all tasks concurrently
-        if session_log and session_log.condition == 1 and session_log.problem_description:
-            # Condition 1: 4 concurrent calls
-            ai_next_line, ai_full_code_suggestion, correct_next_line, correct_full_code_suggestion = await asyncio.gather(*tasks)
-        else:
-            # Conditions 2 & 3: 2 concurrent calls
-            ai_next_line, ai_full_code_suggestion = await asyncio.gather(*tasks)
-            correct_next_line = ai_next_line  # Default fallback
-            correct_full_code_suggestion = ai_full_code_suggestion
+            # Always use next_line mode (suggestions only on new lines)
+            suggestion_kind = "next_line"
+
+            # Step 2 & 3: Concurrent API calls for better performance
+            session_log = None
+            if session_id and session_id in active_sessions:
+                session_log = active_sessions[session_id]
+
+            # Prepare concurrent tasks
+            tasks = []
+
+            ai_next_line_task = get_ai_next_line_async(problem_description, code_for_suggestion, language=language)
+            ai_full_code_task = get_full_code_suggestion_async(problem_description, code_for_suggestion, is_correct_description=False, language=language)
+            tasks.extend([ai_next_line_task, ai_full_code_task])
+
+            # For condition 1, also get correct description suggestions concurrently
+            correct_next_line_task = None
+            correct_full_code_task = None
+            if session_log and session_log.condition == 1 and session_log.problem_description:
+                correct_next_line_task = get_correct_next_line_async(session_log.problem_description, code_for_suggestion, language=language)
+                correct_full_code_task = get_full_code_suggestion_async(session_log.problem_description, code_for_suggestion, is_correct_description=True, language=language)
+                tasks.extend([correct_next_line_task, correct_full_code_task])
+
+            # Execute all tasks concurrently (still within the single semaphore slot)
+            if session_log and session_log.condition == 1 and session_log.problem_description:
+                # Condition 1: 4 concurrent calls
+                ai_next_line, ai_full_code_suggestion, correct_next_line, correct_full_code_suggestion = await asyncio.gather(*tasks)
+            else:
+                # Conditions 2 & 3: 2 concurrent calls
+                ai_next_line, ai_full_code_suggestion = await asyncio.gather(*tasks)
+                correct_next_line = ai_next_line  # Default fallback
+                correct_full_code_suggestion = ai_full_code_suggestion
         
         # Clean AI next line suggestion
         ai_next_line = re.sub(r'```\w*\n?', '', ai_next_line)
@@ -2041,7 +2222,7 @@ async def analyze_code(request: CodeRequest):
         # Fallback: next-line model often returns empty after dedup/comments; full-code task may still succeed
         if not ai_next_line.strip() and ai_full_code_suggestion:
             fb = _next_line_from_full_completion(
-                code, ai_full_code_suggestion, max_lines=2, language=language
+                code_for_suggestion, ai_full_code_suggestion, max_lines=2, language=language
             )
             if fb:
                 ai_next_line = fb
@@ -2071,7 +2252,7 @@ async def analyze_code(request: CodeRequest):
             and correct_full_code_suggestion
         ):
             cfb = _next_line_from_full_completion(
-                code, correct_full_code_suggestion, max_lines=2, language=language
+                code_for_suggestion, correct_full_code_suggestion, max_lines=2, language=language
             )
             if cfb:
                 correct_next_line = cfb
@@ -2085,7 +2266,7 @@ async def analyze_code(request: CodeRequest):
                 full_code_suggestion=ai_full_code_suggestion,
                 timestamp=datetime.now().isoformat(),
                 analysis_type="ai_problem_guess",
-                user_code_snapshot=code
+                user_code_snapshot=code_full,
             )
             session_log.ai_guess_history.append(ai_guess_entry)
             
@@ -2109,7 +2290,7 @@ async def analyze_code(request: CodeRequest):
                     full_code_suggestion=correct_full_code_suggestion,
                     timestamp=datetime.now().isoformat(),
                     analysis_type="correct_description",
-                    user_code_snapshot=code
+                    user_code_snapshot=code_full,
                 )
                 session_log.correct_description_history.append(correct_desc_entry)
             
@@ -2125,7 +2306,7 @@ async def analyze_code(request: CodeRequest):
                     full_code_suggestion=ai_full_code_suggestion,
                     timestamp=datetime.now().isoformat(),
                     analysis_type="suggestions_only",
-                    user_code_snapshot=code
+                    user_code_snapshot=code_full,
                 )
                 session_log.suggestions_only_history.append(suggestions_entry)
             
@@ -2269,6 +2450,7 @@ async def submit_code(request: SubmitRequest):
     Submit final code and upload all session data to Firebase
     AUTOMATICALLY LOGS OUT USER after successful submission
     """
+    submit_gate_session: Optional[str] = None
     try:
         code = request.code.strip()
         session_id = request.session_id
@@ -2290,10 +2472,55 @@ async def submit_code(request: SubmitRequest):
         if request.files:
             submitted_files = [{"filename": f.filename, "content": f.content} for f in request.files]
 
-        # Get session log
+        if session_id:
+            async with _submit_gate:
+                if session_id in _submitting_sessions:
+                    return SubmitResponse(
+                        status="already_submitted",
+                        message="Submission already in progress or completed",
+                        submission_id="duplicate",
+                        timestamp=datetime.now().isoformat(),
+                        firebase_status="skipped",
+                        logout_required=True,
+                    )
+                _submitting_sessions.add(session_id)
+            submit_gate_session = session_id
+
+        # Get session log — try memory first, then disk, then Firebase checkpoint
         session_log = None
-        if session_id and session_id in active_sessions:
-            session_log = active_sessions[session_id]
+        if session_id:
+            if session_id in active_sessions:
+                session_log = active_sessions[session_id]
+            else:
+                sl = load_session_log_from_disk(session_id)
+                if sl is None and firebase_db:
+                    fdb = firebase_db
+                    try:
+
+                        def _read_checkpoint():
+                            return fdb.child("sessions").child(session_id).child("checkpoint").get()
+
+                        chk = await asyncio.to_thread(_read_checkpoint)
+                        if isinstance(chk, dict) and isinstance(chk.get("session"), dict):
+                            sl = SessionLog.model_validate(chk["session"])
+                    except Exception as _fb_e:
+                        logger.warning("submit: Firebase reload failed for %s: %s", session_id, _fb_e)
+                if sl is not None:
+                    active_sessions[session_id] = sl
+                    session_log = sl
+                    logger.info("submit: reloaded session %s from storage", session_id)
+                else:
+                    logger.warning("submit: session %s not in memory/disk/Firebase — saving submission without session context", session_id)
+
+        if session_log is not None:
+            # Patch user_id / assignment_id with real values from the request when the
+            # session was reconstructed with placeholder "unknown" values (e.g. after a
+            # server restart).
+            if session_log.user_id in ("unknown", "", None) and user_id not in ("anonymous", "", None):
+                session_log.user_id = user_id
+            if session_log.assignment_id in ("unknown", "", None) and assignment_key not in ("unknown", "", None):
+                session_log.assignment_id = assignment_key
+
             session_log.code_submit_timestamp = timestamp
             session_log.submitted_full_code = code
             if submitted_files:
@@ -2324,7 +2551,19 @@ async def submit_code(request: SubmitRequest):
 
                 # Update local backup with final data
                 save_session_to_local(session_log)
-                
+
+                # Mark the resume pointer as completed so re-login starts fresh
+                if not session_log.quiz_id:
+                    try:
+                        assignment_resume_write(
+                            session_log.assignment_id or "",
+                            session_log.user_id or "",
+                            session_id or "",
+                            completed=True,
+                        )
+                    except Exception as _rw_err:
+                        logger.warning("assignment_resume_write completed=True failed: %s", _rw_err)
+
                 # Remove from active sessions - FORCE LOGOUT
                 if session_id:
                     del active_sessions[session_id]
@@ -2400,7 +2639,6 @@ async def submit_code(request: SubmitRequest):
             }
             
             # Send email asynchronously to avoid blocking the response
-            import asyncio
             loop = asyncio.get_event_loop()
             loop.run_in_executor(None, send_notification_email, email_data)
             
@@ -2418,12 +2656,16 @@ async def submit_code(request: SubmitRequest):
             firebase_status=firebase_status,
             logout_required=True
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error in code submission: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Submission failed: {str(e)}")
+    finally:
+        if submit_gate_session:
+            async with _submit_gate:
+                _submitting_sessions.discard(submit_gate_session)
 
 # Set up templates directory
 templates = Jinja2Templates(directory="templates")
@@ -2671,7 +2913,7 @@ async def checkpoint_editor(request: EditorCheckpointRequest):
         try:
             clean = json.loads(json.dumps(payload, default=str))
             ref = firebase_db.child("sessions").child(session_id).child("editor_draft")
-            firebase_editor_ok = firebase_rtdb_set_with_retry(ref, clean, max_attempts=3)
+            firebase_editor_ok = await firebase_rtdb_set_async(ref, clean, max_attempts=3)
         except Exception as e:
             logger.error("Firebase editor_draft set failed: %s", e)
 
@@ -2920,7 +3162,7 @@ async def submit_survey(request: SurveySubmission):
             }
             if request.ai_history_context:
                 fb_payload["ai_history_context"] = request.ai_history_context
-            if append_periodic_survey_to_firebase(request.session_id, fb_payload):
+            if await asyncio.to_thread(append_periodic_survey_to_firebase, request.session_id, fb_payload):
                 logger.info("Periodic/final survey appended to Firebase for session %s", request.session_id)
             if request.session_id in active_sessions:
                 session_log = active_sessions[request.session_id]
@@ -3223,12 +3465,38 @@ async def update_survey_status(
     status: str
 ):
     """
-    Update survey status for a session
+    Update survey status for a session.
+    Tolerant of missing active sessions: tries disk then Firebase before giving up.
+    Never returns 404 — a missing session is logged and treated as best-effort.
     """
     try:
         if session_id not in active_sessions:
-            raise HTTPException(status_code=404, detail="Session not found")
-        
+            # Try to reload from disk first, then Firebase checkpoint
+            sl = load_session_log_from_disk(session_id)
+            if sl is None and firebase_db:
+                fdb = firebase_db
+                try:
+                    chk = await asyncio.to_thread(
+                        lambda: fdb.child("sessions").child(session_id).child("checkpoint").get()
+                    )
+                    if isinstance(chk, dict) and isinstance(chk.get("session"), dict):
+                        sl = SessionLog.model_validate(chk["session"])
+                except Exception as _fb_e:
+                    logger.warning("update-survey-status: Firebase reload failed for %s: %s", session_id, _fb_e)
+            if sl is not None:
+                active_sessions[session_id] = sl
+                logger.info("update-survey-status: reloaded session %s from storage", session_id)
+            else:
+                logger.warning(
+                    "update-survey-status: session %s not found anywhere — recording status best-effort",
+                    session_id,
+                )
+                return {
+                    "status": "ok",
+                    "message": f"{survey_type} survey status noted (session not in memory)",
+                    "timestamp": datetime.now().isoformat(),
+                }
+
         session_log = active_sessions[session_id]
         timestamp = datetime.now().isoformat()
         
@@ -3406,6 +3674,101 @@ async def submit_pre_post_survey(request: PrePostSurveySubmission):
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Survey submission failed: {str(e)}")
     
+def find_incomplete_session_for_assignment(user_id: str, assignment_key: str) -> Optional[SessionLog]:
+    """
+    Find the most recent incomplete (non-submitted) session for a
+    user + assignment_key combination.
+
+    Strategy (local-first, Firebase fallback):
+    1. Scan session_logs/ for files matching {user_id}_{assignment_key}_*.json.
+       Return the most recent one that has not been submitted.
+    2. If nothing found on disk AND Firebase is available, check the
+       assignment_resume pointer.  If the pointer points to an incomplete
+       session, try to reconstruct the SessionLog from:
+       a. Local disk (by session_id)  — in case the file exists but wasn't
+          matched by the prefix scan (e.g. different casing).
+       b. Firebase sessions/{session_id}/checkpoint/session.
+    """
+    # ── Step 1: local disk scan ───────────────────────────────────────────
+    logs_dir = Path(os.getenv("SUBMISSIONS_DIR", "session_logs"))
+    if logs_dir.is_dir():
+        prefix = f"{user_id}_{assignment_key}_"
+        candidates = [
+            p for p in logs_dir.iterdir()
+            if p.is_file() and p.suffix == ".json" and p.name.startswith(prefix)
+        ]
+        candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        for p in candidates:
+            sl = load_session_log_from_disk(p.stem)
+            if sl is None:
+                continue
+            if sl.code_submit_timestamp or sl.submitted_full_code:
+                continue
+            logger.info(
+                "Resume (disk): found incomplete session %s for user %s / assignment %s",
+                sl.session_id, user_id, assignment_key,
+            )
+            return sl
+
+    # ── Step 2: Firebase fallback ────────────────────────────────────────
+    if not firebase_db:
+        return None
+    try:
+        ref = assignment_resume_ref(assignment_key, user_id)
+        if ref is None:
+            return None
+        pointer = ref.get()
+        if not isinstance(pointer, dict):
+            return None
+        if pointer.get("completed"):
+            return None  # session was fully submitted
+
+        session_id = (pointer.get("session_id") or "").strip()
+        if not session_id:
+            return None
+
+        # 2a: try to load from disk by explicit session_id
+        sl = load_session_log_from_disk(session_id)
+        if sl is not None and not sl.code_submit_timestamp and not sl.submitted_full_code:
+            logger.info(
+                "Resume (disk by Firebase pointer): session %s for user %s / assignment %s",
+                session_id, user_id, assignment_key,
+            )
+            return sl
+
+        # 2b: reconstruct from Firebase sessions/{session_id}/checkpoint/session
+        chk = firebase_db.child("sessions").child(session_id).child("checkpoint").get()
+        if not isinstance(chk, dict):
+            return None
+        session_dict = chk.get("session")
+        if not isinstance(session_dict, dict):
+            return None
+
+        # Validate ownership and submission status
+        if session_dict.get("user_id") != user_id:
+            return None
+        if session_dict.get("code_submit_timestamp") or session_dict.get("submitted_full_code"):
+            return None
+
+        try:
+            sl = SessionLog.model_validate(session_dict)
+        except Exception as val_err:
+            logger.warning("Firebase checkpoint SessionLog validation failed for %s: %s", session_id, val_err)
+            return None
+
+        # Persist to disk so future lookups are local
+        save_session_to_local(sl)
+        logger.info(
+            "Resume (Firebase checkpoint): session %s for user %s / assignment %s",
+            session_id, user_id, assignment_key,
+        )
+        return sl
+
+    except Exception as e:
+        logger.warning("find_incomplete_session_for_assignment Firebase fallback failed: %s", e)
+        return None
+
+
 @app.post("/authenticate", response_model=AuthResponse)
 async def authenticate_user(request: AuthRequest):
     """
@@ -3427,7 +3790,54 @@ async def authenticate_user(request: AuthRequest):
         
         if condition is None:
             raise HTTPException(status_code=400, detail="Invalid assignment key. Please check your credentials and try again.")
-        
+
+        # ── Resume detection ────────────────────────────────────────────────
+        # Before creating a brand-new session, look for an incomplete one on
+        # disk for this user + assignment.  If found, return the same session
+        # ID so the client can restore the saved editor state.
+        existing_sl = find_incomplete_session_for_assignment(user_id, assignment_key)
+        if existing_sl:
+            active_sessions[existing_sl.session_id] = existing_sl
+            save_session_to_local(existing_sl)
+
+            # Rebuild survey flags from persisted statuses
+            _pre_done  = existing_sl.pre_survey_status  in ("completed", "not_required")
+            _post_done = existing_sl.post_survey_status in ("completed", "not_required")
+
+            # Rebuild periodic / final-survey flags (reuse the config helpers)
+            _base_key_ex     = get_assignment_base_key(assignment_key)
+            _periodic_cfg_ex = get_periodic_survey_config()
+            _periodic_en_ex  = _base_key_ex.lower() in _periodic_cfg_ex["enabled_prefixes"] if _base_key_ex else False
+            _final_dis_ex    = is_final_survey_disabled(_base_key_ex)
+
+            logger.info(
+                "Resuming existing session %s for user %s / assignment %s (problem_index=%s)",
+                existing_sl.session_id, user_id, assignment_key,
+                existing_sl.current_problem_index,
+            )
+
+            return AuthResponse(
+                status="success",
+                message="Resumed existing session",
+                condition=existing_sl.condition,
+                problem_description=existing_sl.problem_description,
+                session_id=existing_sl.session_id,
+                paste_allowed=1,
+                tab_tracking_enabled=True,
+                has_pre_survey=not _pre_done,
+                has_post_survey=not _post_done,
+                programming_language=programming_language,
+                starter_code=get_starter_code(get_assignment_base_key(assignment_key), programming_language),
+                periodic_survey_enabled=_periodic_en_ex,
+                periodic_survey_start=_periodic_cfg_ex["start_after_suggestions"],
+                final_survey_disabled=_final_dis_ex,
+                current_problem_index=existing_sl.current_problem_index,
+                total_problems=existing_sl.total_problems,
+                resumed=True,
+                editor_draft_code=existing_sl.editor_draft_checkpoint,
+            )
+        # ── End resume detection ─────────────────────────────────────────────
+
         session_id = f"{user_id}_{assignment_key}_{uuid.uuid4().hex[:8]}"
         
         problem_description = None
@@ -3498,6 +3908,14 @@ async def authenticate_user(request: AuthRequest):
             )
         except Exception as fb_e:
             logger.warning("Firebase checkpoint at auth failed: %s", fb_e)
+
+        # Write a resume pointer so Firebase can be used as fallback on re-login
+        try:
+            await asyncio.to_thread(
+                lambda: assignment_resume_write(assignment_key, user_id, session_id)
+            )
+        except Exception as fb_e:
+            logger.warning("assignment_resume_write at auth failed: %s", fb_e)
         
         logger.info(f"Authentication successful: {user_id} -> Condition {condition}, Session: {session_id}, Language: {programming_language}")
         
@@ -3552,7 +3970,7 @@ async def log_periodic_survey(request: Request):
         # Log to Firebase if available
         if firebase_db:
             try:
-                if append_periodic_survey_to_firebase(session_id, survey_data):
+                if await asyncio.to_thread(append_periodic_survey_to_firebase, session_id, survey_data):
                     logger.info(
                         "Periodic survey #%s logged for session %s",
                         survey_data.get("survey_number"),
@@ -3771,12 +4189,12 @@ async def save_session_to_firebase(
                 }
             }
         user_ref = firebase_db.child(f'{condition_path}/{session_log.assignment_id}/{session_log.user_id}')
-        if not firebase_rtdb_set_with_retry(user_ref, user_data, max_attempts=3):
+        if not await firebase_rtdb_set_async(user_ref, user_data, max_attempts=3):
             return False
 
         # Mirror final payload under sessions/{session_id} for recovery / cross-refs
         session_ref = firebase_db.child("sessions").child(session_log.session_id).child("final_submit")
-        firebase_rtdb_set_with_retry(
+        await firebase_rtdb_set_async(
             session_ref,
             {
                 "checkpoint_type": "final_submit",
@@ -3940,9 +4358,18 @@ async def get_assignment_text(assignment_key: str, problem_index: int = 0):
         assignment_file = get_assignment_file_path(assignment_key)
         if not assignment_file or not assignment_file.exists():
             raise HTTPException(status_code=404, detail="Assignment text not found")
-        with open(assignment_file, 'r', encoding='utf-8') as f:
+        with open(assignment_file, "r", encoding="utf-8") as f:
             content = f.read().strip()
-        return {"text": content}
+        # Plain .txt assignments: always return `html` so the IDE panel uses innerHTML (not textContent),
+        # which would show angle brackets as raw characters. Escaped text only — no raw HTML from file.
+        safe_txt = html_std.escape(content).replace("\n", "<br/>")
+        html_plain = (
+            f'<div class="problem-section">'
+            f'<span class="section-label">Assignment</span>'
+            f'<div class="section-content">{safe_txt}</div>'
+            f"</div>"
+        )
+        return {"html": html_plain, "text": None}
     except HTTPException:
         raise
     except Exception as e:
@@ -4151,14 +4578,30 @@ def normalize_quiz_data(quiz_data: dict) -> dict:
         for prob in quiz_data["problems"]:
             if not prob.get("_has_surveys"):
                 prob["_has_surveys"] = True
-                prob["pre_survey_enabled"] = bool(quiz_pre)
-                prob["pre_survey"] = quiz_pre
-                prob["post_survey_enabled"] = bool(quiz_post)
-                prob["post_survey"] = quiz_post
-                prob["recurrent_survey_enabled"] = bool(quiz_rec)
-                prob["recurrent_survey"] = quiz_rec
-                prob["recurrent_survey_interval"] = quiz_rec_interval
-                prob["recurrent_survey_start"] = quiz_rec_start
+                has_own_surveys = any(
+                    len(prob.get(k) or []) > 0
+                    for k in ("pre_survey", "post_survey", "recurrent_survey")
+                )
+                if has_own_surveys:
+                    if "pre_survey_enabled" not in prob:
+                        prob["pre_survey_enabled"] = bool(prob.get("pre_survey"))
+                    if "post_survey_enabled" not in prob:
+                        prob["post_survey_enabled"] = bool(prob.get("post_survey"))
+                    if "recurrent_survey_enabled" not in prob:
+                        prob["recurrent_survey_enabled"] = bool(prob.get("recurrent_survey"))
+                    if "recurrent_survey_interval" not in prob:
+                        prob["recurrent_survey_interval"] = quiz_rec_interval
+                    if "recurrent_survey_start" not in prob:
+                        prob["recurrent_survey_start"] = quiz_rec_start
+                else:
+                    prob["pre_survey_enabled"] = bool(quiz_pre)
+                    prob["pre_survey"] = quiz_pre
+                    prob["post_survey_enabled"] = bool(quiz_post)
+                    prob["post_survey"] = quiz_post
+                    prob["recurrent_survey_enabled"] = bool(quiz_rec)
+                    prob["recurrent_survey"] = quiz_rec
+                    prob["recurrent_survey_interval"] = quiz_rec_interval
+                    prob["recurrent_survey_start"] = quiz_rec_start
 
     return quiz_data
 
@@ -4422,8 +4865,27 @@ async def quiz_next_problem(request: Request):
     code = body.get("code", "")
     programming_language = body.get("programming_language", "python").strip()
 
-    if not session_id or session_id not in active_sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+
+    if session_id not in active_sessions:
+        # Try to recover the session from disk / Firebase before failing
+        sl = load_session_log_from_disk(session_id)
+        if sl is None and firebase_db:
+            fdb = firebase_db
+            try:
+                chk = await asyncio.to_thread(
+                    lambda: fdb.child("sessions").child(session_id).child("checkpoint").get()
+                )
+                if isinstance(chk, dict) and isinstance(chk.get("session"), dict):
+                    sl = SessionLog.model_validate(chk["session"])
+            except Exception as _fb_e:
+                logger.warning("quiz/next-problem: Firebase reload failed for %s: %s", session_id, _fb_e)
+        if sl is not None:
+            active_sessions[session_id] = sl
+            logger.info("quiz/next-problem: reloaded session %s from storage", session_id)
+        else:
+            raise HTTPException(status_code=404, detail="Session not found and could not be recovered")
 
     session_log = active_sessions[session_id]
 
