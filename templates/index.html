@@ -3141,11 +3141,20 @@ function retrieveCachedSubmissionData() {
 function clearCachedSubmissionData() {
     try {
         sessionStorage.removeItem('pendingSubmissionData');
+        // perProblemCodes_ is intentionally NOT cleared here — it accumulates codes
+        // across all problems and must survive until the final post-quiz download + submit.
+    } catch (error) {
+        console.error('❌ Failed to clear cached data:', error);
+    }
+}
+
+function clearAllSessionCodes() {
+    try {
         if (currentSession && currentSession.sessionId) {
             sessionStorage.removeItem(`perProblemCodes_${currentSession.sessionId}`);
         }
     } catch (error) {
-        console.error('❌ Failed to clear cached data:', error);
+        console.error('❌ Failed to clear per-problem codes:', error);
     }
 }
 
@@ -5171,20 +5180,7 @@ async function submitFinalSurvey() {
         
         // Check if post-survey exists
         const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
-        const isLastProblem = (authData.currentProblemIndex || 0) >= (authData.totalProblems || 1) - 1;
-
-        if (!authData.hasPostSurvey && isLastProblem) {
-            // No post-survey and last problem — download code now
-            addTerminalOutput('📥 Downloading your code...', 'info');
-            const downloadSuccess = await downloadCodeFile();
-
-            if (downloadSuccess) {
-                addTerminalOutput('✅ Code file downloaded successfully!', 'success');
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            } else {
-                addTerminalOutput('⚠️ Code download encountered an issue, but submission will continue', 'warning');
-            }
-        }
+        // Code download happens once in proceedWithActualSubmission (all problems + current files / ZIP).
 
         // Check for post-survey or advance to next problem
         await checkAndShowPostSurvey();
@@ -6174,25 +6170,8 @@ async function submitToDatabase() {
         addTerminalOutput('✅ Final Likert skipped (recurrent surveys not enabled for this problem)', 'info');
     }
     
-    // If no final periodic survey was shown, check if we need to download now
-    if ((surveyData.questions.length === 0 || surveyData.finalSurveyResponse || currentSession.finalSurveyDisabled)) {
-        const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
-        const isLastProblem = (authData.currentProblemIndex || 0) >= (authData.totalProblems || 1) - 1;
+    // Code download happens once in proceedWithActualSubmission (all problems + current files / ZIP).
 
-        if (!authData.hasPostSurvey && isLastProblem) {
-            // No post-survey and last problem — download code now
-            addTerminalOutput('📥 Downloading your code...', 'info');
-            const downloadSuccess = await downloadCodeFile();
-
-            if (downloadSuccess) {
-                addTerminalOutput('✅ Code file downloaded successfully!', 'success');
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            } else {
-                addTerminalOutput('⚠️ Code download encountered an issue, but submission will continue', 'warning');
-            }
-        }
-    }
-    
     // Check for post-survey
     await checkAndShowPostSurvey();
 }
@@ -6335,6 +6314,20 @@ async function proceedWithActualSubmission() {
     }
 
     const code = cachedData.code;
+
+    // Local copy of all solutions: prior problems (sessionStorage) + current editor / multi-file → one file or ZIP
+    addTerminalOutput('📥 Downloading your code (all problems in this session)...', 'info');
+    try {
+        const downloadOk = await downloadCodeFile();
+        if (downloadOk) {
+            addTerminalOutput('✅ Your code was saved to your device.', 'success');
+        } else {
+            addTerminalOutput('⚠️ Could not start a code download (empty buffer or ZIP unavailable). Submission will still be sent.', 'warning');
+        }
+    } catch (dlErr) {
+        console.warn('downloadCodeFile', dlErr);
+        addTerminalOutput('⚠️ Code download failed; submission will still be sent.', 'warning');
+    }
     
     submitButton.disabled = true;
     submitButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Submitting...</div>';
@@ -6390,9 +6383,10 @@ async function proceedWithActualSubmission() {
         if (result.firebase_status === 'success') {
             addTerminalOutput(`Database save successful - logging out now...`, 'success');
             
-            // Clear both caches
+            // Clear all caches including accumulated per-problem codes (final submission done)
             clearPeriodicSurveysFromStorage();
-            clearCachedSubmissionData();  // ✅ ADD THIS LINE
+            clearCachedSubmissionData();
+            clearAllSessionCodes();
             
             setTimeout(() => {
                 showSuccessMessage(

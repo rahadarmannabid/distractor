@@ -1716,6 +1716,7 @@
                                 const result = await codeResponse.json();
 
                                 this.clearCachedSubmissionData();
+                                this.clearAllSessionCodes();
                                 this.clearPeriodicSurveysFromStorage();
                                 sessionStorage.removeItem('authData');
 
@@ -1764,12 +1765,24 @@
             clearCachedSubmissionData() {
                 try {
                     sessionStorage.removeItem('pendingSubmissionData');
-                    const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
-                    if (authData.sessionId) {
-                        sessionStorage.removeItem(`perProblemCodes_${authData.sessionId}`);
-                    }
+                    // perProblemCodes_ is intentionally NOT cleared here — it accumulates codes
+                    // across all problems and must survive until the final post-quiz download + submit.
                 } catch (error) {
                     console.error('Failed to clear cached data:', error);
+                }
+            }
+
+            clearAllSessionCodes() {
+                try {
+                    const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
+                    const cachedData = this.retrieveCachedSubmissionData();
+                    const sessionId = (cachedData && cachedData.session && cachedData.session.sessionId)
+                        || authData.sessionId;
+                    if (sessionId) {
+                        sessionStorage.removeItem(`perProblemCodes_${sessionId}`);
+                    }
+                } catch (error) {
+                    console.error('Failed to clear per-problem codes:', error);
                 }
             }
 
