@@ -854,6 +854,23 @@ class AuthRequest(BaseModel):
     assignment_key: str
     programming_language: str = "javascript"
 
+def _validated_participant_user_id(raw: Optional[str], field: str = "user_id") -> str:
+    """Reject placeholder IDs so submissions and analytics attribute work to real participants."""
+    uid = (raw or "").strip()
+    if len(uid) < 3:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field} is required (minimum 3 characters).",
+        )
+    low = uid.lower()
+    if low in ("anonymous", "unknown"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field} cannot be '{uid}' — use the participant identifier from login.",
+        )
+    return uid
+
+
 class AuthResponse(BaseModel):
     status: str
     message: str
@@ -2458,8 +2475,13 @@ async def submit_code(request: SubmitRequest):
     try:
         code = request.code.strip()
         session_id = request.session_id
-        user_id = request.user_id or "anonymous"
-        assignment_key = request.assignment_key or "unknown"
+        user_id = _validated_participant_user_id(request.user_id)
+        assignment_key = (request.assignment_key or "").strip()
+        if len(assignment_key) < 4 or assignment_key.lower() == "unknown":
+            raise HTTPException(
+                status_code=400,
+                detail="assignment_key is required (minimum 4 characters).",
+            )
         programming_language = request.programming_language or "unknown"
         timestamp = request.timestamp or datetime.now().isoformat()
         suggestion_clicked = request.suggestion_clicked
@@ -2520,9 +2542,9 @@ async def submit_code(request: SubmitRequest):
             # Patch user_id / assignment_id with real values from the request when the
             # session was reconstructed with placeholder "unknown" values (e.g. after a
             # server restart).
-            if session_log.user_id in ("unknown", "", None) and user_id not in ("anonymous", "", None):
+            if session_log.user_id in ("unknown", "", None):
                 session_log.user_id = user_id
-            if session_log.assignment_id in ("unknown", "", None) and assignment_key not in ("unknown", "", None):
+            if session_log.assignment_id in ("unknown", "", None) and assignment_key:
                 session_log.assignment_id = assignment_key
 
             session_log.code_submit_timestamp = timestamp
@@ -2861,6 +2883,9 @@ async def get_survey_config_endpoint():
 class ActivityLogRequest(BaseModel):
     activities: List[ActivityEntry]
     session_id: str
+    # Required when the server has no session (e.g. after restart) so we never store user_id=unknown
+    user_id: Optional[str] = None
+    assignment_key: Optional[str] = None
 
 
 class EditorCheckpointRequest(BaseModel):
@@ -2887,10 +2912,12 @@ async def checkpoint_editor(request: EditorCheckpointRequest):
         raise HTTPException(status_code=400, detail=f"Code too long (max {max_len} chars)")
 
     session_id = request.session_id.strip()
-    uid = request.user_id.strip()
+    uid = _validated_participant_user_id(request.user_id)
     aid = request.assignment_key.strip()
-    if not session_id or not uid:
-        raise HTTPException(status_code=400, detail="session_id and user_id are required")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    if not aid or aid.lower() == "unknown":
+        raise HTTPException(status_code=400, detail="assignment_key is required")
 
     session_log = active_sessions.get(session_id)
     if session_log is not None:
@@ -2966,10 +2993,21 @@ async def log_activities(request: ActivityLogRequest):
             }
         
         if session_id not in active_sessions:
-            logger.warning(f"Session {session_id} not found in active sessions - creating minimal session for logging")
+            uid = _validated_participant_user_id(request.user_id)
+            aid = (request.assignment_key or "").strip()
+            if len(aid) < 2 or aid.lower() == "unknown":
+                raise HTTPException(
+                    status_code=400,
+                    detail="user_id and assignment_key are required when the server has no session state (e.g. after a restart).",
+                )
+            logger.warning(
+                "Session %s not in active sessions — creating session from activity batch for user %s",
+                session_id,
+                uid,
+            )
             active_sessions[session_id] = SessionLog(
-                user_id="unknown",
-                assignment_id="unknown", 
+                user_id=uid,
+                assignment_id=aid,
                 session_id=session_id,
                 condition=0,
                 code_start_timestamp=datetime.now().isoformat(),
@@ -3136,6 +3174,7 @@ async def log_activities(request: ActivityLogRequest):
 async def submit_survey(request: SurveySubmission):
     """Submit survey responses with AI history context"""
     try:
+        _validated_participant_user_id(request.user_id)
         # Get session log
         session_log = None
         if request.session_id in active_sessions:
@@ -3781,12 +3820,9 @@ async def authenticate_user(request: AuthRequest):
     Creates a new session and starts logging
     """
     try:
-        user_id = request.user_id.strip()
+        user_id = _validated_participant_user_id(request.user_id)
         assignment_key = request.assignment_key.strip()
         programming_language = request.programming_language or "javascript"
-        
-        if len(user_id) < 3:
-            raise HTTPException(status_code=400, detail="User ID must be at least 3 characters")
         
         if len(assignment_key) < 4:
             raise HTTPException(status_code=400, detail="Assignment Key must be at least 4 characters")
@@ -4569,8 +4605,10 @@ def normalize_quiz_data(quiz_data: dict) -> dict:
             "starter_code": quiz_data.pop("starter_code", {}),
         }]
     if "conditions" not in quiz_data and "condition" in quiz_data:
+        # Legacy single field: default missing value to 1 (only if key absent after pop)
         quiz_data["conditions"] = [int(quiz_data.pop("condition", 1))]
     elif "conditions" not in quiz_data:
+        # Missing entirely → all students get arm 1 only (random.choice([1])). Prefer explicit `conditions` in Firebase.
         quiz_data["conditions"] = [1]
 
     # Migrate quiz-level surveys into per-problem surveys if missing
@@ -4767,11 +4805,8 @@ async def student_quiz_join(request: Request):
     """Authenticate a student into an instructor-created quiz."""
     body = await request.json()
     access_code = (body.get("access_code") or "").strip()
-    user_id = (body.get("user_id") or "").strip()
+    user_id = _validated_participant_user_id(body.get("user_id"))
     programming_language = (body.get("programming_language") or "python").strip()
-
-    if len(user_id) < 3:
-        raise HTTPException(status_code=400, detail="User ID must be at least 3 characters")
 
     if not firebase_db:
         raise HTTPException(status_code=503, detail="Database unavailable")

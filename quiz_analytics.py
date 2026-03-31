@@ -405,8 +405,8 @@ def derive_session_metrics(
     end_time = meta.get("end_time")
     completed_assignment = bool(end_time)
 
-    user_id = str(meta.get("user_id") or "unknown")
     session_id = str(meta.get("session_id") or "")
+    user_id = _resolved_participant_user_id(meta.get("user_id"), session_id)
     condition = meta.get("condition")
 
     per_rows = _firebase_to_list(meta.get("per_problem_submissions"))
@@ -1211,6 +1211,112 @@ def find_user_session_payload_for_quiz(
     return max(matches, key=score)
 
 
+def _session_condition_key(d: Dict[str, Any]) -> str:
+    cond_raw = d.get("condition")
+    return str(cond_raw) if cond_raw is not None else "unknown"
+
+
+def _resolved_participant_user_id(meta_user: Any, session_id: str) -> str:
+    """Prefer real login user_id; never surface the literal 'unknown' in exports."""
+    s = str(meta_user).strip() if meta_user is not None else ""
+    if len(s) >= 3 and s.lower() not in ("anonymous", "unknown"):
+        return s
+    sid = (session_id or "").strip()
+    if sid:
+        return f"session:{sid}"
+    return "unattributed"
+
+
+def _grouped_condition_order_for_charts(all_conds: List[str]) -> List[str]:
+    """Order conditions for grouped charts. Numeric RCT arms 1/2/3 always reserve three slots."""
+    if not all_conds:
+        return []
+    obs_set = set(all_conds)
+    non_unknown = {c for c in obs_set if c != "unknown"}
+    if non_unknown and non_unknown.issubset({"1", "2", "3"}):
+        out = ["1", "2", "3"]
+        if "unknown" in obs_set:
+            out.append("unknown")
+        return out
+    return list(all_conds)
+
+
+def _median_float(xs: List[float]) -> Optional[float]:
+    if not xs:
+        return None
+    s = sorted(xs)
+    m = len(s) // 2
+    if len(s) % 2:
+        return s[m]
+    return (s[m - 1] + s[m]) / 2.0
+
+
+def _compute_boxplot_payload(
+    derived: List[Dict[str, Any]],
+    n: int,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Build summary + boxplot blocks for a list of derived sessions (whole quiz or one condition)."""
+    total_times: List[float] = []
+    for d in derived:
+        if not d["completed_assignment"]:
+            continue
+        t = _primary_session_duration_seconds(d)
+        if t is not None:
+            total_times.append(t)
+
+    time_per_problem_series: List[List[float]] = [[] for _ in range(n)]
+    ai_per_problem_series: List[List[float]] = [[] for _ in range(n)]
+    ai_analyses_per_problem_series: List[List[float]] = [[] for _ in range(n)]
+    acc_per_problem_series: List[List[float]] = [[] for _ in range(n)]
+    rej_per_problem_series: List[List[float]] = [[] for _ in range(n)]
+    run_per_problem_series: List[List[float]] = [[] for _ in range(n)]
+
+    for d in derived:
+        tpm = d.get("time_per_problem_seconds") or {}
+        agb = d.get("ai_generations_by_problem") or {}
+        aab = d.get("ai_analyses_by_problem") or {}
+        acb = d.get("accepts_by_problem") or {}
+        rjb = d.get("rejects_by_problem") or {}
+        rub = d.get("runs_by_problem") or {}
+        for i in range(n):
+            time_per_problem_series[i].append(_by_problem_num(tpm, i, 0.0))
+            ai_per_problem_series[i].append(_by_problem_num(agb, i, 0.0))
+            ai_analyses_per_problem_series[i].append(_by_problem_num(aab, i, 0.0))
+            acc_per_problem_series[i].append(_by_problem_num(acb, i, 0.0))
+            rej_per_problem_series[i].append(_by_problem_num(rjb, i, 0.0))
+            run_per_problem_series[i].append(_by_problem_num(rub, i, 0.0))
+
+    ai_gen_total_series = [float(d["ai_generations_total"]) for d in derived]
+    ai_analyses_total_series = [float(d.get("ai_analyses_total") or 0.0) for d in derived]
+    acc_total_series = [float(d["accepts_total"]) for d in derived]
+    rej_total_series = [float(d["rejects_total"]) for d in derived]
+    run_total_series = [float(d.get("runs_total") or 0.0) for d in derived]
+
+    summary: Dict[str, Any] = {
+        "median_session_time_seconds": _median_float(total_times),
+        "median_ai_generations": _median_float([float(d["ai_generations_total"]) for d in derived]),
+        "median_ai_analyses": _median_float([float(d.get("ai_analyses_total") or 0.0) for d in derived]),
+        "median_accepts": _median_float([float(d["accepts_total"]) for d in derived]),
+        "median_rejects": _median_float([float(d["rejects_total"]) for d in derived]),
+        "median_runs": _median_float([float(d.get("runs_total") or 0.0) for d in derived]),
+    }
+
+    boxplot: Dict[str, Any] = {
+        "total_time_seconds": total_times,
+        "time_per_problem_seconds": time_per_problem_series,
+        "ai_generations_total": ai_gen_total_series,
+        "ai_generations_per_problem": ai_per_problem_series,
+        "ai_analyses_total": ai_analyses_total_series,
+        "ai_analyses_per_problem": ai_analyses_per_problem_series,
+        "accepts_total": acc_total_series,
+        "rejects_total": rej_total_series,
+        "accepts_per_problem": acc_per_problem_series,
+        "rejects_per_problem": rej_per_problem_series,
+        "runs_total": run_total_series,
+        "runs_per_problem": run_per_problem_series,
+    }
+    return summary, boxplot
+
 
 def aggregate_quiz_analytics(
     sessions: List[Dict[str, Any]],
@@ -1253,67 +1359,41 @@ def aggregate_quiz_analytics(
             condition_incomplete[cond_key] = condition_incomplete.get(cond_key, 0) + 1
 
     all_conds = sorted(condition_totals.keys(), key=lambda k: (k == "unknown", k))
+    grouped_chart_conditions = _grouped_condition_order_for_charts(all_conds)
     condition_breakdown = {
-        "conditions": all_conds,
-        "totals": [condition_totals.get(c, 0) for c in all_conds],
-        "completed": [condition_completed.get(c, 0) for c in all_conds],
-        "incomplete": [condition_incomplete.get(c, 0) for c in all_conds],
+        "conditions": grouped_chart_conditions,
+        "totals": [condition_totals.get(c, 0) for c in grouped_chart_conditions],
+        "completed": [condition_completed.get(c, 0) for c in grouped_chart_conditions],
+        "incomplete": [condition_incomplete.get(c, 0) for c in grouped_chart_conditions],
     }
 
     completion_by_problem = [0] * n
+    completion_by_problem_by_condition: Dict[str, List[int]] = {
+        c: [0] * n for c in grouped_chart_conditions
+    }
     for d in derived:
         cp = d.get("completed_problem") or []
         for i in range(min(n, len(cp))):
             if cp[i]:
                 completion_by_problem[i] += 1
-
-    # Median + "Total" time boxplot: same metric as per-session Time column (focus when available).
-    total_times: List[float] = []
-    for d in derived:
-        if not d["completed_assignment"]:
-            continue
-        t = _primary_session_duration_seconds(d)
-        if t is not None:
-            total_times.append(t)
-
-    time_per_problem_series: List[List[float]] = [[] for _ in range(n)]
-    ai_per_problem_series: List[List[float]] = [[] for _ in range(n)]
-    ai_analyses_per_problem_series: List[List[float]] = [[] for _ in range(n)]
-    acc_per_problem_series: List[List[float]] = [[] for _ in range(n)]
-    rej_per_problem_series: List[List[float]] = [[] for _ in range(n)]
-    run_per_problem_series: List[List[float]] = [[] for _ in range(n)]
+        ck = _session_condition_key(d)
+        if ck not in completion_by_problem_by_condition:
+            completion_by_problem_by_condition[ck] = [0] * n
+        for i in range(min(n, len(cp))):
+            if cp[i]:
+                completion_by_problem_by_condition[ck][i] += 1
 
     any_pi = any(d.get("has_problem_index_on_activities") for d in derived)
 
-    for d in derived:
-        tpm = d.get("time_per_problem_seconds") or {}
-        agb = d.get("ai_generations_by_problem") or {}
-        aab = d.get("ai_analyses_by_problem") or {}
-        acb = d.get("accepts_by_problem") or {}
-        rjb = d.get("rejects_by_problem") or {}
-        rub = d.get("runs_by_problem") or {}
-        for i in range(n):
-            time_per_problem_series[i].append(_by_problem_num(tpm, i, 0.0))
-            ai_per_problem_series[i].append(_by_problem_num(agb, i, 0.0))
-            ai_analyses_per_problem_series[i].append(_by_problem_num(aab, i, 0.0))
-            acc_per_problem_series[i].append(_by_problem_num(acb, i, 0.0))
-            rej_per_problem_series[i].append(_by_problem_num(rjb, i, 0.0))
-            run_per_problem_series[i].append(_by_problem_num(rub, i, 0.0))
+    summary, boxplot = _compute_boxplot_payload(derived, n)
 
-    ai_gen_total_series = [float(d["ai_generations_total"]) for d in derived]
-    ai_analyses_total_series = [float(d.get("ai_analyses_total") or 0.0) for d in derived]
-    acc_total_series = [float(d["accepts_total"]) for d in derived]
-    rej_total_series = [float(d["rejects_total"]) for d in derived]
-    run_total_series = [float(d.get("runs_total") or 0.0) for d in derived]
-
-    def _median(xs: List[float]) -> Optional[float]:
-        if not xs:
-            return None
-        s = sorted(xs)
-        m = len(s) // 2
-        if len(s) % 2:
-            return s[m]
-        return (s[m - 1] + s[m]) / 2.0
+    boxplot_by_condition: Dict[str, Dict[str, Any]] = {}
+    summary_by_condition: Dict[str, Dict[str, Any]] = {}
+    for c in grouped_chart_conditions:
+        sub = [d for d in derived if _session_condition_key(d) == c]
+        s_c, bp_c = _compute_boxplot_payload(sub, n)
+        summary_by_condition[c] = s_c
+        boxplot_by_condition[c] = bp_c
 
     # Coverage: confirm Firebase payloads used by analytics contain expected fields
     total_act_entries = 0
@@ -1352,7 +1432,7 @@ def aggregate_quiz_analytics(
 
         per_session_rows.append(
             {
-                "user_id": d.get("user_id") or "unknown",
+                "user_id": _resolved_participant_user_id(d.get("user_id"), str(d.get("session_id") or "")),
                 "session_id": d.get("session_id") or "",
                 "condition": d.get("condition"),
                 "completed_assignment": d.get("completed_assignment"),
@@ -1414,34 +1494,17 @@ def aggregate_quiz_analytics(
         "completed_assignments": completed_count,
         "incomplete_sessions": incomplete_count,
         "condition_breakdown": condition_breakdown,
+        "grouped_chart_conditions": grouped_chart_conditions,
         "completion_by_problem": completion_by_problem,
+        "completion_by_problem_by_condition": completion_by_problem_by_condition,
         "per_problem_completion": per_problem_completion,
         "per_problem_activity_breakdown": any_pi,
         "per_session": per_session_rows,
         "data_health": data_health,
-        "summary": {
-            # Same duration rule as per-session Time column: focus_time_seconds when present, else wall clock.
-            "median_session_time_seconds": _median(total_times),
-            "median_ai_generations": _median([float(d["ai_generations_total"]) for d in derived]),
-            "median_ai_analyses": _median([float(d.get("ai_analyses_total") or 0.0) for d in derived]),
-            "median_accepts": _median([float(d["accepts_total"]) for d in derived]),
-            "median_rejects": _median([float(d["rejects_total"]) for d in derived]),
-            "median_runs": _median([float(d.get("runs_total") or 0.0) for d in derived]),
-        },
-        "boxplot": {
-            "total_time_seconds": total_times,
-            "time_per_problem_seconds": time_per_problem_series,
-            "ai_generations_total": ai_gen_total_series,
-            "ai_generations_per_problem": ai_per_problem_series,
-            "ai_analyses_total": ai_analyses_total_series,
-            "ai_analyses_per_problem": ai_analyses_per_problem_series,
-            "accepts_total": acc_total_series,
-            "rejects_total": rej_total_series,
-            "accepts_per_problem": acc_per_problem_series,
-            "rejects_per_problem": rej_per_problem_series,
-            "runs_total": run_total_series,
-            "runs_per_problem": run_per_problem_series,
-        },
+        "summary": summary,
+        "boxplot": boxplot,
+        "summary_by_condition": summary_by_condition,
+        "boxplot_by_condition": boxplot_by_condition,
     }
     return sanitize_for_json(payload)  # type: ignore[return-value]
 
@@ -1451,10 +1514,13 @@ def _checkpoint_session_to_user_data(checkpoint: Dict[str, Any]) -> Optional[Dic
     sess = checkpoint.get("session")
     if not isinstance(sess, dict):
         return None
-    user_id = sess.get("user_id") or checkpoint.get("user_id") or "unknown"
     session_id = sess.get("session_id") or ""
     if not session_id:
         return None
+    user_id = _resolved_participant_user_id(
+        sess.get("user_id") or checkpoint.get("user_id"),
+        session_id,
+    )
 
     session_metadata: Dict[str, Any] = {
         "user_id": user_id,

@@ -811,6 +811,8 @@
         const userIdInput = document.getElementById('userId');
         const assignmentKeyInput = document.getElementById('assignmentKey');
         const programmingLanguageSelect = document.getElementById('programmingLanguage');
+        /** True when opened via /quiz/{access_code} — must use /quiz/join only, not legacy /authenticate. */
+        const IS_QUIZ_MODE = {{ (quiz_mode is defined and quiz_mode) | tojson }};
 
         let consentGiven = false;
 
@@ -955,7 +957,68 @@
             hideError();
             
             try {
-                // Try standard assignment key auth first
+                // Instructor quiz share link: never call legacy /authenticate first — if the access code
+                // matches CONDITION_*_PREFIXES in .env, legacy auth would "win" and assign the wrong arm.
+                if (IS_QUIZ_MODE) {
+                    const quizRes = await fetch('/quiz/join', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            access_code: assignmentKey,
+                            user_id: userId,
+                            programming_language: selectedLanguage
+                        })
+                    });
+                    if (!quizRes.ok) {
+                        const quizErr = await quizRes.json().catch(() => ({}));
+                        throw new Error(quizErr.detail || 'Could not join this quiz. Check the code and try again.');
+                    }
+                    const data = await quizRes.json();
+                    const sessionToken = Date.now().toString(36) + Math.random().toString(36).substring(2);
+                    sessionStorage.setItem('authData', JSON.stringify({
+                        userId: userId,
+                        assignmentKey: 'quiz_' + assignmentKey,
+                        sessionToken: sessionToken,
+                        condition: data.condition,
+                        problemDescription: data.problem_description,
+                        sessionId: data.session_id,
+                        programmingLanguage: selectedLanguage,
+                        timestamp: new Date().toISOString(),
+                        consentGiven: true,
+                        consentTimestamp: new Date().toISOString(),
+                        pasteAllowed: data.paste_allowed !== undefined ? data.paste_allowed : 1,
+                        tabTrackingEnabled: data.tab_tracking_enabled !== false,
+                        hasPreSurvey: data.has_pre_survey || false,
+                        hasPostSurvey: data.has_post_survey || false,
+                        starterCode: data.starter_code || null,
+                        starterFiles: data.starter_files || null,
+                        periodicSurveyEnabled: data.periodic_survey_enabled === true,
+                        periodicSurveyStart: data.periodic_survey_start || 5,
+                        periodicSurveyInterval: data.periodic_survey_interval || 4,
+                        finalSurveyDisabled: data.final_survey_disabled === true,
+                        quizId: data.quiz_id || null,
+                        quizTeaser: data.quiz_teaser || '',
+                        timeLimitMinutes: data.time_limit_minutes || 0,
+                        totalProblems: data.total_problems || 1,
+                        currentProblemIndex: data.current_problem_index || 0,
+                        resumed: data.resumed === true,
+                        editorDraftCode: data.editor_draft_code || null,
+                    }));
+
+                    loginButton.innerHTML = 'Authenticated! Redirecting...';
+                    loginButton.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
+
+                    let redirectUrl;
+                    if (data.has_pre_survey) {
+                        redirectUrl = '/survey.html?type=pre';
+                    } else {
+                        redirectUrl = '/index.html?session=' + sessionToken + '&user=' + encodeURIComponent(userId);
+                    }
+                    setTimeout(() => { window.location.href = redirectUrl; }, 1000);
+                    return;
+                }
+
+                // Standard home: try legacy assignment key auth first
                 const response = await fetch('/authenticate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -967,7 +1030,7 @@
                 });
 
                 if (!response.ok) {
-                    // Standard auth failed — try as instructor-created assignment
+                    // Standard auth failed — try as instructor quiz access code (same box on home page)
                     const quizRes = await fetch('/quiz/join', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },

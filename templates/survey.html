@@ -846,8 +846,8 @@
         }
 
         function surveySanitizeIdPart(s) {
-            const t = String(s || 'unknown').replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80);
-            return t || 'unknown';
+            const t = String(s || '').replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80);
+            return t || 'participant';
         }
 
         function surveyDownloadTimestampSegment() {
