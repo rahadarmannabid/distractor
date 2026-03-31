@@ -1235,6 +1235,7 @@ def aggregate_quiz_analytics(
 
     sessions_considered = len(derived)
     completed_count = sum(1 for d in derived if d["completed_assignment"])
+    incomplete_count = sessions_considered - completed_count
 
     completion_by_problem = [0] * n
     for d in derived:
@@ -1387,6 +1388,7 @@ def aggregate_quiz_analytics(
         "problem_labels": problem_labels,
         "sessions_considered": sessions_considered,
         "completed_assignments": completed_count,
+        "incomplete_sessions": incomplete_count,
         "completion_by_problem": completion_by_problem,
         "per_problem_completion": per_problem_completion,
         "per_problem_activity_breakdown": any_pi,
@@ -1419,8 +1421,88 @@ def aggregate_quiz_analytics(
     return sanitize_for_json(payload)  # type: ignore[return-value]
 
 
+def _checkpoint_session_to_user_data(checkpoint: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Convert a checkpoint payload (raw SessionLog dump) into the user_data shape analytics expects."""
+    sess = checkpoint.get("session")
+    if not isinstance(sess, dict):
+        return None
+    user_id = sess.get("user_id") or checkpoint.get("user_id") or "unknown"
+    session_id = sess.get("session_id") or ""
+    if not session_id:
+        return None
+
+    session_metadata: Dict[str, Any] = {
+        "user_id": user_id,
+        "assignment_key": sess.get("assignment_id") or checkpoint.get("assignment_id") or "",
+        "session_id": session_id,
+        "condition": sess.get("condition") or checkpoint.get("condition"),
+        "programming_language": "unknown",
+        "starting_time": sess.get("code_start_timestamp"),
+        "end_time": sess.get("code_submit_timestamp"),  # None for truly incomplete
+        "submitted_code": sess.get("submitted_full_code"),
+        "submitted_files": sess.get("submitted_files"),
+        "suggestion_clicked": 0,
+        "compiler_clicked": 0,
+        "total_problems": sess.get("total_problems", 1),
+        "per_problem_submissions": sess.get("per_problem_submissions") or [],
+    }
+    if sess.get("quiz_id"):
+        session_metadata["quiz_id"] = sess["quiz_id"]
+
+    activity_entries = sess.get("activity_log") or []
+    activity_summary = sess.get("activity_summary") or {}
+    activity_log_data: Dict[str, Any] = {
+        "entries": activity_entries if isinstance(activity_entries, list) else [],
+        "summary": activity_summary if isinstance(activity_summary, dict) else {},
+    }
+
+    logs_data: Dict[str, Any] = {"ai_guesses": {}}
+    ai_hist = sess.get("ai_guess_history") or []
+    if isinstance(ai_hist, list):
+        for i, entry in enumerate(ai_hist, 1):
+            if isinstance(entry, dict):
+                logs_data["ai_guesses"][str(i)] = {
+                    "ai_analysis": entry.get("problem_analysis", ""),
+                    "timestamp": entry.get("timestamp", ""),
+                    "next_line_suggestion": entry.get("next_line_suggestion", ""),
+                    "full_code_suggestion": entry.get("full_code_suggestion", ""),
+                    "user_code_snapshot": entry.get("user_code_snapshot", ""),
+                }
+
+    user_data: Dict[str, Any] = {
+        "session_metadata": session_metadata,
+        "logs": logs_data,
+        "activity_log": activity_log_data,
+        "_from_checkpoint": True,
+    }
+
+    if sess.get("pre_survey_responses") and isinstance(sess["pre_survey_responses"], dict):
+        user_data["pre_survey"] = {
+            "status": sess.get("pre_survey_status", "not_started"),
+            "timestamp": sess.get("pre_survey_timestamp"),
+            "completed": sess.get("pre_survey_status") in ("completed", "COMPLETED"),
+            "questions": sess["pre_survey_responses"].get("questions", []),
+            "responses": sess["pre_survey_responses"].get("responses", []),
+        }
+
+    if sess.get("periodic_surveys") and isinstance(sess["periodic_surveys"], list):
+        occs: Dict[str, Any] = {}
+        for idx, ps in enumerate(sess["periodic_surveys"]):
+            if isinstance(ps, dict):
+                key = f"occurrence_{ps.get('occurrence', idx + 1)}"
+                occs[key] = ps
+        if occs:
+            user_data["periodic_surveys"] = {"metadata": {}, "occurrences": occs}
+
+    return user_data
+
+
 def collect_quiz_sessions_from_firebase(db, quiz_id: str) -> List[Dict[str, Any]]:
-    """Load user payloads from condition_1..3 / quiz_{prefix} / * and mirror sessions/final_submit."""
+    """Load user payloads from condition_1..3 / quiz_{prefix} / * and mirror sessions/final_submit.
+
+    Also picks up incomplete sessions from sessions/{id}/checkpoint when no
+    final_submit exists, so abandoned/in-progress students appear in analytics.
+    """
     prefix = f"quiz_{quiz_id[:8]}"
     out: List[Dict[str, Any]] = []
     seen_ids: set = set()
@@ -1448,6 +1530,7 @@ def collect_quiz_sessions_from_firebase(db, quiz_id: str) -> List[Dict[str, Any]
 
     # Mirror path (same payload as save_session_to_firebase writes under sessions/{id}/final_submit)
     needle = f"_quiz_{quiz_id[:8]}_"
+    checkpoint_candidates: List[Dict[str, Any]] = []
     try:
         sessions_root = db.reference("sessions")
         shallow = sessions_root.get(shallow=True)
@@ -1456,13 +1539,23 @@ def collect_quiz_sessions_from_firebase(db, quiz_id: str) -> List[Dict[str, Any]
                 if not isinstance(sid, str) or needle not in sid:
                     continue
                 final = db.reference(f"sessions/{sid}/final_submit").get()
-                if not isinstance(final, dict):
-                    continue
-                ud = final.get("user_data")
-                if isinstance(ud, dict):
-                    _append_payload(ud)
+                if isinstance(final, dict):
+                    ud = final.get("user_data")
+                    if isinstance(ud, dict):
+                        _append_payload(ud)
+                else:
+                    # No final_submit — try checkpoint (incomplete session)
+                    cp = db.reference(f"sessions/{sid}/checkpoint").get()
+                    if isinstance(cp, dict):
+                        checkpoint_candidates.append(cp)
     except Exception as e:
-        logger.warning("sessions/final_submit mirror scan failed: %s", e)
+        logger.warning("sessions mirror scan failed: %s", e)
+
+    # Convert checkpoint-only sessions to user_data format
+    for cp in checkpoint_candidates:
+        ud = _checkpoint_session_to_user_data(cp)
+        if ud is not None:
+            _append_payload(ud)
 
     return out
 

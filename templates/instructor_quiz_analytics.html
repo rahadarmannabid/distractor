@@ -82,6 +82,25 @@
     .kpi .value { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1.2; }
     .kpi .hint { font-size: 0.65rem; color: #64748b; margin-top: 4px; line-height: 1.3; }
 
+    .status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .status-completed {
+      background: #d1fae5;
+      color: #065f46;
+    }
+    .status-incomplete {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    .col-status { text-align: center; min-width: 80px; }
+
     .chart-grid {
       display: grid;
       grid-template-columns: 1fr;
@@ -614,6 +633,7 @@
               <thead>
                 <tr>
                   <th class="col-user">User</th>
+                  <th class="col-status">Status</th>
                   <th class="col-time">Time</th>
                   <th class="col-per-problem">Per problem</th>
                   <th>AI gen</th>
@@ -802,6 +822,7 @@
           '<div class="kpi live"><div class="label">Active now</div><div class="value">' + liveTotal + '</div><div class="hint">This server</div></div>',
           '<div class="kpi"><div class="label">Avg. compilation</div><div class="value">' + fmtNum(avgCompilation) + '</div><div class="hint">Mean code runs per session</div></div>',
           '<div class="kpi success"><div class="label">Completed</div><div class="value">' + (data.completed_assignments || 0) + '</div><div class="hint">Final submit</div></div>',
+          '<div class="kpi' + ((data.incomplete_sessions || 0) > 0 ? ' warn' : '') + '"><div class="label">Incomplete</div><div class="value">' + (data.incomplete_sessions || 0) + '</div><div class="hint">Left without submitting</div></div>',
           '<div class="kpi"><div class="label">Med. session time</div><div class="value">' + fmtNum(summary.median_session_time_seconds) + '</div><div class="hint">sec · completed (focus if logged)</div></div>',
           '<div class="kpi warn"><div class="label">Med. AI gen</div><div class="value">' + fmtNum(summary.median_ai_generations) + '</div><div class="hint">per session</div></div>',
           '<div class="kpi"><div class="label">Accepted</div><div class="value">' + totalAccepts + '</div><div class="hint">Σ all · med ' + fmtNum(medAccept) + '/session</div></div>',
@@ -831,7 +852,8 @@
         var comp = data.completion_by_problem || [];
         var compCats = ['Total'].concat(labels.map(function(_, i) { return 'P' + (i + 1); }));
         var compData = [data.completed_assignments || 0].concat(comp);
-        document.getElementById('overlay-completion').innerHTML = '<strong>' + (data.completed_assignments || 0) + '</strong> completed\n' + n + ' sessions';
+        var incompleteN = data.incomplete_sessions || 0;
+        document.getElementById('overlay-completion').innerHTML = '<strong>' + (data.completed_assignments || 0) + '</strong> completed' + (incompleteN > 0 ? ' · <strong>' + incompleteN + '</strong> incomplete' : '') + '\n' + n + ' sessions';
         initChart('chart-completion', Object.assign(baseOption(), {
           grid: { left: 40, right: 12, top: 20, bottom: 36 },
           xAxis: { type: 'category', data: compCats, axisLine: { lineStyle: { color: THEME.border } }, axisLabel: { color: THEME.text, fontSize: 10, interval: 0 } },
@@ -1252,6 +1274,7 @@
 
             var uidEnc = encodeURIComponent(String(row.user_id || ''));
             var uidRaw = String(row.user_id || '');
+            var isCompleted = !!row.completed_assignment;
             return {
               user:
                 '<a class="user-log-link" href="/instructor/quiz/' +
@@ -1261,6 +1284,9 @@
                 '" title="Open AI activity log for this user">' +
                 escHtml(uidRaw) +
                 '</a>',
+              status: isCompleted
+                ? '<span class="status-badge status-completed">Completed</span>'
+                : '<span class="status-badge status-incomplete">Incomplete</span>',
               time: formatTimeCell(row),
               perProblem: '<div class="cell-multi per-problem-mini-wrap">' + perProblemHtml + '</div>',
               aiGen: formatNum(row.ai_generated_total, 0),
@@ -1306,6 +1332,7 @@
               var tr = document.createElement('tr');
               tr.innerHTML =
                 '<td class="col-user">' + cols.user + '</td>' +
+                '<td class="col-status">' + cols.status + '</td>' +
                 '<td class="col-time">' + cols.time + '</td>' +
                 '<td class="col-per-problem">' + cols.perProblem + '</td>' +
                 '<td class="col-ai">' + escHtml(cols.aiGen) + '</td>' +
