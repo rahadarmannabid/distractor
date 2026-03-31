@@ -831,8 +831,10 @@ async def quiz_activity_log_page(
 
     sm = payload.get("session_metadata")
     prog_lang = ""
+    session_condition = None
     if isinstance(sm, dict):
         prog_lang = str(sm.get("programming_language") or "").strip()
+        session_condition = sm.get("condition")
 
     log = build_user_ai_activity_log(payload, labels)
     rows = log.get("rows") or []
@@ -847,6 +849,7 @@ async def quiz_activity_log_page(
             "user_id": log.get("user_id") or uid,
             "user_id_query": uid_q,
             "programming_language": prog_lang,
+            "condition": session_condition,
             "log_rows": rows,
             "problem_tables": problem_tables,
             "session_id": log.get("session_id"),

@@ -407,6 +407,7 @@ def derive_session_metrics(
 
     user_id = str(meta.get("user_id") or "unknown")
     session_id = str(meta.get("session_id") or "")
+    condition = meta.get("condition")
 
     per_rows = _firebase_to_list(meta.get("per_problem_submissions"))
 
@@ -629,6 +630,7 @@ def derive_session_metrics(
     return {
         "user_id": user_id,
         "session_id": session_id,
+        "condition": condition,
         "completed_assignment": completed_assignment,
         "completed_problem": completed_problem[:num_problems] if num_problems else [False],
         "total_time_seconds": total_time_seconds,
@@ -1237,6 +1239,27 @@ def aggregate_quiz_analytics(
     completed_count = sum(1 for d in derived if d["completed_assignment"])
     incomplete_count = sessions_considered - completed_count
 
+    # Per-condition breakdown
+    condition_totals: Dict[str, int] = {}
+    condition_completed: Dict[str, int] = {}
+    condition_incomplete: Dict[str, int] = {}
+    for d in derived:
+        cond_raw = d.get("condition")
+        cond_key = str(cond_raw) if cond_raw is not None else "unknown"
+        condition_totals[cond_key] = condition_totals.get(cond_key, 0) + 1
+        if d["completed_assignment"]:
+            condition_completed[cond_key] = condition_completed.get(cond_key, 0) + 1
+        else:
+            condition_incomplete[cond_key] = condition_incomplete.get(cond_key, 0) + 1
+
+    all_conds = sorted(condition_totals.keys(), key=lambda k: (k == "unknown", k))
+    condition_breakdown = {
+        "conditions": all_conds,
+        "totals": [condition_totals.get(c, 0) for c in all_conds],
+        "completed": [condition_completed.get(c, 0) for c in all_conds],
+        "incomplete": [condition_incomplete.get(c, 0) for c in all_conds],
+    }
+
     completion_by_problem = [0] * n
     for d in derived:
         cp = d.get("completed_problem") or []
@@ -1331,6 +1354,7 @@ def aggregate_quiz_analytics(
             {
                 "user_id": d.get("user_id") or "unknown",
                 "session_id": d.get("session_id") or "",
+                "condition": d.get("condition"),
                 "completed_assignment": d.get("completed_assignment"),
                 "total_time_seconds": d.get("total_time_seconds"),
                 "focus_time_seconds": d.get("focus_time_seconds"),
@@ -1389,6 +1413,7 @@ def aggregate_quiz_analytics(
         "sessions_considered": sessions_considered,
         "completed_assignments": completed_count,
         "incomplete_sessions": incomplete_count,
+        "condition_breakdown": condition_breakdown,
         "completion_by_problem": completion_by_problem,
         "per_problem_completion": per_problem_completion,
         "per_problem_activity_breakdown": any_pi,
