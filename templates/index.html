@@ -3504,7 +3504,10 @@ async function initializeFromURL() {
                 }
                 if (assignmentPanelHtmlIsPresent(htmlRaw)) {
                     var toInsert = htmlRaw;
-                    if (/&lt;[a-z]/i.test(toInsert) && !/<[a-z]/i.test(toInsert.slice(0, Math.min(toInsert.length, 500)))) {
+                    // Double-encoded fragments (&amp;lt;p&amp;gt;) or entity-only bodies after wrappers (<div>…&lt;p&gt;…)
+                    if (/&amp;lt;[a-z]/i.test(toInsert)) {
+                        toInsert = decodeHtmlEntities(toInsert);
+                    } else if (/&lt;[a-z]/i.test(toInsert) && !/<[a-z]/i.test(toInsert.slice(0, Math.min(toInsert.length, 500)))) {
                         toInsert = decodeHtmlEntities(toInsert);
                     }
                     problemBody.innerHTML = toInsert;

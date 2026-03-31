@@ -46,6 +46,11 @@ logger = logging.getLogger(__name__)
 
 # Instructor quiz problem fields may contain HTML from the rich-text editor (Quill).
 _HTML_TAG_RE = re.compile(r"<[a-zA-Z][\w:-]*(?:\s[^>]*)?>")
+# Quill-like tags when stored as entities only (no literal '<' yet) — avoid false positives on "&lt;3"
+_ENTITY_HTML_TAG_OPEN_RE = re.compile(
+    r"&lt;(?:p|br|strong|em|b|i|u|ul|ol|li|div|span|h[1-4]|blockquote|pre|code|a|hr)\b",
+    re.IGNORECASE,
+)
 
 
 def _field_looks_like_html(s: str) -> bool:
@@ -135,6 +140,16 @@ def format_instructor_problem_html_field(raw: Optional[str]) -> tuple[str, bool]
         return "", False
     s = str(raw).strip()
     s = _maybe_unescape_stored_html_entities(s)
+    # If markup is only entity-encoded (&lt;p&gt;...) _field_looks_like_html misses (no literal '<'),
+    # we must not html.escape() that — it becomes &amp;lt; and the panel shows raw "<p>" as text.
+    if _ENTITY_HTML_TAG_OPEN_RE.search(s) and not _HTML_TAG_RE.search(s):
+        for _ in range(4):
+            s2 = html_std.unescape(s)
+            if s2 == s:
+                break
+            s = s2
+            if _HTML_TAG_RE.search(s):
+                break
     if not _field_looks_like_html(s):
         return html_std.escape(s), False
     return sanitize_instructor_rich_html(s), True
@@ -1284,6 +1299,34 @@ def get_response(prompt):
         logger.error(f"OpenAI API error: {e}")
         return f"Error getting AI response: {str(e)}"
 
+def _code_slice_at_cursor(
+    code: str,
+    cursor_line: Optional[int],
+    cursor_column: Optional[int],
+) -> str:
+    """
+    Return editor text strictly before the cursor (prefix). Line and column are 1-based
+    (Monaco / VS Code). If cursor is missing or out of range, returns `code` unchanged.
+    """
+    if not code:
+        return code
+    if cursor_line is None or cursor_line < 1:
+        return code
+    lines = code.split("\n")
+    if cursor_line > len(lines):
+        return code
+    idx = cursor_line - 1
+    line = lines[idx]
+    if cursor_column is None or cursor_column < 1:
+        col0 = len(line)
+    else:
+        col0 = min(cursor_column - 1, len(line))
+    head = "\n".join(lines[:idx])
+    if head:
+        return head + "\n" + line[:col0]
+    return line[:col0]
+
+
 def _clamp_problem_description_to_lines(text: str, max_lines: int = 3) -> str:
     """Keep explanation short: at most `max_lines` non-empty lines (LeetCode-style brevity)."""
     if not text or not str(text).strip():
@@ -1791,7 +1834,7 @@ def predict_next_line(problem_description, existing_code, language=None):
     The last lines already written are:
     {last_lines_str}
     
-    The cursor is at the END of the code above, on a new blank line.
+    The fragment above ends where the user's cursor is (nothing below the cursor is visible).
     Generate ONLY the next single line of code that should logically follow AFTER the last line above.
     
     Rules:
@@ -1952,27 +1995,34 @@ async def analyze_code(request: CodeRequest):
     FIXED: Generate separate suggestions for AI guess and correct description
     """
     try:
-        code = request.code.strip()
+        code_full = request.code.replace("\r\n", "\n").replace("\r", "\n")
         session_id = request.session_id
         
         max_code_length = int(os.getenv("MAX_CODE_LENGTH", "10000"))
-        if len(code) > max_code_length:
+        if len(code_full) > max_code_length:
             raise HTTPException(status_code=400, detail=f"Code too long - please keep under {max_code_length} characters")
         
-        if not code:
+        if not code_full.strip():
             return CodeResponse(
                 analysis="Start typing code to get AI-powered problem analysis...",
                 next_line="",
                 suggestion_kind="next_line",
             )
+
+        # Prefix up to cursor so next-line / full-buffer suggestions match caret (Monaco: 1-based line/col).
+        code_for_suggestion = _code_slice_at_cursor(
+            code_full, request.cursor_line, request.cursor_column
+        )
+        if request.cursor_line is not None and request.cursor_line >= 1 and not str(code_for_suggestion).strip():
+            code_for_suggestion = code_full
         
-        language = request.programming_language or detect_programming_language(code)
+        language = request.programming_language or detect_programming_language(code_full)
 
         # Skip heavy suggestions only for tiny snippets (was 10 — too strict, blocked early edits)
         min_chars = int(os.getenv("MIN_CODE_CHARS_FOR_SUGGESTION", "3"))
-        if len(code.strip()) < min_chars:
+        if len(code_full.strip()) < min_chars:
             return CodeResponse(
-                analysis=f"Code snippet in progress: {code.strip()} (detected: {language})",
+                analysis=f"Code snippet in progress: {code_full.strip()} (detected: {language})",
                 next_line="",
                 suggestion_kind="next_line",
             )
@@ -1980,7 +2030,7 @@ async def analyze_code(request: CodeRequest):
         # Step 1: Analyze what problem the code is trying to solve (thread pool — do not block event loop)
         loop = asyncio.get_event_loop()
         problem_description = await loop.run_in_executor(
-            None, lambda: analyze_problem_statement(code, language=language)
+            None, lambda: analyze_problem_statement(code_for_suggestion, language=language)
         )
         
         # Clean problem description
@@ -2000,16 +2050,16 @@ async def analyze_code(request: CodeRequest):
         # Prepare concurrent tasks
         tasks = []
         
-        ai_next_line_task = get_ai_next_line_async(problem_description, code, language=language)
-        ai_full_code_task = get_full_code_suggestion_async(problem_description, code, is_correct_description=False, language=language)
+        ai_next_line_task = get_ai_next_line_async(problem_description, code_for_suggestion, language=language)
+        ai_full_code_task = get_full_code_suggestion_async(problem_description, code_for_suggestion, is_correct_description=False, language=language)
         tasks.extend([ai_next_line_task, ai_full_code_task])
 
         # For condition 1, also get correct description suggestions concurrently
         correct_next_line_task = None
         correct_full_code_task = None
         if session_log and session_log.condition == 1 and session_log.problem_description:
-            correct_next_line_task = get_correct_next_line_async(session_log.problem_description, code, language=language)
-            correct_full_code_task = get_full_code_suggestion_async(session_log.problem_description, code, is_correct_description=True, language=language)
+            correct_next_line_task = get_correct_next_line_async(session_log.problem_description, code_for_suggestion, language=language)
+            correct_full_code_task = get_full_code_suggestion_async(session_log.problem_description, code_for_suggestion, is_correct_description=True, language=language)
             tasks.extend([correct_next_line_task, correct_full_code_task])
         
         # Execute all tasks concurrently
@@ -2042,7 +2092,7 @@ async def analyze_code(request: CodeRequest):
         # Fallback: next-line model often returns empty after dedup/comments; full-code task may still succeed
         if not ai_next_line.strip() and ai_full_code_suggestion:
             fb = _next_line_from_full_completion(
-                code, ai_full_code_suggestion, max_lines=2, language=language
+                code_for_suggestion, ai_full_code_suggestion, max_lines=2, language=language
             )
             if fb:
                 ai_next_line = fb
@@ -2072,7 +2122,7 @@ async def analyze_code(request: CodeRequest):
             and correct_full_code_suggestion
         ):
             cfb = _next_line_from_full_completion(
-                code, correct_full_code_suggestion, max_lines=2, language=language
+                code_for_suggestion, correct_full_code_suggestion, max_lines=2, language=language
             )
             if cfb:
                 correct_next_line = cfb
@@ -2086,7 +2136,7 @@ async def analyze_code(request: CodeRequest):
                 full_code_suggestion=ai_full_code_suggestion,
                 timestamp=datetime.now().isoformat(),
                 analysis_type="ai_problem_guess",
-                user_code_snapshot=code
+                user_code_snapshot=code_full,
             )
             session_log.ai_guess_history.append(ai_guess_entry)
             
@@ -2110,7 +2160,7 @@ async def analyze_code(request: CodeRequest):
                     full_code_suggestion=correct_full_code_suggestion,
                     timestamp=datetime.now().isoformat(),
                     analysis_type="correct_description",
-                    user_code_snapshot=code
+                    user_code_snapshot=code_full,
                 )
                 session_log.correct_description_history.append(correct_desc_entry)
             
@@ -2126,7 +2176,7 @@ async def analyze_code(request: CodeRequest):
                     full_code_suggestion=ai_full_code_suggestion,
                     timestamp=datetime.now().isoformat(),
                     analysis_type="suggestions_only",
-                    user_code_snapshot=code
+                    user_code_snapshot=code_full,
                 )
                 session_log.suggestions_only_history.append(suggestions_entry)
             
