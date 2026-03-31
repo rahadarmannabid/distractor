@@ -207,14 +207,32 @@ def _normalize_quiz_data(quiz_data: dict) -> dict:
                 prob["test_cases"] = ""
             if not prob.get("_has_surveys"):
                 prob["_has_surveys"] = True
-                prob["pre_survey_enabled"] = bool(quiz_pre)
-                prob["pre_survey"] = quiz_pre
-                prob["post_survey_enabled"] = bool(quiz_post)
-                prob["post_survey"] = quiz_post
-                prob["recurrent_survey_enabled"] = bool(quiz_rec)
-                prob["recurrent_survey"] = quiz_rec
-                prob["recurrent_survey_interval"] = quiz_rec_interval
-                prob["recurrent_survey_start"] = quiz_rec_start
+                # If this problem already has its own survey question lists, do not replace them
+                # with quiz-level copies (often empty) — that wiped problem 2+ on duplicate / load.
+                has_own_surveys = any(
+                    len(prob.get(k) or []) > 0
+                    for k in ("pre_survey", "post_survey", "recurrent_survey")
+                )
+                if has_own_surveys:
+                    if "pre_survey_enabled" not in prob:
+                        prob["pre_survey_enabled"] = bool(prob.get("pre_survey"))
+                    if "post_survey_enabled" not in prob:
+                        prob["post_survey_enabled"] = bool(prob.get("post_survey"))
+                    if "recurrent_survey_enabled" not in prob:
+                        prob["recurrent_survey_enabled"] = bool(prob.get("recurrent_survey"))
+                    if "recurrent_survey_interval" not in prob:
+                        prob["recurrent_survey_interval"] = quiz_rec_interval
+                    if "recurrent_survey_start" not in prob:
+                        prob["recurrent_survey_start"] = quiz_rec_start
+                else:
+                    prob["pre_survey_enabled"] = bool(quiz_pre)
+                    prob["pre_survey"] = quiz_pre
+                    prob["post_survey_enabled"] = bool(quiz_post)
+                    prob["post_survey"] = quiz_post
+                    prob["recurrent_survey_enabled"] = bool(quiz_rec)
+                    prob["recurrent_survey"] = quiz_rec
+                    prob["recurrent_survey_interval"] = quiz_rec_interval
+                    prob["recurrent_survey_start"] = quiz_rec_start
 
     return quiz_data
 

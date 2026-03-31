@@ -52,12 +52,12 @@ if [ "${1:-}" = "local" ]; then
     echo "Tag:        $TAG"
     echo "=========================================="
     if [ "$DOCKER_BUILD_NO_CACHE" = "1" ]; then
-        docker build --no-cache -f dockerfile \
+        docker build --no-cache -f Dockerfile \
             -t "${DOCKER_REPO}:${TAG}" \
             -t "${DOCKER_REPO}:latest" \
             .
     else
-        docker build -f dockerfile \
+        docker build -f Dockerfile \
             -t "${DOCKER_REPO}:${TAG}" \
             -t "${DOCKER_REPO}:latest" \
             .
@@ -100,7 +100,7 @@ echo "Building and pushing manifest (per-arch layers + combined tag)..."
 if [ "$DOCKER_BUILD_NO_CACHE" = "1" ]; then
     docker buildx build --no-cache \
         --platform "$DOCKER_PLATFORMS" \
-        -f dockerfile \
+        -f Dockerfile \
         -t "${DOCKER_REPO}:${VERSION}" \
         -t "${DOCKER_REPO}:latest" \
         --push \
@@ -108,7 +108,7 @@ if [ "$DOCKER_BUILD_NO_CACHE" = "1" ]; then
 else
     docker buildx build \
         --platform "$DOCKER_PLATFORMS" \
-        -f dockerfile \
+        -f Dockerfile \
         -t "${DOCKER_REPO}:${VERSION}" \
         -t "${DOCKER_REPO}:latest" \
         --push \

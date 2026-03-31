@@ -31,6 +31,7 @@ COPY --chown=appuser:appuser . .
 # Verify layout (no .env required — configure via container env at run time)
 RUN echo "=== VERIFYING CRITICAL FILES ===" && \
     test -f /app/main.py && test -f /app/admin.py && \
+    test -f /app/run_production.sh && \
     test -d /app/templates && \
     test -f /app/templates/home.html && \
     test -f /app/templates/index.html && \
@@ -39,13 +40,15 @@ RUN echo "=== VERIFYING CRITICAL FILES ===" && \
     echo "✅ Verification complete"
 
 RUN mkdir -p submissions session_logs logs surveys/quiz_assets && \
+    chmod +x /app/run_production.sh && \
     chown -R appuser:appuser /app
 
 USER appuser
 
 EXPOSE 8000
 
+# gunicorn + UvicornWorker (see run_production.sh). Set API_PORT / WEB_CONCURRENCY / REDIS_URL at runtime.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
+CMD ["./run_production.sh"]
