@@ -2194,6 +2194,7 @@ let lastSaveTime = null;
 var _lastServerEditorCheckpointAt = 0;
 var SERVER_EDITOR_CHECKPOINT_MIN_MS = 12000;
 var _serverEditorCheckpointTimer = null;
+var _savePending = false;
 
 function getPendingActivityStorageKey() {
     if (!currentSession.sessionId) return null;
@@ -2224,6 +2225,14 @@ async function postActivityBatchToServer(activities) {
         })
     });
     return response.ok;
+}
+
+/** Serialize activity uploads so many concurrent batches do not stampede the server. */
+var _activityUploadChain = Promise.resolve();
+function queueActivityBatchUpload() {
+    _activityUploadChain = _activityUploadChain.then(function() {
+        return uploadActivityBatch();
+    });
 }
 
 async function flushPendingActivityQueueFromStorage() {
@@ -2402,6 +2411,7 @@ function saveProgress() {
             addTerminalOutput('⚠️ Storage quota exceeded. Consider clearing browser cache.', 'warning');
         }
     }
+    return Promise.resolve();
 }
 
 function restoreProgress() {
@@ -2609,8 +2619,13 @@ function startAutoSave() {
     }
     
     autosaveTimer = setInterval(() => {
-        if (currentSession.sessionId && editor) {
-            saveProgress();
+        if (currentSession.sessionId && editor && !_savePending) {
+            _savePending = true;
+            try {
+                saveProgress();
+            } finally {
+                _savePending = false;
+            }
         }
     }, AUTOSAVE_INTERVAL);
     
@@ -2631,7 +2646,13 @@ function onEditorChange() {
     }
     
     editorChangeTimeout = setTimeout(() => {
-        saveProgress();
+        if (_savePending) return;
+        _savePending = true;
+        try {
+            saveProgress();
+        } finally {
+            _savePending = false;
+        }
     }, 3000);
 }
 // END AUTO-SAVE FUNCTIONALITY
@@ -2732,6 +2753,8 @@ const ACTIVITY_BATCH_SIZE = 10;
 
 // ADD submission state flag
 let isSubmissionInProgress = false;
+/** Prevents double submit while /analyze and download run before submitButton is disabled. */
+let _submitInflight = false;
 
     // UI Elements
     const loadingScreen = document.getElementById('loadingScreen');
@@ -2997,7 +3020,7 @@ function logActivity(activityType, activityDetails = {}, sessionContext = {}) {
     activityBuffer.push(activity);
     
     if (activityBuffer.length >= ACTIVITY_BATCH_SIZE) {
-        uploadActivityBatch();
+        queueActivityBatchUpload();
     }
 }
 
@@ -3748,7 +3771,7 @@ async function initializeFromURL() {
             // Set up periodic activity uploads
             setInterval(() => {
                 if (activityBuffer.length > 0) {
-                    uploadActivityBatch();
+                    queueActivityBatchUpload();
                 }
             }, 30000); // Upload every 30 seconds
 
@@ -3760,7 +3783,7 @@ async function initializeFromURL() {
 
             window.addEventListener('online', function() {
                 flushPendingActivityQueueFromStorage();
-                if (activityBuffer.length > 0) uploadActivityBatch();
+                if (activityBuffer.length > 0) queueActivityBatchUpload();
                 serverEditorCheckpoint();
             });
             setTimeout(function() { flushPendingActivityQueueFromStorage(); }, 2000);
@@ -6336,6 +6359,16 @@ async function checkAndShowPostSurvey() {
 
 // RENAME the original function
 async function proceedWithActualSubmission() {
+    if (_submitInflight) {
+        addTerminalOutput('Submission already in progress…', 'warning');
+        return;
+    }
+    _submitInflight = true;
+    var submitButtonEarly = document.getElementById('submitButton');
+    if (submitButtonEarly) {
+        submitButtonEarly.disabled = true;
+        submitButtonEarly.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Preparing…</div>';
+    }
     // This is the original submission code
     isSubmissionInProgress = true;
     
@@ -6352,6 +6385,11 @@ async function proceedWithActualSubmission() {
         addTerminalOutput('❌ No cached submission data found!', 'error');
         alert('Submission data was lost. Please try submitting again.');
         isSubmissionInProgress = false;
+        _submitInflight = false;
+        if (submitButtonEarly) {
+            submitButtonEarly.disabled = false;
+            submitButtonEarly.innerHTML = 'SUBMIT';
+        }
         return;
     }
 
@@ -6455,6 +6493,7 @@ async function proceedWithActualSubmission() {
         submitButton.disabled = false;
         submitButton.innerHTML = 'SUBMIT';
         isSubmissionInProgress = false;
+        _submitInflight = false;
     }
     
     clearProgress();

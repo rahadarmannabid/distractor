@@ -20,17 +20,15 @@ import uuid
 import json
 import mimetypes 
 from datetime import datetime, timezone
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any, Iterator, Tuple
 import firebase_admin
 from firebase_admin import credentials, db
 from fastapi.responses import HTMLResponse, RedirectResponse
 import asyncio
 import shlex
-from typing import List, Dict, Optional, Any
 import smtplib
 from email.message import EmailMessage
 import traceback
-from typing import List, Dict, Optional, Any
 from enum import Enum
 import json
 from fastapi.responses import FileResponse
@@ -966,8 +964,92 @@ class SurveyConfig(BaseModel):
     questions: List[str]
     feedback_interval: int
 
-# Global session storage (in-memory, will be sent to Firebase on submit)
-active_sessions: Dict[str, SessionLog] = {}
+
+class ActiveSessionMap:
+    """Dict-like SessionLog storage. Use Redis when REDIS_URL is set (Koyeb multi-instance)."""
+
+    __slots__ = ("_redis", "_local", "_prefix", "_ttl")
+
+    def __init__(self) -> None:
+        self._local: Dict[str, SessionLog] = {}
+        self._redis = None
+        self._prefix = (os.getenv("SESSION_REDIS_KEY_PREFIX", "autosuggest:session:") or "autosuggest:session:").strip()
+        self._ttl = int(os.getenv("SESSION_REDIS_TTL_SECONDS", "172800"))
+        url = (os.getenv("REDIS_URL") or "").strip()
+        if url:
+            try:
+                import redis as redis_lib  # noqa: PLC0415
+
+                self._redis = redis_lib.from_url(url, decode_responses=True)
+                self._redis.ping()
+                logger.info("Session store: Redis enabled (safe across multiple workers)")
+            except Exception as exc:
+                logger.warning("REDIS_URL set but Redis unavailable (%s); using in-memory sessions", exc)
+                self._redis = None
+
+    def __getitem__(self, k: str) -> SessionLog:
+        if self._redis is None:
+            return self._local[k]
+        raw = self._redis.get(self._prefix + k)
+        if raw is None:
+            raise KeyError(k)
+        return SessionLog.model_validate_json(raw)
+
+    def __setitem__(self, k: str, v: SessionLog) -> None:
+        if self._redis is None:
+            self._local[k] = v
+            return
+        self._redis.setex(self._prefix + k, self._ttl, v.model_dump_json())
+
+    def __delitem__(self, k: str) -> None:
+        if self._redis is None:
+            del self._local[k]
+            return
+        self._redis.delete(self._prefix + k)
+
+    def __contains__(self, k: str) -> bool:
+        if self._redis is None:
+            return k in self._local
+        return bool(self._redis.exists(self._prefix + k))
+
+    def get(self, k: str, default: Any = None) -> Any:
+        try:
+            return self[k]
+        except KeyError:
+            return default
+
+    def keys(self) -> Iterator[str]:
+        if self._redis is None:
+            yield from self._local.keys()
+            return
+        p = self._prefix
+        for full in self._redis.scan_iter(match=f"{p}*"):
+            if isinstance(full, str) and full.startswith(p):
+                yield full[len(p) :]
+
+    def items(self) -> Iterator[Tuple[str, SessionLog]]:
+        for k in list(self.keys()):
+            try:
+                yield k, self[k]
+            except KeyError:
+                continue
+
+    def __len__(self) -> int:
+        return len(list(self.keys()))
+
+
+# Global session storage (Redis if REDIS_URL, else in-memory; sent to Firebase on submit)
+active_sessions: ActiveSessionMap = ActiveSessionMap()
+
+# Limit concurrent OpenAI calls to avoid rate-limit / 500 errors under heavy load.
+# Configurable via OPENAI_CONCURRENCY env var (default 5).
+_analyze_semaphore: asyncio.Semaphore = asyncio.Semaphore(
+    int(os.getenv("OPENAI_CONCURRENCY", "5"))
+)
+
+# Prevent duplicate /submit for the same session (double-click, retries, multiple tabs).
+_submit_gate = asyncio.Lock()
+_submitting_sessions: set = set()
 
 
 def get_active_quiz_session_counts(quiz_id: str) -> Dict[str, Any]:
@@ -1072,6 +1154,11 @@ def firebase_rtdb_set_with_retry(ref, value, *, max_attempts: int = 3) -> bool:
                 time.sleep(0.35 * (2**attempt))
     logger.error("Firebase set failed after %s attempts: %s", max_attempts, last_err)
     return False
+
+
+async def firebase_rtdb_set_async(ref, value, *, max_attempts: int = 3) -> bool:
+    """Non-blocking: run blocking Firebase set() in a thread pool (keeps event loop responsive)."""
+    return await asyncio.to_thread(firebase_rtdb_set_with_retry, ref, value, max_attempts=max_attempts)
 
 
 def _sanitize_firebase_key_segment(s: str) -> str:
@@ -2067,50 +2154,53 @@ async def analyze_code(request: CodeRequest):
                 suggestion_kind="next_line",
             )
 
-        # Step 1: Analyze what problem the code is trying to solve (thread pool — do not block event loop)
-        loop = asyncio.get_event_loop()
-        problem_description = await loop.run_in_executor(
-            None, lambda: analyze_problem_statement(code_for_suggestion, language=language)
-        )
-        
-        # Clean problem description
-        problem_description = re.sub(r'^\*\*.*?\*\*:\s*', '', problem_description)
-        problem_description = re.sub(r'^Problem.*?:\s*', '', problem_description, flags=re.IGNORECASE)
-        problem_description = problem_description.strip()
-        problem_description = _clamp_problem_description_to_lines(problem_description, max_lines=3)
+        # All OpenAI calls go through this semaphore so we never fire more than
+        # OPENAI_CONCURRENCY requests at once (prevents 500 / rate-limit errors).
+        async with _analyze_semaphore:
+            # Step 1: Analyze what problem the code is trying to solve (thread pool — do not block event loop)
+            loop = asyncio.get_event_loop()
+            problem_description = await loop.run_in_executor(
+                None, lambda: analyze_problem_statement(code_for_suggestion, language=language)
+            )
 
-        # Always use next_line mode (suggestions only on new lines)
-        suggestion_kind = "next_line"
-        
-        # Step 2 & 3: Concurrent API calls for better performance
-        session_log = None
-        if session_id and session_id in active_sessions:
-            session_log = active_sessions[session_id]
-        
-        # Prepare concurrent tasks
-        tasks = []
-        
-        ai_next_line_task = get_ai_next_line_async(problem_description, code_for_suggestion, language=language)
-        ai_full_code_task = get_full_code_suggestion_async(problem_description, code_for_suggestion, is_correct_description=False, language=language)
-        tasks.extend([ai_next_line_task, ai_full_code_task])
+            # Clean problem description
+            problem_description = re.sub(r'^\*\*.*?\*\*:\s*', '', problem_description)
+            problem_description = re.sub(r'^Problem.*?:\s*', '', problem_description, flags=re.IGNORECASE)
+            problem_description = problem_description.strip()
+            problem_description = _clamp_problem_description_to_lines(problem_description, max_lines=3)
 
-        # For condition 1, also get correct description suggestions concurrently
-        correct_next_line_task = None
-        correct_full_code_task = None
-        if session_log and session_log.condition == 1 and session_log.problem_description:
-            correct_next_line_task = get_correct_next_line_async(session_log.problem_description, code_for_suggestion, language=language)
-            correct_full_code_task = get_full_code_suggestion_async(session_log.problem_description, code_for_suggestion, is_correct_description=True, language=language)
-            tasks.extend([correct_next_line_task, correct_full_code_task])
-        
-        # Execute all tasks concurrently
-        if session_log and session_log.condition == 1 and session_log.problem_description:
-            # Condition 1: 4 concurrent calls
-            ai_next_line, ai_full_code_suggestion, correct_next_line, correct_full_code_suggestion = await asyncio.gather(*tasks)
-        else:
-            # Conditions 2 & 3: 2 concurrent calls
-            ai_next_line, ai_full_code_suggestion = await asyncio.gather(*tasks)
-            correct_next_line = ai_next_line  # Default fallback
-            correct_full_code_suggestion = ai_full_code_suggestion
+            # Always use next_line mode (suggestions only on new lines)
+            suggestion_kind = "next_line"
+
+            # Step 2 & 3: Concurrent API calls for better performance
+            session_log = None
+            if session_id and session_id in active_sessions:
+                session_log = active_sessions[session_id]
+
+            # Prepare concurrent tasks
+            tasks = []
+
+            ai_next_line_task = get_ai_next_line_async(problem_description, code_for_suggestion, language=language)
+            ai_full_code_task = get_full_code_suggestion_async(problem_description, code_for_suggestion, is_correct_description=False, language=language)
+            tasks.extend([ai_next_line_task, ai_full_code_task])
+
+            # For condition 1, also get correct description suggestions concurrently
+            correct_next_line_task = None
+            correct_full_code_task = None
+            if session_log and session_log.condition == 1 and session_log.problem_description:
+                correct_next_line_task = get_correct_next_line_async(session_log.problem_description, code_for_suggestion, language=language)
+                correct_full_code_task = get_full_code_suggestion_async(session_log.problem_description, code_for_suggestion, is_correct_description=True, language=language)
+                tasks.extend([correct_next_line_task, correct_full_code_task])
+
+            # Execute all tasks concurrently (still within the single semaphore slot)
+            if session_log and session_log.condition == 1 and session_log.problem_description:
+                # Condition 1: 4 concurrent calls
+                ai_next_line, ai_full_code_suggestion, correct_next_line, correct_full_code_suggestion = await asyncio.gather(*tasks)
+            else:
+                # Conditions 2 & 3: 2 concurrent calls
+                ai_next_line, ai_full_code_suggestion = await asyncio.gather(*tasks)
+                correct_next_line = ai_next_line  # Default fallback
+                correct_full_code_suggestion = ai_full_code_suggestion
         
         # Clean AI next line suggestion
         ai_next_line = re.sub(r'```\w*\n?', '', ai_next_line)
@@ -2360,6 +2450,7 @@ async def submit_code(request: SubmitRequest):
     Submit final code and upload all session data to Firebase
     AUTOMATICALLY LOGS OUT USER after successful submission
     """
+    submit_gate_session: Optional[str] = None
     try:
         code = request.code.strip()
         session_id = request.session_id
@@ -2381,10 +2472,55 @@ async def submit_code(request: SubmitRequest):
         if request.files:
             submitted_files = [{"filename": f.filename, "content": f.content} for f in request.files]
 
-        # Get session log
+        if session_id:
+            async with _submit_gate:
+                if session_id in _submitting_sessions:
+                    return SubmitResponse(
+                        status="already_submitted",
+                        message="Submission already in progress or completed",
+                        submission_id="duplicate",
+                        timestamp=datetime.now().isoformat(),
+                        firebase_status="skipped",
+                        logout_required=True,
+                    )
+                _submitting_sessions.add(session_id)
+            submit_gate_session = session_id
+
+        # Get session log — try memory first, then disk, then Firebase checkpoint
         session_log = None
-        if session_id and session_id in active_sessions:
-            session_log = active_sessions[session_id]
+        if session_id:
+            if session_id in active_sessions:
+                session_log = active_sessions[session_id]
+            else:
+                sl = load_session_log_from_disk(session_id)
+                if sl is None and firebase_db:
+                    fdb = firebase_db
+                    try:
+
+                        def _read_checkpoint():
+                            return fdb.child("sessions").child(session_id).child("checkpoint").get()
+
+                        chk = await asyncio.to_thread(_read_checkpoint)
+                        if isinstance(chk, dict) and isinstance(chk.get("session"), dict):
+                            sl = SessionLog.model_validate(chk["session"])
+                    except Exception as _fb_e:
+                        logger.warning("submit: Firebase reload failed for %s: %s", session_id, _fb_e)
+                if sl is not None:
+                    active_sessions[session_id] = sl
+                    session_log = sl
+                    logger.info("submit: reloaded session %s from storage", session_id)
+                else:
+                    logger.warning("submit: session %s not in memory/disk/Firebase — saving submission without session context", session_id)
+
+        if session_log is not None:
+            # Patch user_id / assignment_id with real values from the request when the
+            # session was reconstructed with placeholder "unknown" values (e.g. after a
+            # server restart).
+            if session_log.user_id in ("unknown", "", None) and user_id not in ("anonymous", "", None):
+                session_log.user_id = user_id
+            if session_log.assignment_id in ("unknown", "", None) and assignment_key not in ("unknown", "", None):
+                session_log.assignment_id = assignment_key
+
             session_log.code_submit_timestamp = timestamp
             session_log.submitted_full_code = code
             if submitted_files:
@@ -2420,8 +2556,10 @@ async def submit_code(request: SubmitRequest):
                 if not session_log.quiz_id:
                     try:
                         assignment_resume_write(
-                            session_log.assignment_id, session_log.user_id,
-                            session_id, completed=True,
+                            session_log.assignment_id or "",
+                            session_log.user_id or "",
+                            session_id or "",
+                            completed=True,
                         )
                     except Exception as _rw_err:
                         logger.warning("assignment_resume_write completed=True failed: %s", _rw_err)
@@ -2501,7 +2639,6 @@ async def submit_code(request: SubmitRequest):
             }
             
             # Send email asynchronously to avoid blocking the response
-            import asyncio
             loop = asyncio.get_event_loop()
             loop.run_in_executor(None, send_notification_email, email_data)
             
@@ -2519,12 +2656,16 @@ async def submit_code(request: SubmitRequest):
             firebase_status=firebase_status,
             logout_required=True
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error in code submission: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Submission failed: {str(e)}")
+    finally:
+        if submit_gate_session:
+            async with _submit_gate:
+                _submitting_sessions.discard(submit_gate_session)
 
 # Set up templates directory
 templates = Jinja2Templates(directory="templates")
@@ -2772,7 +2913,7 @@ async def checkpoint_editor(request: EditorCheckpointRequest):
         try:
             clean = json.loads(json.dumps(payload, default=str))
             ref = firebase_db.child("sessions").child(session_id).child("editor_draft")
-            firebase_editor_ok = firebase_rtdb_set_with_retry(ref, clean, max_attempts=3)
+            firebase_editor_ok = await firebase_rtdb_set_async(ref, clean, max_attempts=3)
         except Exception as e:
             logger.error("Firebase editor_draft set failed: %s", e)
 
@@ -3021,7 +3162,7 @@ async def submit_survey(request: SurveySubmission):
             }
             if request.ai_history_context:
                 fb_payload["ai_history_context"] = request.ai_history_context
-            if append_periodic_survey_to_firebase(request.session_id, fb_payload):
+            if await asyncio.to_thread(append_periodic_survey_to_firebase, request.session_id, fb_payload):
                 logger.info("Periodic/final survey appended to Firebase for session %s", request.session_id)
             if request.session_id in active_sessions:
                 session_log = active_sessions[request.session_id]
@@ -3324,12 +3465,38 @@ async def update_survey_status(
     status: str
 ):
     """
-    Update survey status for a session
+    Update survey status for a session.
+    Tolerant of missing active sessions: tries disk then Firebase before giving up.
+    Never returns 404 — a missing session is logged and treated as best-effort.
     """
     try:
         if session_id not in active_sessions:
-            raise HTTPException(status_code=404, detail="Session not found")
-        
+            # Try to reload from disk first, then Firebase checkpoint
+            sl = load_session_log_from_disk(session_id)
+            if sl is None and firebase_db:
+                fdb = firebase_db
+                try:
+                    chk = await asyncio.to_thread(
+                        lambda: fdb.child("sessions").child(session_id).child("checkpoint").get()
+                    )
+                    if isinstance(chk, dict) and isinstance(chk.get("session"), dict):
+                        sl = SessionLog.model_validate(chk["session"])
+                except Exception as _fb_e:
+                    logger.warning("update-survey-status: Firebase reload failed for %s: %s", session_id, _fb_e)
+            if sl is not None:
+                active_sessions[session_id] = sl
+                logger.info("update-survey-status: reloaded session %s from storage", session_id)
+            else:
+                logger.warning(
+                    "update-survey-status: session %s not found anywhere — recording status best-effort",
+                    session_id,
+                )
+                return {
+                    "status": "ok",
+                    "message": f"{survey_type} survey status noted (session not in memory)",
+                    "timestamp": datetime.now().isoformat(),
+                }
+
         session_log = active_sessions[session_id]
         timestamp = datetime.now().isoformat()
         
@@ -3803,7 +3970,7 @@ async def log_periodic_survey(request: Request):
         # Log to Firebase if available
         if firebase_db:
             try:
-                if append_periodic_survey_to_firebase(session_id, survey_data):
+                if await asyncio.to_thread(append_periodic_survey_to_firebase, session_id, survey_data):
                     logger.info(
                         "Periodic survey #%s logged for session %s",
                         survey_data.get("survey_number"),
@@ -4022,12 +4189,12 @@ async def save_session_to_firebase(
                 }
             }
         user_ref = firebase_db.child(f'{condition_path}/{session_log.assignment_id}/{session_log.user_id}')
-        if not firebase_rtdb_set_with_retry(user_ref, user_data, max_attempts=3):
+        if not await firebase_rtdb_set_async(user_ref, user_data, max_attempts=3):
             return False
 
         # Mirror final payload under sessions/{session_id} for recovery / cross-refs
         session_ref = firebase_db.child("sessions").child(session_log.session_id).child("final_submit")
-        firebase_rtdb_set_with_retry(
+        await firebase_rtdb_set_async(
             session_ref,
             {
                 "checkpoint_type": "final_submit",
@@ -4682,8 +4849,27 @@ async def quiz_next_problem(request: Request):
     code = body.get("code", "")
     programming_language = body.get("programming_language", "python").strip()
 
-    if not session_id or session_id not in active_sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+
+    if session_id not in active_sessions:
+        # Try to recover the session from disk / Firebase before failing
+        sl = load_session_log_from_disk(session_id)
+        if sl is None and firebase_db:
+            fdb = firebase_db
+            try:
+                chk = await asyncio.to_thread(
+                    lambda: fdb.child("sessions").child(session_id).child("checkpoint").get()
+                )
+                if isinstance(chk, dict) and isinstance(chk.get("session"), dict):
+                    sl = SessionLog.model_validate(chk["session"])
+            except Exception as _fb_e:
+                logger.warning("quiz/next-problem: Firebase reload failed for %s: %s", session_id, _fb_e)
+        if sl is not None:
+            active_sessions[session_id] = sl
+            logger.info("quiz/next-problem: reloaded session %s from storage", session_id)
+        else:
+            raise HTTPException(status_code=404, detail="Session not found and could not be recovered")
 
     session_log = active_sessions[session_id]
 
