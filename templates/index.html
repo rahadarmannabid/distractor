@@ -3752,6 +3752,18 @@ async function initializeFromURL() {
         updateLoadingMessage('Finalizing setup...');
         showMainApp();
         maybeShowTeaser();
+
+        // Keep sessionStorage authData.currentProblemIndex in sync with the IDE session so
+        // survey drafts (keyed by problem index) match when navigating back from the editor.
+        try {
+            const _ad = JSON.parse(sessionStorage.getItem('authData') || '{}');
+            if (_ad.sessionId === currentSession.sessionId) {
+                _ad.currentProblemIndex = typeof currentSession.currentProblemIndex === 'number'
+                    ? currentSession.currentProblemIndex
+                    : (_ad.currentProblemIndex || 0);
+                sessionStorage.setItem('authData', JSON.stringify(_ad));
+            }
+        } catch (_e) { /* ignore */ }
         
         initializeSidebar();
         initProblemPanelTabs();

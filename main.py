@@ -3335,6 +3335,9 @@ class SurveyStatusResponse(BaseModel):
     post_survey_timestamp: Optional[str] = None
     can_access_ide: bool
     can_submit_code: bool
+    # question_id -> answer so the client can rehydrate the form when returning from the IDE
+    pre_survey_answers: Optional[Dict[str, Any]] = None
+    post_survey_answers: Optional[Dict[str, Any]] = None
 
 
 @app.get("/survey-config/{assignment_key}")
@@ -3447,6 +3450,24 @@ async def get_survey_config(assignment_key: str, problem_index: int = 0):
         raise HTTPException(status_code=500, detail=f"Failed to load survey config: {str(e)}")
     
 
+def _survey_answers_map_from_stored_package(pkg: Optional[Any]) -> Optional[Dict[str, Any]]:
+    """Build question_id -> answer from a stored pre/post survey package on SessionLog."""
+    if not pkg or not isinstance(pkg, dict):
+        return None
+    responses = pkg.get("responses")
+    if not isinstance(responses, list):
+        return None
+    out: Dict[str, Any] = {}
+    for r in responses:
+        if not isinstance(r, dict):
+            continue
+        qid = r.get("question_id")
+        if qid is None:
+            continue
+        out[str(qid)] = r.get("answer")
+    return out if out else None
+
+
 @app.get("/survey-status/{session_id}")
 async def get_survey_status(session_id: str):
     """
@@ -3485,6 +3506,9 @@ async def get_survey_status(session_id: str):
             not post_required or 
             session_log.post_survey_status == SurveyStatus.COMPLETED
         )
+
+        pre_ans = _survey_answers_map_from_stored_package(session_log.pre_survey_responses)
+        post_ans = _survey_answers_map_from_stored_package(session_log.post_survey_responses)
         
         return SurveyStatusResponse(
             pre_survey_status=session_log.pre_survey_status,
@@ -3492,7 +3516,9 @@ async def get_survey_status(session_id: str):
             pre_survey_timestamp=session_log.pre_survey_timestamp,
             post_survey_timestamp=session_log.post_survey_timestamp,
             can_access_ide=can_access_ide,
-            can_submit_code=can_submit_code
+            can_submit_code=can_submit_code,
+            pre_survey_answers=pre_ans,
+            post_survey_answers=post_ans,
         )
         
     except HTTPException:
