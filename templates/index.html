@@ -2224,6 +2224,7 @@ async function postActivityBatchToServer(activities) {
             session_id: currentSession.sessionId,
             user_id: currentSession.userId,
             assignment_key: currentSession.assignmentKey,
+            quiz_id: currentSession.quizId || null,
         })
     });
     return response.ok;
@@ -2689,6 +2690,7 @@ let currentSession = {
     // Multi-problem tracking
     totalProblems: 1,
     currentProblemIndex: 0,
+    quizId: null,
 };
 
 
@@ -3432,6 +3434,35 @@ async function uploadActivityBatch() {
 
 // Initialize application from URL parameters
 // Initialize application from URL parameters
+var _quizHeartbeatTimer = null;
+/** Firebase-backed presence so “active now” matches across local + hosted (same Firebase project). */
+function scheduleQuizPresenceHeartbeat() {
+    if (_quizHeartbeatTimer) {
+        clearInterval(_quizHeartbeatTimer);
+        _quizHeartbeatTimer = null;
+    }
+    if (!currentSession.sessionId || !currentSession.userId || !currentSession.quizId) {
+        return;
+    }
+    var send = function() {
+        if (!currentSession.sessionId || !currentSession.userId || !currentSession.quizId) return;
+        fetch('/quiz/heartbeat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: currentSession.sessionId,
+                user_id: currentSession.userId,
+                quiz_id: currentSession.quizId,
+                current_problem_index: typeof currentSession.currentProblemIndex === 'number' ? currentSession.currentProblemIndex : 0
+            }),
+            credentials: 'same-origin',
+            keepalive: true
+        }).catch(function() {});
+    };
+    setTimeout(send, 12000);
+    _quizHeartbeatTimer = setInterval(send, 90000);
+}
+
 async function initializeFromURL() {
     updateLoadingMessage('Validating session parameters...');
     console.log('SessionStorage data:', sessionStorage.getItem('authData'));
@@ -3490,6 +3521,7 @@ async function initializeFromURL() {
             totalProblems: authData.totalProblems || 1,
             currentProblemIndex: authData.currentProblemIndex || 0,
             quizTeaser: authData.quizTeaser || '',
+            quizId: authData.quizId || null,
         };
 
         // If returning for a new problem (not the first), reset all survey state fresh
@@ -3851,6 +3883,7 @@ async function initializeFromURL() {
                 serverEditorCheckpoint();
             });
             setTimeout(function() { flushPendingActivityQueueFromStorage(); }, 2000);
+            scheduleQuizPresenceHeartbeat();
         }, 100);
         
         // Initialize enhanced activity tracking
@@ -6909,6 +6942,7 @@ window.addEventListener('beforeunload', (e) => {
                 session_id: currentSession.sessionId,
                 user_id: currentSession.userId,
                 assignment_key: currentSession.assignmentKey,
+                quiz_id: currentSession.quizId || null,
             });
             var actBlob = new Blob([actPayload], { type: 'application/json' });
             navigator.sendBeacon('/log-activities', actBlob);

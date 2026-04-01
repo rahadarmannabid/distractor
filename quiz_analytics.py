@@ -109,6 +109,9 @@ def _problem_index_from_entry(e: Dict[str, Any]) -> Optional[int]:
 
 def _activity_entries(user_data: Dict[str, Any]) -> List[Dict[str, Any]]:
     al = user_data.get("activity_log")
+    # Legacy RTDB: activity_log stored as a top-level list of entries (no {entries, summary} wrapper).
+    if isinstance(al, list):
+        return [x for x in al if isinstance(x, dict)]
     if not isinstance(al, dict):
         return []
     return _firebase_to_list(al.get("entries"))
@@ -117,6 +120,78 @@ def _activity_entries(user_data: Dict[str, Any]) -> List[Dict[str, Any]]:
 def _session_meta(user_data: Dict[str, Any]) -> Dict[str, Any]:
     sm = user_data.get("session_metadata")
     return sm if isinstance(sm, dict) else {}
+
+
+def _entry_activity_type(e: Dict[str, Any]) -> str:
+    """Normalize activity type across client / export variants (camelCase, ``type`` alias)."""
+    at = e.get("activity_type")
+    if at is None:
+        at = e.get("activityType") or e.get("type")
+    return str(at or "").strip().lower()
+
+
+def _safe_int_metric(v: Any) -> int:
+    if v is None:
+        return 0
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _distribute_count_by_problem(
+    count: int,
+    num_problems: int,
+    completed_problem: List[bool],
+) -> Dict[int, int]:
+    """Spread a session-level integer across problem indices (prefer problems with submitted code)."""
+    if count <= 0 or num_problems < 1:
+        return {}
+    if num_problems == 1:
+        return {0: count}
+    preferred = [i for i in range(num_problems) if i < len(completed_problem) and completed_problem[i]]
+    targets = preferred if preferred else list(range(num_problems))
+    n = len(targets)
+    base = count // n
+    rem = count % n
+    out: Dict[int, int] = {}
+    for j, pi in enumerate(targets):
+        extra = 1 if j < rem else 0
+        out[pi] = out.get(pi, 0) + base + extra
+    return out
+
+
+def _merge_int_maps(base: Dict[int, int], extra: Dict[int, int]) -> None:
+    for k, v in extra.items():
+        base[k] = base.get(k, 0) + v
+
+
+def _activity_log_summary_dict(user_data: Dict[str, Any]) -> Dict[str, Any]:
+    al = user_data.get("activity_log")
+    if not isinstance(al, dict):
+        return {}
+    s = al.get("summary")
+    return s if isinstance(s, dict) else {}
+
+
+def _ai_generation_count_from_logs(user_data: Dict[str, Any]) -> int:
+    """When activity entries lack AI rows, infer generations from stored Firebase ``logs`` (server SessionLog)."""
+    logs = user_data.get("logs")
+    if not isinstance(logs, dict):
+        return 0
+    ag = _normalize_log_dict_map(logs.get("ai_guesses"))
+    so = _normalize_log_dict_map(logs.get("suggestions_only"))
+    cg = _normalize_log_dict_map(logs.get("correct_guesses"))
+    meta = _session_meta(user_data)
+    try:
+        cond = int(meta.get("condition") or 0)
+    except (TypeError, ValueError):
+        cond = 0
+    if cond == 1:
+        return max(len(ag), len(cg))
+    if cond == 3:
+        return max(len(ag), len(so))
+    return len(ag)
 
 
 # Approximate seconds to subtract per survey_interaction that falls between first/last editor
@@ -463,7 +538,7 @@ def derive_session_metrics(
     for e in entries:
         if not isinstance(e, dict):
             continue
-        at = str(e.get("activity_type") or "").strip().lower()
+        at = _entry_activity_type(e)
         _ad = e.get("activity_details")
         ad: Dict[str, Any] = _ad if isinstance(_ad, dict) else {}
         _sc = e.get("session_context")
@@ -502,6 +577,11 @@ def derive_session_metrics(
                     if pi is not None:
                         ai_gen_time_ms_by_pi[pi] = ai_gen_time_ms_by_pi.get(pi, 0.0) + t_ms
                         ai_gen_time_ms_count_by_pi[pi] = ai_gen_time_ms_count_by_pi.get(pi, 0) + 1
+        elif at == "code_suggestion_generated":
+            # Some clients emit this instead of/in addition to ai_analysis_complete + suggestion_generated.
+            ai_gen_total += 1
+            if pi is not None:
+                ai_gen_by_pi[pi] = ai_gen_by_pi.get(pi, 0) + 1
         elif at == "ai_analysis_trigger":
             ai_trig_total += 1
             if pi is not None:
@@ -597,23 +677,39 @@ def derive_session_metrics(
                 for i in zeros:
                     time_per_problem_seconds[i] = float(time_per_problem_seconds.get(i, 0.0) or 0.0) + share
 
-    # Fallback for accept counts: use session_metadata.suggestion_clicked when
-    # activity-log scanning found zero accepts.
-    if acc_total == 0:
-        sc_val = _int_pi(meta.get("suggestion_clicked"))
-        if sc_val and sc_val > 0:
-            acc_total = sc_val
-            if num_problems == 1:
-                acc_by_pi[0] = sc_val
+    summary = _activity_log_summary_dict(user_data)
 
-    # Fallback for run/compile counts: use session_metadata.compiler_clicked when
-    # activity-log scanning found zero code_execution events.
+    # Fallback runs: ``activity_log.summary`` is updated by the server's /log-activities handler even when
+    # individual ``entries`` were throttled, lost, or stored under alternate keys.
     if run_total == 0:
-        cc_val = _int_pi(meta.get("compiler_clicked"))
-        if cc_val and cc_val > 0:
+        te = summary.get("total_code_executions")
+        nruns = _safe_int_metric(te)
+        if nruns > 0:
+            run_total = nruns
+            _merge_int_maps(run_by_pi, _distribute_count_by_problem(nruns, num_problems, completed_problem))
+    if run_total == 0:
+        cc_val = _safe_int_metric(meta.get("compiler_clicked"))
+        if cc_val > 0:
             run_total = cc_val
-            if num_problems == 1:
-                run_by_pi[0] = cc_val
+            _merge_int_maps(run_by_pi, _distribute_count_by_problem(cc_val, num_problems, completed_problem))
+
+    # Fallback AI generations: Firebase ``logs`` mirrors ``SessionLog.ai_guess_history`` at submit time.
+    if ai_gen_total == 0:
+        lg = _ai_generation_count_from_logs(user_data)
+        if lg > 0:
+            ai_gen_total = lg
+            _merge_int_maps(ai_gen_by_pi, _distribute_count_by_problem(lg, num_problems, completed_problem))
+
+    # Fallback analysis triggers: summary counter (paired with ai_analysis_trigger on server).
+    if ai_trig_total == 0:
+        ta = summary.get("total_ai_analyses")
+        nt = _safe_int_metric(ta)
+        if nt > 0:
+            ai_trig_total = nt
+            _merge_int_maps(ai_trig_by_pi, _distribute_count_by_problem(nt, num_problems, completed_problem))
+
+    # Note: do not use session_metadata.suggestion_clicked as accepts_total — the client increments it
+    # on both accept and reject (total copilot interactions).
 
     avg_suggestion_time_seconds_total = (
         (ai_gen_time_ms_total / 1000.0) / ai_gen_time_ms_count if ai_gen_time_ms_count > 0 else 0.0
@@ -629,9 +725,14 @@ def derive_session_metrics(
 
     survey_summary = _summarize_survey_payload(user_data)
 
+    resolved_quiz_id = str(qid).strip() if qid is not None else quiz_norm
+
     return {
         "user_id": user_id,
         "session_id": session_id,
+        "quiz_id": resolved_quiz_id,
+        "starting_time": str(meta.get("starting_time") or "").strip(),
+        "end_time": str(meta.get("end_time") or "").strip(),
         "condition": condition,
         "completed_assignment": completed_assignment,
         "completed_problem": completed_problem[:num_problems] if num_problems else [False],
@@ -797,7 +898,7 @@ def _build_timeline_points_by_problem(user_data: Dict[str, Any]) -> Dict[int, Li
     for e in entries:
         if not isinstance(e, dict):
             continue
-        at = str(e.get("activity_type") or "").strip().lower()
+        at = _entry_activity_type(e)
         if at not in _INTERACTION_TIMELINE_ACTIVITY_TYPES:
             continue
         pi = _problem_index_from_entry(e)
@@ -812,7 +913,7 @@ def _build_timeline_points_by_problem(user_data: Dict[str, Any]) -> Dict[int, Li
     for pi in sorted(by_pi.keys()):
         pts: List[Dict[str, Any]] = []
         for i, e in enumerate(by_pi[pi], start=1):
-            at = str(e.get("activity_type") or "").strip().lower()
+            at = _entry_activity_type(e)
             ts = _parse_iso(e.get("timestamp"))
             tu = _utc_for_delta(ts)
             if not tu:
@@ -849,7 +950,7 @@ def _ai_suggestion_completion_events(user_data: Dict[str, Any]) -> List[Tuple[Op
     """``ai_analysis_complete`` with ``suggestion_generated``, chronologically — for pairing with ``logs.ai_guesses``."""
     out: List[Tuple[Optional[datetime], int]] = []
     for e in _sorted_activity_entries_chrono(user_data):
-        at = str(e.get("activity_type") or "").strip().lower()
+        at = _entry_activity_type(e)
         if at != "ai_analysis_complete":
             continue
         _ad = e.get("activity_details")
@@ -905,7 +1006,7 @@ def _all_ai_analysis_trigger_times(entries_sorted: List[Dict[str, Any]]) -> List
     """Chronological ``ai_analysis_trigger`` timestamps (client clock — pairs with copilot events)."""
     out: List[Optional[datetime]] = []
     for e in entries_sorted:
-        at = str(e.get("activity_type") or "").strip().lower()
+        at = _entry_activity_type(e)
         if at != "ai_analysis_trigger":
             continue
         ts = _parse_iso(e.get("timestamp"))
@@ -919,7 +1020,7 @@ def _all_copilot_reactions_chrono(
     """``(utc_datetime, 'accepted'|'rejected', entry)`` for each copilot popup action, in log order."""
     out: List[Tuple[Optional[datetime], str, Dict[str, Any]]] = []
     for e in entries_sorted:
-        at = str(e.get("activity_type") or "").strip().lower()
+        at = _entry_activity_type(e)
         ts = _parse_iso(e.get("timestamp"))
         tu = _utc_for_delta(ts) if ts else None
         if at in _LOG_ACCEPT_TYPES:
@@ -969,7 +1070,7 @@ def _first_accept_reject_between_timestamps(
             continue
         if eu is not None and tu >= eu:
             break
-        at = str(e.get("activity_type") or "").strip().lower()
+        at = _entry_activity_type(e)
         snap = _snapshot_from_copilot_activity_entry(e)
         if at in _LOG_ACCEPT_TYPES:
             sec = (tu - su).total_seconds() if su and tu else None
@@ -1062,6 +1163,32 @@ def _verdict_latency_for_suggestion_row(
     return verdict, reaction_seconds, suggestion_time_iso, activity_snapshot
 
 
+def _synthetic_ai_guess_rows_from_activity(user_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """When ``logs.ai_guesses`` is empty, build pseudo-rows from ``ai_analysis_complete`` activity entries."""
+    out: List[Dict[str, Any]] = []
+    for e in _sorted_activity_entries_chrono(user_data):
+        if _entry_activity_type(e) != "ai_analysis_complete":
+            continue
+        ad = e.get("activity_details") if isinstance(e.get("activity_details"), dict) else {}
+        sg = ad.get("suggestion_generated")
+        if not (sg is True or sg == "true" or sg == 1):
+            continue
+        out.append(
+            {
+                "timestamp": e.get("timestamp"),
+                "ai_analysis": str(
+                    ad.get("analysis_result") or ad.get("analysis") or ad.get("problem_analysis") or ""
+                ).strip(),
+                "next_line_suggestion": str(
+                    ad.get("next_line_suggestion") or ad.get("next_line") or ""
+                ).strip(),
+                "full_code_suggestion": str(ad.get("full_code_suggestion") or "").strip(),
+                "user_code_snapshot": str(ad.get("user_code_snapshot") or "").strip(),
+            }
+        )
+    return out
+
+
 def build_user_ai_activity_log_rows(user_data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     One row per Firebase ``logs.ai_guesses`` (or ``suggestions_only``).
@@ -1075,6 +1202,8 @@ def build_user_ai_activity_log_rows(user_data: Dict[str, Any]) -> List[Dict[str,
 
     guesses = _normalize_log_dict_map(logs.get("ai_guesses"))
     sugg_only = _normalize_log_dict_map(logs.get("suggestions_only"))
+    if not guesses and not sugg_only:
+        guesses = _synthetic_ai_guess_rows_from_activity(user_data)
 
     if not guesses and sugg_only:
         base_rows = sugg_only
@@ -1438,7 +1567,10 @@ def aggregate_quiz_analytics(
             {
                 "user_id": _resolved_participant_user_id(d.get("user_id"), str(d.get("session_id") or "")),
                 "session_id": d.get("session_id") or "",
+                "quiz_id": d.get("quiz_id") or quiz_id,
                 "condition": d.get("condition"),
+                "starting_time": d.get("starting_time") or "",
+                "end_time": d.get("end_time") or "",
                 "completed_assignment": d.get("completed_assignment"),
                 "total_time_seconds": d.get("total_time_seconds"),
                 "focus_time_seconds": d.get("focus_time_seconds"),
@@ -1453,6 +1585,7 @@ def aggregate_quiz_analytics(
                 "per_problem_tab_switches": [int(_by_problem_num(tsb, i, 0.0)) for i in range(n)],
                 "per_problem_paste_attempts": [int(_by_problem_num(pab, i, 0.0)) for i in range(n)],
                 "ai_generated_total": d.get("ai_generations_total") or 0,
+                "ai_analyses_total": int(d.get("ai_analyses_total") or 0),
                 "accepted_total": d.get("accepts_total") or 0,
                 "rejected_total": d.get("rejects_total") or 0,
                 "avg_suggestion_time_seconds_total": d.get("avg_suggestion_time_seconds_total") or 0.0,
@@ -1875,6 +2008,28 @@ def _survey_csv_answers_for_row(survey_summary: Any, specs: List[SurveySlot]) ->
     return out
 
 
+def _csv_float_cell(v: Any, default: float = 0.0) -> float:
+    """Excel-friendly numeric cell: never NaN/Inf/blank for a measured value."""
+    if v is None:
+        return default
+    try:
+        x = float(v)
+        if math.isnan(x) or math.isinf(x):
+            return default
+        return x
+    except (TypeError, ValueError):
+        return default
+
+
+def _csv_int_cell(v: Any, default: int = 0) -> int:
+    if v is None:
+        return default
+    try:
+        return int(round(float(v)))
+    except (TypeError, ValueError):
+        return default
+
+
 def export_per_session_csv(problem_labels: List[str], per_session: List[Dict[str, Any]]) -> str:
     """Flatten ``per_session`` rows to CSV (UTF-8, Excel-friendly).
 
@@ -1901,11 +2056,16 @@ def export_per_session_csv(problem_labels: List[str], per_session: List[Dict[str
     header = [
         "user_id",
         "session_id",
+        "quiz_id",
+        "condition",
+        "starting_time",
+        "end_time",
         "completed_assignment",
         "total_time_seconds",
         "focus_time_seconds",
         "programming_language",
         "ai_generated_total",
+        "ai_analyses_total",
         "accepted_total",
         "rejected_total",
         "avg_suggestion_time_seconds_total",
@@ -1931,40 +2091,56 @@ def export_per_session_csv(problem_labels: List[str], per_session: List[Dict[str
     header.extend(survey_headers)
     w.writerow(header)
 
-    def _at(li: Any, idx: int) -> Any:
+    def _at_done(li: Any, idx: int) -> str:
         if not isinstance(li, list) or idx >= len(li):
-            return ""
-        return li[idx] if li[idx] is not None else ""
+            return "N"
+        v = li[idx]
+        if v is True or v == 1 or str(v).lower() in ("true", "1", "yes", "y"):
+            return "Y"
+        return "N"
 
     for row in per_session:
+        ca = row.get("completed_assignment")
+        completed_cell = "Y" if (ca is True or ca == 1 or str(ca).lower() in ("true", "1", "yes")) else "N"
         out: List[Any] = [
-            row.get("user_id"),
-            row.get("session_id"),
-            row.get("completed_assignment"),
-            row.get("total_time_seconds"),
-            row.get("focus_time_seconds"),
-            row.get("programming_language"),
-            row.get("ai_generated_total"),
-            row.get("accepted_total"),
-            row.get("rejected_total"),
-            row.get("avg_suggestion_time_seconds_total"),
-            row.get("compiles_total"),
-            row.get("tab_switch_total"),
-            row.get("paste_attempt_total"),
+            row.get("user_id") or "",
+            row.get("session_id") or "",
+            row.get("quiz_id") or "",
+            row.get("condition") if row.get("condition") is not None else "",
+            row.get("starting_time") or "",
+            row.get("end_time") or "",
+            completed_cell,
+            _csv_float_cell(row.get("total_time_seconds"), 0.0),
+            _csv_float_cell(row.get("focus_time_seconds"), 0.0),
+            row.get("programming_language") or "",
+            _csv_int_cell(row.get("ai_generated_total"), 0),
+            _csv_int_cell(row.get("ai_analyses_total"), 0),
+            _csv_int_cell(row.get("accepted_total"), 0),
+            _csv_int_cell(row.get("rejected_total"), 0),
+            _csv_float_cell(row.get("avg_suggestion_time_seconds_total"), 0.0),
+            _csv_int_cell(row.get("compiles_total"), 0),
+            _csv_int_cell(row.get("tab_switch_total"), 0),
+            _csv_int_cell(row.get("paste_attempt_total"), 0),
         ]
+
+        def _pv(key: str, idx: int) -> Any:
+            li = row.get(key)
+            if not isinstance(li, list) or idx >= len(li):
+                return None
+            return li[idx]
+
         for i in range(n):
-            done = _at(row.get("completed_problem"), i)
-            done_s = "Y" if done else "N"
+            done_s = _at_done(row.get("completed_problem"), i)
             out.extend(
                 [
-                    _at(row.get("per_problem_time_seconds"), i),
-                    _at(row.get("per_problem_ai_generated"), i),
-                    _at(row.get("per_problem_accepted"), i),
-                    _at(row.get("per_problem_rejected"), i),
-                    _at(row.get("per_problem_avg_suggestion_time_seconds"), i),
-                    _at(row.get("per_problem_compiles"), i),
-                    _at(row.get("per_problem_tab_switches"), i),
-                    _at(row.get("per_problem_paste_attempts"), i),
+                    _csv_float_cell(_pv("per_problem_time_seconds", i), 0.0),
+                    _csv_int_cell(_pv("per_problem_ai_generated", i), 0),
+                    _csv_int_cell(_pv("per_problem_accepted", i), 0),
+                    _csv_int_cell(_pv("per_problem_rejected", i), 0),
+                    _csv_float_cell(_pv("per_problem_avg_suggestion_time_seconds", i), 0.0),
+                    _csv_int_cell(_pv("per_problem_compiles", i), 0),
+                    _csv_int_cell(_pv("per_problem_tab_switches", i), 0),
+                    _csv_int_cell(_pv("per_problem_paste_attempts", i), 0),
                     done_s,
                 ]
             )

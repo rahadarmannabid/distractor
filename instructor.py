@@ -1033,7 +1033,7 @@ async def quiz_analytics_data(request: Request, quiz_id: str):
         data["live_now"] = {
             "total_active": int(live.get("total_active") or 0),
             "by_problem": live_by_problem,
-            "scope_note": "Live counts are from this server only (in-memory). Reload to refresh.",
+            "scope_note": "“Active now” merges this server’s in-memory sessions with Firebase presence heartbeats (same project as localhost and production). Optional REDIS_URL shares counts across workers on one deployment.",
         }
         return JSONResponse(content=data, headers=_ANALYTICS_JSON_NO_CACHE)
     except Exception as e:
@@ -1122,7 +1122,7 @@ async def quiz_analytics_export(request: Request, quiz_id: str, fmt: str = "csv"
         data["live_now"] = {
             "total_active": int(live.get("total_active") or 0),
             "by_problem": live_by_problem,
-            "scope_note": "Live counts are from this server only (in-memory). Reload to refresh.",
+            "scope_note": "“Active now” merges this server’s in-memory sessions with Firebase presence heartbeats (same project as localhost and production). Optional REDIS_URL shares counts across workers on one deployment.",
         }
 
         slug = _safe_quiz_export_slug(quiz_id)

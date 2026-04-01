@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 import uuid
+import hashlib
 import json
 import mimetypes 
 from datetime import datetime, timezone
@@ -1074,27 +1075,150 @@ _analyze_semaphore: asyncio.Semaphore = asyncio.Semaphore(
 _submit_gate = asyncio.Lock()
 _submitting_sessions: set = set()
 
+# Quiz “active now” visibility across hosts (local vs deployed): heartbeats under ``quiz_presence`` in RTDB.
+_QUIZ_PRESENCE_TTL_SEC = int(os.getenv("QUIZ_PRESENCE_TTL_SECONDS", "180"))
+_QUIZ_HEARTBEAT_MIN_INTERVAL_SEC = float(os.getenv("QUIZ_HEARTBEAT_MIN_INTERVAL_SEC", "45"))
+_heartbeat_rate_limit: Dict[str, float] = {}
 
-def get_active_quiz_session_counts(quiz_id: str) -> Dict[str, Any]:
-    """Count students currently in an in-progress session for this quiz (this process only).
 
-    Sessions are held in memory until submit; multi-worker or restarted servers only see
-    their own processes' sessions.
-    """
+def _session_belongs_to_quiz_log(log: Any, sid: Any, target_lower: str) -> bool:
+    """Same rules as historical get_active_quiz_session_counts matching."""
+    prefix8 = target_lower[:8] if len(target_lower) >= 8 else target_lower
+    expected_assignment = f"quiz_{prefix8}"
+    session_id_needle = f"_quiz_{prefix8}_"
+    lid = getattr(log, "quiz_id", None)
+    match = lid is not None and str(lid).strip().lower() == target_lower
+    if not match:
+        aid = str(getattr(log, "assignment_id", "") or "").strip().lower()
+        if aid == expected_assignment:
+            match = True
+        elif isinstance(sid, str) and session_id_needle in sid.lower():
+            match = True
+    return match
+
+
+def _memory_quiz_session_map(quiz_id: str) -> Dict[str, int]:
+    """session_id -> current_problem_index for this quiz on this server process."""
     target = str(quiz_id).strip().lower()
-    by_idx: Dict[int, int] = {}
-    total = 0
-    for _sid, log in active_sessions.items():
-        lid = getattr(log, "quiz_id", None)
-        if lid is None or str(lid).strip().lower() != target:
+    if not target:
+        return {}
+    out: Dict[str, int] = {}
+    for sid, log in active_sessions.items():
+        if not _session_belongs_to_quiz_log(log, sid, target):
             continue
-        total += 1
         try:
             pi = int(getattr(log, "current_problem_index", 0) or 0)
         except (TypeError, ValueError):
             pi = 0
+        out[str(sid)] = pi
+    return out
+
+
+def _parse_presence_iso(ts: Any) -> Optional[datetime]:
+    if not ts or not isinstance(ts, str):
+        return None
+    s = ts.strip()
+    if not s:
+        return None
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _firebase_presence_session_map(quiz_id: str) -> Dict[str, int]:
+    """Fresh heartbeats from Firebase (any app instance / any region using the same project)."""
+    if not firebase_db:
+        return {}
+    qkey = _sanitize_firebase_key_segment(str(quiz_id).strip())[:96]
+    try:
+        data = firebase_db.child("quiz_presence").child(qkey).get()
+    except Exception as e:
+        logger.warning("quiz_presence read failed: %s", e)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    cutoff = datetime.now(timezone.utc).timestamp() - float(_QUIZ_PRESENCE_TTL_SEC)
+    out: Dict[str, int] = {}
+    for _k, v in data.items():
+        if not isinstance(v, dict):
+            continue
+        sid = v.get("session_id")
+        if not sid or not isinstance(sid, str):
+            continue
+        at = _parse_presence_iso(v.get("at") or v.get("last_seen"))
+        if at is None or at.timestamp() < cutoff:
+            continue
+        try:
+            pi = int(v.get("problem_index") if v.get("problem_index") is not None else v.get("current_problem_index") or 0)
+        except (TypeError, ValueError):
+            pi = 0
+        out[sid.strip()] = pi
+    return out
+
+
+def _quiz_presence_doc_key(session_id: str) -> str:
+    return hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:32]
+
+
+def _heartbeat_rate_allow(session_id: str) -> bool:
+    """Throttle writes per session so heartbeats cannot stall the API or Firebase."""
+    now = time.time()
+    last = _heartbeat_rate_limit.get(session_id, 0.0)
+    if now - last < _QUIZ_HEARTBEAT_MIN_INTERVAL_SEC:
+        return False
+    _heartbeat_rate_limit[session_id] = now
+    if len(_heartbeat_rate_limit) > 8000:
+        _heartbeat_rate_limit.clear()
+    return True
+
+
+def write_quiz_presence_heartbeat(quiz_id: str, session_id: str, user_id: str, problem_index: int) -> bool:
+    """Persist one presence row under ``quiz_presence/{quiz}/…`` (caller throttles frequency)."""
+    if not firebase_db:
+        return False
+    qid = str(quiz_id).strip()
+    sid = str(session_id).strip()
+    if len(qid) < 8 or not sid:
+        return False
+    needle = f"_quiz_{qid[:8].lower()}_"
+    if needle not in sid.lower():
+        return False
+    doc_key = _quiz_presence_doc_key(sid)
+    qkey = _sanitize_firebase_key_segment(qid)[:96]
+    ref = firebase_db.child("quiz_presence").child(qkey).child(doc_key)
+    payload = {
+        "session_id": sid,
+        "user_id": str(user_id).strip(),
+        "quiz_id": qid,
+        "problem_index": int(problem_index or 0),
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+    return firebase_rtdb_set_with_retry(ref, payload, max_attempts=2)
+
+
+def get_active_quiz_session_counts(quiz_id: str) -> Dict[str, Any]:
+    """Count students in-session for this quiz: **in-memory on this server** ∪ **Firebase presence**.
+
+    Firebase heartbeats (see ``POST /quiz/heartbeat``) let the instructor see the same “active”
+    picture from localhost or the hosted site when both use the **same Firebase project**, without
+    requiring Redis for cross-process counts.
+    """
+    target = str(quiz_id).strip().lower()
+    if not target:
+        return {"total_active": 0, "by_problem_index": {}}
+    merged: Dict[str, int] = _memory_quiz_session_map(quiz_id)
+    for sid, pi in _firebase_presence_session_map(quiz_id).items():
+        merged[sid] = pi
+    by_idx: Dict[int, int] = {}
+    for _sid, pi in merged.items():
         by_idx[pi] = by_idx.get(pi, 0) + 1
-    return {"total_active": total, "by_problem_index": by_idx}
+    return {"total_active": len(merged), "by_problem_index": by_idx}
 
 
 def forget_active_sessions_for_quiz_user(quiz_id: str, user_id: str) -> int:
@@ -3212,6 +3336,8 @@ class ActivityLogRequest(BaseModel):
     # Required when the server has no session (e.g. after restart) so we never store user_id=unknown
     user_id: Optional[str] = None
     assignment_key: Optional[str] = None
+    # Instructor Firebase quiz id (from /quiz/join) — keeps active-session counts accurate after reload
+    quiz_id: Optional[str] = None
 
 
 class EditorCheckpointRequest(BaseModel):
@@ -3331,6 +3457,7 @@ async def log_activities(request: ActivityLogRequest):
                 session_id,
                 uid,
             )
+            qid_stub = (request.quiz_id or "").strip() or None
             active_sessions[session_id] = SessionLog(
                 user_id=uid,
                 assignment_id=aid,
@@ -3338,7 +3465,8 @@ async def log_activities(request: ActivityLogRequest):
                 condition=0,
                 code_start_timestamp=datetime.now().isoformat(),
                 activity_log=[],
-                activity_summary=ActivitySummary()
+                activity_summary=ActivitySummary(),
+                quiz_id=qid_stub,
             )
         
         session_log = active_sessions[session_id]
@@ -5309,6 +5437,36 @@ async def student_quiz_join(request: Request):
     return build_quiz_join_response(
         session_log, quiz_data, programming_language, 0, "Joined quiz successfully", resumed=False
     )
+
+
+class QuizHeartbeatRequest(BaseModel):
+    """Client pings so instructor “active” counts work across localhost vs hosted (same Firebase project)."""
+
+    session_id: str
+    user_id: str
+    quiz_id: str
+    current_problem_index: int = 0
+
+
+@app.post("/quiz/heartbeat")
+async def quiz_session_heartbeat(hb: QuizHeartbeatRequest):
+    """Throttled presence write to RTDB; merged into :func:`get_active_quiz_session_counts` reads."""
+    if not firebase_db:
+        return {"ok": True, "recorded": False, "reason": "no_firebase"}
+    sid = hb.session_id.strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="session_id required")
+    uid = _validated_participant_user_id(hb.user_id)
+    if not _heartbeat_rate_allow(sid):
+        return {"ok": True, "recorded": False, "reason": "rate_limited"}
+    ok = await asyncio.to_thread(
+        write_quiz_presence_heartbeat,
+        hb.quiz_id,
+        sid,
+        uid,
+        int(hb.current_problem_index or 0),
+    )
+    return {"ok": True, "recorded": bool(ok)}
 
 
 @app.post("/quiz/next-problem")

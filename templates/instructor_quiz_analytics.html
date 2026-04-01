@@ -773,6 +773,24 @@
       return [a[0], q(0.25), q(0.5), q(0.75), a[n - 1]];
     }
 
+    /** Largest value in boxplot rows (for y-axis — all-zero boxes are invisible without a positive max). */
+    function maxFromBoxplotSeriesList(seriesList) {
+      var m = 0;
+      if (!seriesList || !seriesList.length) return 0;
+      for (var si = 0; si < seriesList.length; si++) {
+        var rows = (seriesList[si] && seriesList[si].data) || [];
+        for (var ri = 0; ri < rows.length; ri++) {
+          var d = rows[ri];
+          if (!d || d.length < 5) continue;
+          for (var k = 0; k < 5; k++) {
+            var v = Number(d[k]);
+            if (!isNaN(v)) m = Math.max(m, v);
+          }
+        }
+      }
+      return m;
+    }
+
     function baseOption() {
       return {
         backgroundColor: THEME.bg,
@@ -788,13 +806,27 @@
       };
     }
 
+    /** Min size when parent was display:none — ECharts otherwise inits at 0×0 and stays blank. */
+    function chartInitSize(el) {
+      var r = el.getBoundingClientRect();
+      var w = r.width || el.clientWidth || el.offsetWidth;
+      var h = r.height || el.clientHeight || el.offsetHeight;
+      if (!w || w < 80) w = el.parentElement ? (el.parentElement.clientWidth || 400) : 400;
+      if (!h || h < 40) {
+        h = parseFloat(getComputedStyle(el).height) || 240;
+        if (!h || h < 40) h = 240;
+      }
+      return { width: Math.round(Math.max(w, 200)), height: Math.round(Math.max(h, 120)) };
+    }
+
     function initChart(domId, option) {
       var el = document.getElementById(domId);
       if (!el || typeof echarts === 'undefined') {
         if (el) el.innerHTML = '<p style="color:#64748b;padding:16px;font-size:12px;text-align:center;">Chart unavailable</p>';
         return null;
       }
-      var c = echarts.init(el, null, { renderer: 'canvas' });
+      var sz = chartInitSize(el);
+      var c = echarts.init(el, null, { renderer: 'canvas', width: sz.width, height: sz.height });
       c.setOption(option);
       chartInstances.push(c);
       return c;
@@ -834,7 +866,12 @@
           document.getElementById('empty-state').classList.remove('hidden');
           return;
         }
-        document.getElementById('main-content').classList.remove('hidden');
+        var mainEl = document.getElementById('main-content');
+        mainEl.classList.remove('hidden');
+        // Force layout before chart init (parent was display:none; ECharts needs non-zero box)
+        try {
+          void mainEl.offsetHeight;
+        } catch (e) {}
 
         if (live.scope_note) {
           var lb = document.getElementById('live-scope-banner');
@@ -887,7 +924,7 @@
               name: condLab(c),
               type: 'boxplot',
               data: row,
-              barMaxWidth: nCond >= 3 ? 14 : 20,
+              boxWidth: nCond >= 3 ? 12 : 20,
               itemStyle: {
                 color: sty.color,
                 borderColor: sty.borderColor,
@@ -924,14 +961,26 @@
         var liveData = [liveTotal].concat(liveY);
         document.getElementById('overlay-live').innerHTML = '<strong>' + liveTotal + '</strong> active\nΣ problems = ' + sum(liveY);
 
+        var liveMax = Math.max.apply(null, liveData.map(function(v) { return Number(v) || 0; }));
+        var liveYMax = liveMax > 0 ? null : 1;
         initChart('chart-live-by-problem', Object.assign(baseOption(), {
           grid: { left: 40, right: 12, top: 20, bottom: 36 },
           xAxis: { type: 'category', data: catLive, axisLine: { lineStyle: { color: THEME.border } }, axisLabel: { color: THEME.text, fontSize: 10, interval: 0 } },
-          yAxis: { type: 'value', minInterval: 1, scale: true, splitLine: { lineStyle: { color: THEME.grid } }, axisLabel: { color: THEME.text, fontSize: 10 } },
+          yAxis: {
+            type: 'value',
+            min: 0,
+            max: liveYMax,
+            minInterval: liveMax > 0 ? 1 : undefined,
+            scale: false,
+            splitLine: { lineStyle: { color: THEME.grid } },
+            axisLabel: { color: THEME.text, fontSize: 10 },
+          },
           series: [{
             type: 'bar',
             data: liveData,
             barMaxWidth: 36,
+            showBackground: liveMax === 0,
+            backgroundStyle: { color: 'rgba(148,163,184,0.12)' },
             itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
               { offset: 0, color: THEME.liveBar.top },
               { offset: 1, color: THEME.liveBar.bottom },
@@ -1063,6 +1112,8 @@
             return condLab(c) + ' med: ' + fmtNum(s.median_session_time_seconds != null ? s.median_session_time_seconds : 0) + ' s';
           });
           document.getElementById('overlay-time').innerHTML = timeMedLines.join('\n') + '\n(focus if logged; box: min–Q1–med–Q3–max)';
+          var timeSeriesList = boxPlotSeriesFromBbc('total_time_seconds', 'time_per_problem_seconds');
+          var timeYMax = maxFromBoxplotSeriesList(timeSeriesList);
           initChart('chart-time-combined', Object.assign(baseOption(), {
             grid: { left: 52, right: 18, top: chartTopBox, bottom: gridBottomBox },
             legend: { data: condOrder.map(condLab), top: 2, textStyle: { color: THEME.text, fontSize: 10 } },
@@ -1077,11 +1128,13 @@
               type: 'value',
               name: 'Seconds',
               nameTextStyle: { color: '#64748b', fontSize: 10 },
-              scale: true,
+              min: 0,
+              max: timeYMax > 0 ? undefined : 1,
+              scale: timeYMax > 0,
               splitLine: { lineStyle: { color: THEME.grid } },
               axisLabel: { color: THEME.text, fontSize: 10, formatter: function(v) { return Number(v).toFixed(v >= 100 ? 0 : 1); } },
             },
-            series: boxPlotSeriesFromBbc('total_time_seconds', 'time_per_problem_seconds'),
+            series: timeSeriesList,
             tooltip: {
               trigger: 'item',
               formatter: function(p) {
@@ -1096,6 +1149,7 @@
         } else {
           var timeBox = [boxRow(tt)].concat((tpm || []).map(function(col) { return boxRow(col); }));
           var medT = median(tt);
+          var timeSingleMax = maxFromBoxplotSeriesList([{ data: timeBox }]);
           document.getElementById('overlay-time').innerHTML = 'Median session time: <strong>' + fmtNum(medT) + '</strong> sec\n(focus if logged; box: min–Q1–med–Q3–max)';
           initChart('chart-time-combined', Object.assign(baseOption(), {
             grid: { left: 52, right: 18, top: 22, bottom: gridBottomBox },
@@ -1110,7 +1164,9 @@
               type: 'value',
               name: 'Seconds',
               nameTextStyle: { color: '#64748b', fontSize: 10 },
-              scale: true,
+              min: 0,
+              max: timeSingleMax > 0 ? undefined : 1,
+              scale: timeSingleMax > 0,
               splitLine: { lineStyle: { color: THEME.grid } },
               axisLabel: { color: THEME.text, fontSize: 10, formatter: function(v) { return Number(v).toFixed(v >= 100 ? 0 : 1); } },
             },
@@ -1145,6 +1201,8 @@
             return condLab(c) + ': Σ ' + sum(ag) + ' · med ' + fmtNum(s.median_ai_generations);
           });
           document.getElementById('overlay-ai').innerHTML = aiLines.join('\n');
+          var aiSeriesList = boxPlotSeriesFromBbc('ai_generations_total', 'ai_generations_per_problem');
+          var aiYMax = maxFromBoxplotSeriesList(aiSeriesList);
           initChart('chart-ai-combined', Object.assign(baseOption(), {
             grid: { left: 44, right: 18, top: chartTopBox, bottom: gridBottomBox },
             legend: { data: condOrder.map(condLab), top: 2, textStyle: { color: THEME.text, fontSize: 10 } },
@@ -1159,11 +1217,12 @@
               type: 'value',
               name: 'Count',
               min: 0,
+              max: aiYMax > 0 ? undefined : 1,
               scale: false,
               splitLine: { lineStyle: { color: THEME.grid } },
               axisLabel: { color: THEME.text, fontSize: 10 },
             },
-            series: boxPlotSeriesFromBbc('ai_generations_total', 'ai_generations_per_problem'),
+            series: aiSeriesList,
             tooltip: {
               trigger: 'item',
               formatter: function(p) {
@@ -1176,6 +1235,7 @@
           }));
         } else {
           var aiBox = [boxRow(aiTot)].concat((apm || []).map(function(col) { return boxRow(col); }));
+          var aiSingleMax = maxFromBoxplotSeriesList([{ data: aiBox }]);
           document.getElementById('overlay-ai').innerHTML =
             'Σ <strong>' + sum(aiTot) + '</strong> · median <strong>' + fmtNum(median(aiTot)) + '</strong>\nper session';
           initChart('chart-ai-combined', Object.assign(baseOption(), {
@@ -1191,6 +1251,7 @@
               type: 'value',
               name: 'Count',
               min: 0,
+              max: aiSingleMax > 0 ? undefined : 1,
               scale: false,
               splitLine: { lineStyle: { color: THEME.grid } },
               axisLabel: { color: THEME.text, fontSize: 10 },
@@ -1238,6 +1299,8 @@
           });
           document.getElementById('overlay-accept').innerHTML = accLines.join('\n');
           document.getElementById('overlay-reject').innerHTML = rejLines.join('\n');
+          var accSeriesList = boxPlotSeriesFromBbc('accepts_total', 'accepts_per_problem');
+          var accYMax = maxFromBoxplotSeriesList(accSeriesList);
           initChart('chart-accept', Object.assign(baseOption(), {
             grid: { left: 44, right: 18, top: chartTopBox, bottom: gridBottomBox },
             legend: { data: condOrder.map(condLab), top: 2, textStyle: { color: THEME.text, fontSize: 10 } },
@@ -1252,11 +1315,12 @@
               type: 'value',
               name: 'Count',
               min: 0,
+              max: accYMax > 0 ? undefined : 1,
               scale: false,
               splitLine: { lineStyle: { color: THEME.grid } },
               axisLabel: { color: THEME.text, fontSize: 10 },
             },
-            series: boxPlotSeriesFromBbc('accepts_total', 'accepts_per_problem'),
+            series: accSeriesList,
             tooltip: {
               trigger: 'item',
               formatter: function(p) {
@@ -1269,6 +1333,8 @@
               },
             },
           }));
+          var rejSeriesList = boxPlotSeriesFromBbc('rejects_total', 'rejects_per_problem');
+          var rejYMax = maxFromBoxplotSeriesList(rejSeriesList);
           initChart('chart-reject', Object.assign(baseOption(), {
             grid: { left: 44, right: 18, top: chartTopBox, bottom: gridBottomBox },
             legend: { data: condOrder.map(condLab), top: 2, textStyle: { color: THEME.text, fontSize: 10 } },
@@ -1283,11 +1349,12 @@
               type: 'value',
               name: 'Count',
               min: 0,
+              max: rejYMax > 0 ? undefined : 1,
               scale: false,
               splitLine: { lineStyle: { color: THEME.grid } },
               axisLabel: { color: THEME.text, fontSize: 10 },
             },
-            series: boxPlotSeriesFromBbc('rejects_total', 'rejects_per_problem'),
+            series: rejSeriesList,
             tooltip: {
               trigger: 'item',
               formatter: function(p) {
@@ -1305,6 +1372,8 @@
             'Σ <strong>' + sum(accT) + '</strong> · median <strong>' + fmtNum(median(accT)) + '</strong> · max <strong>' + fmtNum((accT || []).reduce(function(m, x){ x = Number(x)||0; return x>m?x:m; }, 0)) + '</strong>';
           document.getElementById('overlay-reject').innerHTML =
             'Σ <strong>' + sum(rejT) + '</strong> · median <strong>' + fmtNum(median(rejT)) + '</strong> · max <strong>' + fmtNum((rejT || []).reduce(function(m, x){ x = Number(x)||0; return x>m?x:m; }, 0)) + '</strong>';
+          var accSingleMax = maxFromBoxplotSeriesList([{ data: accBox }]);
+          var rejSingleMax = maxFromBoxplotSeriesList([{ data: rejBox }]);
           initChart('chart-accept', Object.assign(baseOption(), {
             grid: { left: 44, right: 18, top: 22, bottom: gridBottomBox },
             xAxis: {
@@ -1318,6 +1387,7 @@
               type: 'value',
               name: 'Count',
               min: 0,
+              max: accSingleMax > 0 ? undefined : 1,
               scale: false,
               splitLine: { lineStyle: { color: THEME.grid } },
               axisLabel: { color: THEME.text, fontSize: 10 },
@@ -1354,6 +1424,7 @@
               type: 'value',
               name: 'Count',
               min: 0,
+              max: rejSingleMax > 0 ? undefined : 1,
               scale: false,
               splitLine: { lineStyle: { color: THEME.grid } },
               axisLabel: { color: THEME.text, fontSize: 10 },
@@ -1391,6 +1462,8 @@
             return condLab(c) + ': Σ ' + sum(r) + ' · med ' + fmtNum(s.median_runs);
           });
           document.getElementById('overlay-runs').innerHTML = runLines.join('\n');
+          var runSeriesList = boxPlotSeriesFromBbc('runs_total', 'runs_per_problem');
+          var runYMax = maxFromBoxplotSeriesList(runSeriesList);
           initChart('chart-runs', Object.assign(baseOption(), {
             grid: { left: 44, right: 18, top: chartTopBox, bottom: gridBottomBox },
             legend: { data: condOrder.map(condLab), top: 2, textStyle: { color: THEME.text, fontSize: 10 } },
@@ -1405,11 +1478,12 @@
               type: 'value',
               name: 'Count',
               min: 0,
+              max: runYMax > 0 ? undefined : 1,
               scale: false,
               splitLine: { lineStyle: { color: THEME.grid } },
               axisLabel: { color: THEME.text, fontSize: 10 },
             },
-            series: boxPlotSeriesFromBbc('runs_total', 'runs_per_problem'),
+            series: runSeriesList,
             tooltip: {
               trigger: 'item',
               formatter: function(p) {
@@ -1425,6 +1499,7 @@
         } else {
           document.getElementById('overlay-runs').innerHTML =
             'Σ <strong>' + sum(runT) + '</strong> · median <strong>' + fmtNum(median(runT)) + '</strong>';
+          var runSingleMax = maxFromBoxplotSeriesList([{ data: runBox }]);
           initChart('chart-runs', Object.assign(baseOption(), {
             grid: { left: 44, right: 18, top: 22, bottom: gridBottomBox },
             xAxis: {
@@ -1438,6 +1513,7 @@
               type: 'value',
               name: 'Count',
               min: 0,
+              max: runSingleMax > 0 ? undefined : 1,
               scale: false,
               splitLine: { lineStyle: { color: THEME.grid } },
               axisLabel: { color: THEME.text, fontSize: 10 },
@@ -1798,7 +1874,16 @@
           render();
         })();
 
-        setTimeout(resizeAll, 50);
+        function scheduleChartResize() {
+          resizeAll();
+          requestAnimationFrame(function() {
+            resizeAll();
+            setTimeout(resizeAll, 0);
+            setTimeout(resizeAll, 100);
+            setTimeout(resizeAll, 400);
+          });
+        }
+        scheduleChartResize();
       })
       .catch(function(err) {
         console.error('Analytics load failed', err);
