@@ -98,8 +98,25 @@ Container image **`rahadarmannabid/codeoracle`** (`build-and-push.sh` publishes 
 ├── requirements.txt
 ├── templates/           # Jinja HTML (index IDE, home, surveys, instructor UIs)
 ├── submissions/       # Default output for submissions (configurable)
+├── scripts/           # Utilities (see Load testing below)
 └── starter_code/      # Default starter files dir (configurable via STARTER_CODE_DIR)
 ```
+
+---
+
+## Load testing (optional)
+
+`scripts/emulate_students_loadtest.py` hammers the same HTTP endpoints the IDE uses after a quiz join (`/health`, `/quiz/{code}`, `/quiz/join`, `/log-activities`, `/checkpoint-editor`). Requires `httpx` (already in `requirements.txt`).
+
+```bash
+# Local — set LOADTEST_QUIZ_CODE to your instructor share code
+LOADTEST_BASE_URL=http://127.0.0.1:8000 LOADTEST_QUIZ_CODE=YOUR_CODE python scripts/emulate_students_loadtest.py
+
+# Remote host — use only when you intend to stress production
+LOADTEST_BASE_URL=https://www.guide.codes LOADTEST_QUIZ_CODE=YOUR_CODE python scripts/emulate_students_loadtest.py
+```
+
+Important: `LOADTEST_QUIZ_LANGUAGE` must match the quiz’s **allowed** languages (default is `python`). Transient network errors retry once; exit code `0` means no 5xx and no failed transport on the sampled requests. Set `LOADTEST_ANALYZE=1` only if you want to include `POST /analyze` (uses OpenAI quota).
 
 ---
 
