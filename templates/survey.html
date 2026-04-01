@@ -910,6 +910,9 @@
                     await this.loadSurveyConfig();
                     await this.updateSurveyStatus('in_progress');
                     this.renderSurvey();
+                    // 1) Server-saved answers (after submit or from last session)
+                    await this.applyServerSavedSurveyResponses();
+                    // 2) Local draft overrides — in-progress work from this browser
                     this.applySurveyDraftFromStorage();
                     this.setupEventListeners();
                     document.getElementById('infoSection').style.display = 'block';
@@ -967,33 +970,29 @@
                 return null;
             }
 
-            applySurveyDraftFromStorage() {
-                if (!this.surveyConfig || !this.surveyConfig.questions) return;
-                let raw;
-                try {
-                    raw = localStorage.getItem(this.getSurveyDraftStorageKey());
-                } catch (e) { return; }
-                if (!raw) return;
-                let data;
-                try {
-                    data = JSON.parse(raw);
-                } catch (e) { return; }
-                if (!data || !data.responses || typeof data.responses !== 'object') return;
-
-                const saved = data.responses;
+            /**
+             * Apply a question_id -> answer map to the rendered form and this.responses.
+             * Used for server rehydration and localStorage drafts (draft applied last wins on overlap).
+             */
+            applyResponseMapToForm(saved) {
+                if (!this.surveyConfig || !this.surveyConfig.questions || !saved || typeof saved !== 'object') return;
                 Object.assign(this.responses, saved);
 
                 for (const q of this.surveyConfig.questions) {
                     if (q.type === 'info_block') continue;
-                    const val = saved[q.id];
+                    let val = saved[q.id];
+                    if (val === undefined || val === null) {
+                        val = saved[String(q.id)];
+                    }
                     if (val === undefined || val === null) continue;
 
                     const el = this.findQuestionElement(q.id);
                     if (!el) continue;
 
+                    const qidStr = String(q.id);
                     if (q.type === 'likert' || q.type === 'likert_7_with_na' || q.type === 'multiple_choice') {
                         el.querySelectorAll('input[type="radio"]').forEach((radio) => {
-                            if (radio.name === q.id && String(radio.value) === String(val)) radio.checked = true;
+                            if (String(radio.name) === qidStr && String(radio.value) === String(val)) radio.checked = true;
                         });
                     } else if (q.type === 'slider') {
                         const slider = el.querySelector('input[type="range"]');
@@ -1007,9 +1006,25 @@
                         }
                     } else if (q.type === 'open_ended') {
                         const textarea = el.querySelector('textarea.text-input');
+                        const charCounter = el.querySelector('.char-counter');
                         if (textarea) {
-                            textarea.value = typeof val === 'string' ? val : String(val);
-                            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                            const s = typeof val === 'string' ? val : String(val);
+                            textarea.value = s;
+                            // Do NOT dispatch synthetic 'input': the open-ended listener deletes
+                            // this.responses[id] when below min_length, clearing merged server/draft data.
+                            if (charCounter) {
+                                const minLength = q.min_length || 0;
+                                const maxLen = q.max_length || 1000;
+                                const trimmed = s.trim();
+                                charCounter.textContent = `${s.length} / ${maxLen} characters${minLength > 0 ? ` (minimum ${minLength})` : ''}`;
+                                if (minLength > 0 && trimmed.length < minLength) {
+                                    charCounter.className = 'char-counter warning';
+                                } else if (s.length > maxLen * 0.9) {
+                                    charCounter.className = 'char-counter warning';
+                                } else {
+                                    charCounter.className = 'char-counter';
+                                }
+                            }
                         }
                     }
 
@@ -1017,6 +1032,36 @@
                 }
 
                 this.updateProgress();
+            }
+
+            async applyServerSavedSurveyResponses() {
+                if (!this.sessionId || !this.surveyConfig) return;
+                try {
+                    const res = await fetch(`/survey-status/${encodeURIComponent(this.sessionId)}`);
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    const field = this.surveyType === 'pre' ? 'pre_survey_answers' : 'post_survey_answers';
+                    const saved = data[field];
+                    if (!saved || typeof saved !== 'object') return;
+                    this.applyResponseMapToForm(saved);
+                } catch (e) {
+                    console.warn('Could not load saved survey answers from server:', e);
+                }
+            }
+
+            applySurveyDraftFromStorage() {
+                if (!this.surveyConfig || !this.surveyConfig.questions) return;
+                let raw;
+                try {
+                    raw = localStorage.getItem(this.getSurveyDraftStorageKey());
+                } catch (e) { return; }
+                if (!raw) return;
+                let data;
+                try {
+                    data = JSON.parse(raw);
+                } catch (e) { return; }
+                if (!data || !data.responses || typeof data.responses !== 'object') return;
+                this.applyResponseMapToForm(data.responses);
             }
 
             async loadSurveyConfig() {
@@ -1354,11 +1399,10 @@
                         charCounter.className = 'char-counter';
                     }
                     
-                    // Validate minimum length
+                    // Validate minimum length (only for real typing — not synthetic events)
                     if (trimmedValue.length >= minLength) {
                         this.handleResponse(question.id, value);
-                    } else {
-                        // Remove from responses if doesn't meet minimum
+                    } else if (e.isTrusted) {
                         delete this.responses[question.id];
                         this.updateProgress();
                         this.schedulePersistSurveyDraft();
@@ -1510,6 +1554,15 @@
                 modal.classList.add('active');
             }
 
+            /** Resolve stored answer for a question (IDs may be number in config, string in API/localStorage). */
+            getAnswerForQuestion(q) {
+                if (!q) return undefined;
+                let v = this.responses[q.id];
+                if (v !== undefined && v !== null) return v;
+                v = this.responses[String(q.id)];
+                return v !== undefined && v !== null ? v : undefined;
+            }
+
             handleResponse(questionId, answer) {
                 this.responses[questionId] = answer;
                 
@@ -1526,8 +1579,12 @@
             updateProgress() {
                 // Exclude info_block from total count
                 const totalQuestions = this.surveyConfig.questions.filter(q => q.type !== 'info_block').length;
-                const answeredQuestions = Object.keys(this.responses).length;
-                const progress = (answeredQuestions / totalQuestions) * 100;
+                const answeredQuestions = this.surveyConfig.questions.filter(q => {
+                    if (q.type === 'info_block') return false;
+                    const v = this.getAnswerForQuestion(q);
+                    return v !== undefined && v !== null;
+                }).length;
+                const progress = totalQuestions ? (answeredQuestions / totalQuestions) * 100 : 0;
 
                 document.getElementById('progressFill').style.width = `${progress}%`;
 
@@ -1535,7 +1592,10 @@
                 if (submitBtn) {
                     // Only required questions block submission
                     const requiredQuestions = this.surveyConfig.questions.filter(q => q.type !== 'info_block' && q.required !== false);
-                    const answeredRequired = requiredQuestions.filter(q => this.responses[q.id] !== undefined).length;
+                    const answeredRequired = requiredQuestions.filter(q => {
+                        const v = this.getAnswerForQuestion(q);
+                        return v !== undefined && v !== null;
+                    }).length;
                     submitBtn.disabled = answeredRequired < requiredQuestions.length;
                 }
             }
@@ -1554,7 +1614,24 @@
             setupEventListeners() {
                 document.getElementById('submitBtn').addEventListener('click', () => this.submitSurvey());
 
+                // Flush draft synchronously when leaving (IDE, back button, refresh) — debounced save may not have run.
+                window.addEventListener('pagehide', () => {
+                    try {
+                        this.persistSurveyDraft();
+                    } catch (e) { /* ignore */ }
+                });
+                document.addEventListener('visibilitychange', () => {
+                    if (document.visibilityState === 'hidden') {
+                        try {
+                            this.persistSurveyDraft();
+                        } catch (e) { /* ignore */ }
+                    }
+                });
+
                 window.addEventListener('beforeunload', (e) => {
+                    try {
+                        this.persistSurveyDraft();
+                    } catch (err) { /* ignore */ }
                     if (allowNavigation) {
                         return undefined;
                     }
@@ -1568,7 +1645,12 @@
 
             async submitSurvey() {
                 const requiredQuestions = this.surveyConfig.questions.filter(q => q.required !== false && q.type !== 'info_block');
-                const unansweredRequired = requiredQuestions.filter(q => !this.responses[q.id]);
+                const unansweredRequired = requiredQuestions.filter(q => {
+                    const v = this.getAnswerForQuestion(q);
+                    if (v === undefined || v === null) return true;
+                    if (typeof v === 'string' && !v.trim()) return true;
+                    return false;
+                });
                 
                 if (unansweredRequired.length > 0) {
                     this.showError(`Please answer all required questions (${unansweredRequired.length} remaining).`);
@@ -1578,7 +1660,7 @@
                 const invalidLengths = [];
                 for (const question of this.surveyConfig.questions) {
                     if (question.type === 'open_ended' && question.min_length) {
-                        const response = this.responses[question.id];
+                        const response = this.getAnswerForQuestion(question);
                         if (response && response.trim().length < question.min_length) {
                             invalidLengths.push({
                                 id: question.id,
