@@ -13,7 +13,6 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 import json
 import logging
-import os
 import re
 import secrets
 import uuid
@@ -21,7 +20,6 @@ from urllib.parse import quote
 from pathlib import Path
 
 from firebase_utils import fb_dict
-from models import QuizCreate, QuizUpdate, QuizJoinRequest
 from quiz_analytics import (
     aggregate_quiz_analytics,
     build_user_ai_activity_log,

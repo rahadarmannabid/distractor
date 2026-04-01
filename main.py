@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from pydantic import BaseModel, Field, ValidationError
 import os
 from pathlib import Path
@@ -12,7 +12,6 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=True)
 from openai import OpenAI
 import re
 import keyword
-import subprocess
 import sys
 import tempfile
 import time
@@ -20,18 +19,14 @@ import uuid
 import json
 import mimetypes 
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Any, Iterator, Tuple
+from typing import List, Dict, Optional, Any, Iterator, Tuple, cast
 import firebase_admin
 from firebase_admin import credentials, db
-from fastapi.responses import HTMLResponse, RedirectResponse
 import asyncio
-import shlex
 import smtplib
 from email.message import EmailMessage
 import traceback
 from enum import Enum
-import json
-from fastapi.responses import FileResponse
 from admin import router as admin_router
 from instructor import router as instructor_router
 from firebase_utils import fb_dict
@@ -1016,7 +1011,8 @@ class ActiveSessionMap:
         raw = self._redis.get(self._prefix + k)
         if raw is None:
             raise KeyError(k)
-        return SessionLog.model_validate_json(raw)
+        # Redis stubs may type .get() loosely; session JSON is always str with decode_responses=True.
+        return SessionLog.model_validate_json(cast(str, raw))
 
     def __setitem__(self, k: str, v: SessionLog) -> None:
         if self._redis is None:
@@ -2557,7 +2553,7 @@ async def execute_code(request: ExecuteRequest):
                 return ExecuteResponse(
                     success=False,
                     output="",
-                    error=f"Total code across all files is too long",
+                    error="Total code across all files is too long",
                     execution_time=0.0
                 )
             files_dicts = [{"filename": f.filename, "content": f.content} for f in request.files]
@@ -2825,7 +2821,7 @@ async def submit_code(request: SubmitRequest):
             else:
                 submission_file = submissions_dir / f"{submission_id}{extension}"
                 with open(submission_file, 'w', encoding='utf-8') as f:
-                    f.write(f"# Submission Details\n")
+                    f.write("# Submission Details\n")
                     f.write(f"# User ID: {user_id}\n")
                     f.write(f"# Assignment Key: {assignment_key}\n")
                     f.write(f"# Session ID: {session_id}\n")
@@ -4370,7 +4366,7 @@ async def save_session_to_firebase(
         periodic_surveys_data = []
         
         # Log what we received
-        logger.info(f"Processing session for Firebase save:")
+        logger.info("Processing session for Firebase save:")
         logger.info(f"  - User: {session_log.user_id}")
         logger.info(f"  - Session: {session_log.session_id}")
         logger.info(f"  - Survey data received: {bool(survey_data)}")
@@ -4523,7 +4519,7 @@ async def save_session_to_firebase(
                 occurrence_type = "FINAL" if survey['is_final'] else f"#{survey['occurrence']}"
                 logger.info(f"    • Occurrence {occurrence_type}: {survey['triggered_at_analysis_count']} analyses, {len(survey['responses'])} responses")
         else:
-            logger.info(f"  - Periodic surveys: none")
+            logger.info("  - Periodic surveys: none")
             
         logger.info(f"  - AI logs: {len(logs_data.get('ai_guesses', {}))} AI analyses")
         logger.info(f"  - Activity log: {len(session_log.activity_log)} entries")

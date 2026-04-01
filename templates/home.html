@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-quiz-mode="{{ 'true' if (quiz_mode is defined and quiz_mode) else 'false' }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -812,7 +812,7 @@
         const assignmentKeyInput = document.getElementById('assignmentKey');
         const programmingLanguageSelect = document.getElementById('programmingLanguage');
         /** True when opened via /quiz/{access_code} — must use /quiz/join only, not legacy /authenticate. */
-        const IS_QUIZ_MODE = {{ (quiz_mode is defined and quiz_mode) | tojson }};
+        const IS_QUIZ_MODE = document.documentElement.dataset.quizMode === 'true';
 
         let consentGiven = false;
 
