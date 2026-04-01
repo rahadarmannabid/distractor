@@ -1811,6 +1811,122 @@ def _strip_blocked_suggestion_lines(text: str, language: Optional[str]) -> str:
     return "\n".join(kept).strip()
 
 
+def _suggestion_quality_prompt_rules() -> str:
+    """Rules for next-line / full-code prompts: no filler tokens, substantive logic, no duplicates."""
+    return (
+        "- NEVER suggest a line that is only a placeholder or no-op: not standalone "
+        "`pass`, `continue`, `break`, `...` (ellipsis), bare `None`, or equivalent filler in the language. "
+        "Prefer real logic, assignments, conditions, calls, or returns with values.\n"
+        "- The next line must be a LOGICAL step toward solving the problem — not padding or repetition.\n"
+        "- Do NOT repeat a line that already appears in the user's code (including the same `return <expr>`, "
+        "same `print(...)`, or duplicate function headers). Suggest the genuinely NEW line that follows."
+    )
+
+
+def _line_is_placeholder_only(line: str, language: Optional[str]) -> bool:
+    """True if the line is only a no-op / filler suggestion (should not be shown)."""
+    if not line or not str(line).strip():
+        return True
+    s = line.strip()
+    lang = (language or "").lower()
+    if lang == "python":
+        low = s.split("#")[0].strip().lower()
+        if low in ("pass", "continue", "break", "none", "..."):
+            return True
+        if s.strip() == "...":
+            return True
+    low_generic = re.sub(r"\s+", " ", s.lower())
+    if low_generic in (
+        "pass",
+        "continue",
+        "break",
+        "...",
+        "none",
+        "null",
+        "undefined",
+        ";",
+    ):
+        return True
+    return False
+
+
+def _normalize_line_for_dedup(line: str) -> str:
+    """Collapse whitespace for comparing whether two lines are the same suggestion."""
+    return re.sub(r"\s+", " ", (line or "").strip().lower())
+
+
+def _refine_next_line_suggestion(
+    raw: str, code_lines: list, language: Optional[str]
+) -> tuple[str, Optional[str]]:
+    """
+    Apply comment strip, duplicate filter, placeholder filter, blocked check.
+    Returns (sanitized text or '', None) on success, or ('', rejection_reason) for retry messaging.
+    rejection_reason: 'empty' | 'duplicate' | 'placeholder' | 'mixed_bad' | 'blocked'
+    """
+    if not raw or not str(raw).strip():
+        return "", "empty"
+    next_line = _strip_comment_only_lines(raw, language)
+    if not next_line or not str(next_line).strip():
+        return "", "empty"
+
+    existing = {_normalize_line_for_dedup(ln) for ln in code_lines if ln.strip()}
+    suggestion_lines = next_line.strip().split("\n")
+    kept: list = []
+    saw_dup = False
+    saw_ph = False
+    for ln in suggestion_lines:
+        if not ln.strip():
+            continue
+        if _line_is_placeholder_only(ln, language):
+            saw_ph = True
+            continue
+        if _normalize_line_for_dedup(ln) in existing:
+            saw_dup = True
+            continue
+        kept.append(ln)
+
+    out = "\n".join(kept).strip()
+    if out and not _contains_blocked_suggestion(out, language):
+        return out, None
+    if out and _contains_blocked_suggestion(out, language):
+        return "", "blocked"
+
+    if saw_dup and saw_ph:
+        return "", "mixed_bad"
+    if saw_dup:
+        return "", "duplicate"
+    if saw_ph:
+        return "", "placeholder"
+    return "", "empty"
+
+
+def _retry_hint_for_next_line(rejection: str) -> str:
+    """User-facing instruction appended on the second attempt."""
+    hints = {
+        "empty": (
+            "Your previous answer was empty or unusable. Output exactly 1–2 lines of real code only."
+        ),
+        "duplicate": (
+            "Your previous suggestion repeated one or more lines that already appear in the code above. "
+            "You must output a NEW line that does not duplicate any existing line (normalize spaces; "
+            "same return/print counts as duplicate)."
+        ),
+        "placeholder": (
+            "Your previous suggestion used only placeholder/no-op tokens (e.g. pass, continue, bare None, "
+            "ellipsis alone). Output a substantive line that advances the solution."
+        ),
+        "mixed_bad": (
+            "Your previous suggestion was rejected: it duplicated existing lines and/or used placeholder-only "
+            "tokens. Output one new, substantive line of code."
+        ),
+        "blocked": (
+            "Your previous suggestion used APIs not allowed in this environment (e.g. input(, unsafe imports). "
+            "Use literals and allowed APIs only."
+        ),
+    }
+    return hints.get(rejection, hints["empty"])
+
+
 def _suggestion_runtime_prompt_rule(language: Optional[str]) -> str:
     """Short rule text injected into AI prompts (per language)."""
     lang = (language or "").lower()
@@ -2100,7 +2216,7 @@ def predict_next_line(problem_description, existing_code, language=None):
         "python": [
             "    else:",
             "        return n * factorial(n - 1)",
-            "    pass",
+            "        result.append(x)",
             "def another_function():"
         ],
         "java": [
@@ -2129,7 +2245,7 @@ def predict_next_line(problem_description, existing_code, language=None):
     last_lines = code_lines[-5:] if len(code_lines) > 5 else code_lines
     last_lines_str = "\n".join(f"  {ln}" for ln in last_lines)
 
-    what_is_the_next_line = f"""
+    prompt_base = f"""
     You are an expert programmer. Based on this problem: {problem_description}
     
     Current {language} code:
@@ -2152,32 +2268,31 @@ def predict_next_line(problem_description, existing_code, language=None):
     - The suggestion must CONTINUE the program, not rewrite what exists
     - If a function body is complete (has a return), suggest calling it or defining the NEXT function
     - Focus on what is MISSING, not what is already written
+    {_suggestion_quality_prompt_rules()}
     {_suggestion_runtime_prompt_rule(language)}
     
     Examples of good responses for {language}:
     {chr(10).join([f'    - "{example}"' for example in examples[:4]])}    
     Next line:
     """
-    
-    next_line = get_response(what_is_the_next_line)
-    next_line = _strip_comment_only_lines(next_line, language)
 
-    # Post-processing: reject if the suggestion duplicates an existing line
-    if next_line:
-        existing_stripped = {ln.strip().lower() for ln in code_lines if ln.strip()}
-        suggestion_lines = next_line.strip().split("\n")
-        kept = [ln for ln in suggestion_lines if ln.strip().lower() not in existing_stripped]
-        next_line = "\n".join(kept).strip()
-        # If dedup removed every line, keep the model's first line (better than empty)
-        if not next_line and suggestion_lines:
-            for ln in suggestion_lines:
-                if ln.strip():
-                    next_line = ln.strip()
-                    break
+    last_rejection: Optional[str] = None
+    for attempt in range(2):
+        retry_extra = ""
+        if attempt == 1 and last_rejection:
+            retry_extra = f"""
 
-    if _contains_blocked_suggestion(next_line, language):
-        return ""
-    return next_line
+IMPORTANT — YOUR PREVIOUS ANSWER WAS REJECTED BY THE SYSTEM:
+{_retry_hint_for_next_line(last_rejection)}
+Reply again with ONLY the next line(s) of code — no explanation.
+"""
+        raw = get_response(prompt_base + retry_extra)
+        refined, rej = _refine_next_line_suggestion(raw, code_lines, language)
+        if refined:
+            return refined
+        last_rejection = rej or "empty"
+
+    return ""
 
 def generate_full_code_suggestion(problem_description, existing_code, is_correct_description=False, language=None):
     """Generate full code completion suggestion"""
@@ -2207,6 +2322,9 @@ def generate_full_code_suggestion(problem_description, existing_code, is_correct
     - Do NOT add comments of any kind: no line comments (#, //), block comments (/* */), HTML comments, or docstrings
     - Don't include extraneous text outside the code.
     - Output should be in markdown text.
+    - Do not pad with useless standalone `pass`, `continue`, bare `None`, or ellipsis-only lines when real logic is expected.
+    - Extend the solution logically; do not append a duplicate of an entire statement block that already exists above.
+    {_suggestion_quality_prompt_rules()}
     {_suggestion_runtime_prompt_rule(language)}
 
     Complete code:
@@ -2404,7 +2522,11 @@ async def analyze_code(request: CodeRequest):
                 code_for_suggestion, ai_full_code_suggestion, max_lines=2, language=language
             )
             if fb:
-                ai_next_line = fb
+                fb_ok, _ = _refine_next_line_suggestion(
+                    fb, _normalized_code_lines(code_for_suggestion), language
+                )
+                if fb_ok:
+                    ai_next_line = fb_ok
 
         # Clean correct next line suggestion (for condition 1)
         if session_log and session_log.condition == 1 and correct_next_line != ai_next_line:
@@ -2434,7 +2556,11 @@ async def analyze_code(request: CodeRequest):
                 code_for_suggestion, correct_full_code_suggestion, max_lines=2, language=language
             )
             if cfb:
-                correct_next_line = cfb
+                cfb_ok, _ = _refine_next_line_suggestion(
+                    cfb, _normalized_code_lines(code_for_suggestion), language
+                )
+                if cfb_ok:
+                    correct_next_line = cfb_ok
 
         # Log this analysis to session if session_id provided
         if session_log:
