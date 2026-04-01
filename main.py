@@ -20,7 +20,7 @@ import hashlib
 import json
 import mimetypes 
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Any, Iterator, Tuple, cast
+from typing import List, Dict, Optional, Any, Iterator, Tuple, cast, Union
 import firebase_admin
 from firebase_admin import credentials, db
 import asyncio
@@ -31,6 +31,7 @@ from enum import Enum
 from admin import router as admin_router
 from instructor import router as instructor_router
 from firebase_utils import fb_dict
+from survey_payload_compact import compact_survey_ai_history
 
 import logging
 import html as html_std
@@ -967,7 +968,7 @@ class SessionLog(BaseModel):
 
 class SurveyResponse(BaseModel):
     question: str
-    response: int  # 1-5 Likert scale
+    response: Union[int, str, float, bool, None]  # Likert int or open-ended text
 
 class SurveySubmission(BaseModel):
     user_id: str
@@ -1416,17 +1417,13 @@ def _sanitize_firebase_key_segment(s: str) -> str:
 
 
 def append_periodic_survey_to_firebase(session_id: str, survey_data: Dict[str, Any]) -> bool:
-    """Append one periodic/final survey record under sessions/{id}/periodic_surveys."""
+    """Append one periodic/final survey under sessions/{id}/periodic_surveys (push; no read of full history)."""
     if not firebase_db:
         return False
     try:
-        session_ref = firebase_db.child("sessions").child(session_id)
-        existing = session_ref.child("periodic_surveys").get() or []
-        if not isinstance(existing, list):
-            existing = []
-        existing.append(survey_data)
-        per_ref = session_ref.child("periodic_surveys")
-        return firebase_rtdb_set_with_retry(per_ref, existing, max_attempts=3)
+        per_ref = firebase_db.child("sessions").child(session_id).child("periodic_surveys")
+        per_ref.push(survey_data)
+        return True
     except Exception as e:
         logger.error("append_periodic_survey_to_firebase failed: %s", e)
         return False
@@ -3624,6 +3621,11 @@ async def log_activities(request: ActivityLogRequest):
     
 
 
+def _write_survey_json_file(path: Path, payload: Dict[str, Any]) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, default=str)
+
+
 @app.post("/submit-survey")
 async def submit_survey(request: SurveySubmission):
     """Submit survey responses with AI history context"""
@@ -3637,14 +3639,21 @@ async def submit_survey(request: SurveySubmission):
         # Enhance request with AI history context if not provided
         if not request.ai_history_context and session_log:
             request.ai_history_context = extract_ai_history_context(session_log)
+
+        ai_ctx = compact_survey_ai_history(
+            request.ai_history_context,
+            max_entries=int(os.getenv("SURVEY_AI_HISTORY_MAX_ENTRIES", "24")),
+            max_chars=int(os.getenv("SURVEY_AI_HISTORY_MAX_CHARS", "6000")),
+        )
         
         # Save survey data locally with AI history context
         surveys_dir = Path(os.getenv("SUBMISSIONS_DIR", "submissions")) / "surveys"
         surveys_dir.mkdir(exist_ok=True)
         
         survey_file = surveys_dir / f"{request.session_id}_{request.survey_type}_{request.analysis_count}.json"
-        with open(survey_file, 'w', encoding='utf-8') as f:
-            json.dump(request.dict(), f, indent=2, default=str)
+        disk_payload = request.dict()
+        disk_payload["ai_history_context"] = ai_ctx
+        await asyncio.to_thread(_write_survey_json_file, survey_file, disk_payload)
         
         logger.info(f"Survey with AI history saved: {request.user_id} - {request.survey_type} survey at analysis {request.analysis_count}")
 
@@ -3658,8 +3667,8 @@ async def submit_survey(request: SurveySubmission):
                 "assignment_key": request.assignment_key,
                 "responses": [r.dict() for r in request.responses],
             }
-            if request.ai_history_context:
-                fb_payload["ai_history_context"] = request.ai_history_context
+            if ai_ctx:
+                fb_payload["ai_history_context"] = ai_ctx
             if await asyncio.to_thread(append_periodic_survey_to_firebase, request.session_id, fb_payload):
                 logger.info("Periodic/final survey appended to Firebase for session %s", request.session_id)
             if request.session_id in active_sessions:

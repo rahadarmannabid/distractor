@@ -3068,19 +3068,25 @@ function resetIdleTimer() {
 }
 
 function savePeriodicSurveysToStorage() {
-    try {
-        const storageKey = `periodicSurveys_${currentSession.sessionId}`;
-        const dataToSave = {
-            surveyResponses: surveyData.surveyResponses,
-            periodicSurveyOccurrenceCount: surveyData.periodicSurveyOccurrenceCount,
-            analysisCount: surveyData.analysisCount,
-            surveyInterval: surveyData.surveyInterval,
-            savedAt: new Date().toISOString()
-        };
-        
-        sessionStorage.setItem(storageKey, JSON.stringify(dataToSave));
-    } catch (error) {
-        console.error('❌ Failed to save periodic surveys to sessionStorage:', error);
+    var doSave = function() {
+        try {
+            const storageKey = `periodicSurveys_${currentSession.sessionId}`;
+            const dataToSave = {
+                surveyResponses: surveyData.surveyResponses,
+                periodicSurveyOccurrenceCount: surveyData.periodicSurveyOccurrenceCount,
+                analysisCount: surveyData.analysisCount,
+                surveyInterval: surveyData.surveyInterval,
+                savedAt: new Date().toISOString()
+            };
+            sessionStorage.setItem(storageKey, JSON.stringify(dataToSave));
+        } catch (error) {
+            console.error('❌ Failed to save periodic surveys to sessionStorage:', error);
+        }
+    };
+    if (typeof requestIdleCallback !== 'undefined') {
+        requestIdleCallback(doSave, { timeout: 1500 });
+    } else {
+        setTimeout(doSave, 0);
     }
 }
 
@@ -5293,15 +5299,15 @@ async function submitPeriodicSurvey() {
     try {
         await saveSurveyResponses(responses, 'periodic');
         
-        // Use the AI snapshot captured when survey was shown
         const aiSnapshot = surveyData.currentSurveyAISnapshot || collectAIHistoryContext();
+        const aiSnapshotCompact = compactAiHistoryForSurvey(aiSnapshot);
         
         const surveyEntry = {
             occurrence: surveyData.periodicSurveyOccurrenceCount,
             timestamp: new Date().toISOString(),
             analysisCount: surveyData.analysisCount,
             responses: responses,
-            ai_history_at_survey: aiSnapshot
+            ai_history_at_survey: aiSnapshotCompact
         };
         surveyData.surveyResponses.push(surveyEntry);
         
@@ -5335,8 +5341,8 @@ async function submitFinalSurvey() {
     }
     
     try {
-        // Use the AI snapshot captured when survey was shown
         const finalAISnapshot = surveyData.currentSurveyAISnapshot || collectAIHistoryContext();
+        const finalAISnapshotCompact = compactAiHistoryForSurvey(finalAISnapshot);
         
         await saveSurveyResponses(responses, 'final');
         
@@ -5346,7 +5352,7 @@ async function submitFinalSurvey() {
             timestamp: new Date().toISOString(),
             analysisCount: surveyData.analysisCount,
             responses: responses,
-            ai_history_at_survey: finalAISnapshot,
+            ai_history_at_survey: finalAISnapshotCompact,
             is_final: true,
             triggered_at_submission: true
         });
@@ -5577,6 +5583,45 @@ function collectSurveyResponses(modalId) {
     return responses;
 }
 
+
+/** Shrink AI history for /submit-survey so large sessions + long answers stay fast (matches server compact). */
+function compactAiHistoryForSurvey(ctx, maxEntries, maxChars) {
+    maxEntries = maxEntries || 24;
+    maxChars = maxChars || 6000;
+    if (!ctx || typeof ctx !== 'object') return ctx;
+    function trunc(s) {
+        if (s == null || typeof s !== 'string') return s;
+        if (s.length <= maxChars) return s;
+        return s.slice(0, maxChars - 1) + '\u2026';
+    }
+    function compactList(arr) {
+        if (!Array.isArray(arr) || !arr.length) return arr;
+        var tail = arr.length > maxEntries ? arr.slice(-maxEntries) : arr;
+        return tail.map(function(row) {
+            if (!row || typeof row !== 'object') return row;
+            var o = {};
+            for (var k in row) {
+                if (Object.prototype.hasOwnProperty.call(row, k)) {
+                    if (k === 'problem_analysis' || k === 'next_line_suggestion' || k === 'full_code_suggestion' || k === 'user_code_snapshot') {
+                        o[k] = trunc(row[k]);
+                    } else {
+                        o[k] = row[k];
+                    }
+                }
+            }
+            return o;
+        });
+    }
+    var out = {};
+    for (var k in ctx) {
+        if (Object.prototype.hasOwnProperty.call(ctx, k)) out[k] = ctx[k];
+    }
+    ['ai_guess_history', 'correct_description_history', 'suggestions_only_history'].forEach(function(key) {
+        if (out[key]) out[key] = compactList(out[key]);
+    });
+    out.ai_history_compact = true;
+    return out;
+}
 
 // Add this function to collect AI history context
 function collectAIHistoryContext() {
@@ -5844,7 +5889,8 @@ function refreshProblemPanelAiHistory() {
 
 async function saveSurveyResponses(responses, surveyType) {
     try {
-        const aiHistoryContext = collectAIHistoryContext();
+        var rawCtx = surveyData.currentSurveyAISnapshot || collectAIHistoryContext();
+        const aiHistoryContext = compactAiHistoryForSurvey(rawCtx);
         
         const response = await fetch('/submit-survey', {
             method: 'POST',
@@ -5859,7 +5905,7 @@ async function saveSurveyResponses(responses, surveyType) {
                 responses: responses,
                 analysis_count: surveyData.analysisCount,
                 timestamp: new Date().toISOString(),
-                ai_history_context: aiHistoryContext  // NEW: Include AI history
+                ai_history_context: aiHistoryContext
             })
         });
 
