@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from pydantic import BaseModel, Field, ValidationError
 import os
 from pathlib import Path
@@ -12,7 +12,6 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=True)
 from openai import OpenAI
 import re
 import keyword
-import subprocess
 import sys
 import tempfile
 import time
@@ -20,18 +19,14 @@ import uuid
 import json
 import mimetypes 
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Any, Iterator, Tuple
+from typing import List, Dict, Optional, Any, Iterator, Tuple, cast
 import firebase_admin
 from firebase_admin import credentials, db
-from fastapi.responses import HTMLResponse, RedirectResponse
 import asyncio
-import shlex
 import smtplib
 from email.message import EmailMessage
 import traceback
 from enum import Enum
-import json
-from fastapi.responses import FileResponse
 from admin import router as admin_router
 from instructor import router as instructor_router
 from firebase_utils import fb_dict
@@ -891,6 +886,12 @@ class AuthResponse(BaseModel):
     # Session-resume fields: set when an incomplete prior session is found
     resumed: bool = False
     editor_draft_code: Optional[str] = None
+    # Exact survey phase (login redirect: e.g. post survey in progress → survey page)
+    pre_survey_status: str = "not_started"
+    post_survey_status: str = "not_started"
+    # True when this user already submitted this assignment (no new session created)
+    assignment_already_completed: bool = False
+    assignment_completed_at: Optional[str] = None
 
 class ActivityEntry(BaseModel):
     timestamp: str
@@ -1010,7 +1011,8 @@ class ActiveSessionMap:
         raw = self._redis.get(self._prefix + k)
         if raw is None:
             raise KeyError(k)
-        return SessionLog.model_validate_json(raw)
+        # Redis stubs may type .get() loosely; session JSON is always str with decode_responses=True.
+        return SessionLog.model_validate_json(cast(str, raw))
 
     def __setitem__(self, k: str, v: SessionLog) -> None:
         if self._redis is None:
@@ -1154,6 +1156,107 @@ def save_session_to_local(session_log: SessionLog):
         logger.error(f"Failed to save session log locally: {e}")
 
 
+def save_full_submission_snapshot_json(
+    *,
+    submission_id: str,
+    user_id: str,
+    assignment_key: str,
+    session_id: Optional[str],
+    timestamp: str,
+    programming_language: str,
+    suggestion_clicked: int,
+    compiler_clicked: int,
+    survey_data: Optional[Dict[str, Any]],
+    session_log: Optional[SessionLog],
+    code: str,
+    submitted_files: Optional[List[Dict[str, Any]]],
+    firebase_sync: str = "pending",
+) -> Optional[Path]:
+    """
+    Durable JSON snapshot of everything needed to recover a submission if Firebase fails.
+    Written under submissions/full_submissions/{submission_id}.json
+    """
+    try:
+        root = Path(os.getenv("SUBMISSIONS_DIR", "submissions"))
+        snap_dir = root / "full_submissions"
+        snap_dir.mkdir(parents=True, exist_ok=True)
+        payload: Dict[str, Any] = {
+            "submission_id": submission_id,
+            "user_id": user_id,
+            "assignment_key": assignment_key,
+            "session_id": session_id,
+            "timestamp": timestamp,
+            "programming_language": programming_language,
+            "suggestion_clicked": suggestion_clicked,
+            "compiler_clicked": compiler_clicked,
+            "survey_data": survey_data,
+            "code": code,
+            "submitted_files": submitted_files,
+            "session_log": session_log.dict() if session_log is not None else None,
+            "firebase_sync": firebase_sync,
+            "saved_at_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        out = snap_dir / f"{submission_id}.json"
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, default=str)
+        logger.info("Full submission snapshot saved: %s", out)
+        return out
+    except Exception as e:
+        logger.error("save_full_submission_snapshot_json failed: %s", e)
+        return None
+
+
+def write_firebase_sync_result_json(
+    submission_id: str, success: bool, error: Optional[str] = None
+) -> None:
+    """Record background Firebase outcome under submissions/firebase_sync_results/."""
+    try:
+        root = Path(os.getenv("SUBMISSIONS_DIR", "submissions"))
+        sync_dir = root / "firebase_sync_results"
+        sync_dir.mkdir(parents=True, exist_ok=True)
+        p = sync_dir / f"{submission_id}.json"
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "submission_id": submission_id,
+                    "success": success,
+                    "error": error,
+                    "completed_at_utc": datetime.now(timezone.utc).isoformat(),
+                },
+                f,
+                indent=2,
+                default=str,
+            )
+    except Exception as e:
+        logger.error("write_firebase_sync_result_json failed: %s", e)
+
+
+async def _background_firebase_submit(
+    session_log_dict: Dict[str, Any],
+    suggestion_clicked: int,
+    compiler_clicked: int,
+    programming_language: str,
+    survey_data: Optional[Dict[str, Any]],
+    submission_id: str,
+) -> None:
+    """Runs after HTTP response; full user data already on disk in full_submissions + session_logs."""
+    try:
+        sl = SessionLog.model_validate(session_log_dict)
+        ok = await save_session_to_firebase(
+            sl, suggestion_clicked, compiler_clicked, programming_language, survey_data
+        )
+        write_firebase_sync_result_json(
+            submission_id, ok, None if ok else "save_session_to_firebase returned False"
+        )
+        if ok:
+            logger.info("Background Firebase submit OK for submission_id=%s", submission_id)
+        else:
+            logger.error("Background Firebase submit failed (returned False) for submission_id=%s", submission_id)
+    except Exception as e:
+        logger.exception("Background Firebase submit error for submission_id=%s", submission_id)
+        write_firebase_sync_result_json(submission_id, False, str(e))
+
+
 # ─── Firebase reliability: retries + incremental checkpoints ─────────────────
 _firebase_checkpoint_last_at: Dict[str, float] = {}
 CHECKPOINT_ACTIVITY_THROTTLE_SEC = float(os.getenv("FIREBASE_CHECKPOINT_ACTIVITY_SEC", "12"))
@@ -1220,6 +1323,61 @@ def load_session_log_from_disk(session_id: str) -> Optional[SessionLog]:
     except Exception as e:
         logger.warning("load_session_log_from_disk failed for %s: %s", session_id, e)
         return None
+
+
+async def ensure_session_log_loaded(session_id: str) -> Optional[SessionLog]:
+    """Return SessionLog from memory, disk, or Firebase checkpoint; repopulate active_sessions."""
+    if session_id in active_sessions:
+        return active_sessions[session_id]
+    sl = load_session_log_from_disk(session_id)
+    if sl is None and firebase_db:
+        fdb = firebase_db
+        try:
+            chk = await asyncio.to_thread(
+                lambda: fdb.child("sessions").child(session_id).child("checkpoint").get()
+            )
+            if isinstance(chk, dict) and isinstance(chk.get("session"), dict):
+                sl = SessionLog.model_validate(chk["session"])
+        except Exception as e:
+            logger.warning("ensure_session_log_loaded Firebase failed for %s: %s", session_id, e)
+    if sl is not None:
+        active_sessions[session_id] = sl
+    return sl
+
+
+def detect_assignment_already_completed(user_id: str, assignment_key: str) -> Optional[Dict[str, Any]]:
+    """If this user already submitted this assignment, return session id and completion time."""
+    if firebase_db:
+        try:
+            ref = assignment_resume_ref(assignment_key, user_id)
+            if ref:
+                p = ref.get()
+                if isinstance(p, dict) and p.get("completed"):
+                    return {
+                        "session_id": (p.get("session_id") or "").strip(),
+                        "completed_at": p.get("updated_at"),
+                    }
+        except Exception as e:
+            logger.warning("detect_assignment_already_completed Firebase: %s", e)
+    logs_dir = Path(os.getenv("SUBMISSIONS_DIR", "session_logs"))
+    if not logs_dir.is_dir():
+        return None
+    prefix = f"{user_id}_{assignment_key}_"
+    candidates = [
+        p for p in logs_dir.iterdir()
+        if p.is_file() and p.suffix == ".json" and p.name.startswith(prefix)
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    for p in candidates:
+        sl = load_session_log_from_disk(p.stem)
+        if sl and (sl.code_submit_timestamp or sl.submitted_full_code):
+            return {
+                "session_id": sl.session_id,
+                "completed_at": sl.code_submit_timestamp or "",
+            }
+    return None
 
 
 def find_latest_quiz_session_log_path(user_id: str, quiz_id: str) -> Optional[Path]:
@@ -1653,6 +1811,122 @@ def _strip_blocked_suggestion_lines(text: str, language: Optional[str]) -> str:
     return "\n".join(kept).strip()
 
 
+def _suggestion_quality_prompt_rules() -> str:
+    """Rules for next-line / full-code prompts: no filler tokens, substantive logic, no duplicates."""
+    return (
+        "- NEVER suggest a line that is only a placeholder or no-op: not standalone "
+        "`pass`, `continue`, `break`, `...` (ellipsis), bare `None`, or equivalent filler in the language. "
+        "Prefer real logic, assignments, conditions, calls, or returns with values.\n"
+        "- The next line must be a LOGICAL step toward solving the problem — not padding or repetition.\n"
+        "- Do NOT repeat a line that already appears in the user's code (including the same `return <expr>`, "
+        "same `print(...)`, or duplicate function headers). Suggest the genuinely NEW line that follows."
+    )
+
+
+def _line_is_placeholder_only(line: str, language: Optional[str]) -> bool:
+    """True if the line is only a no-op / filler suggestion (should not be shown)."""
+    if not line or not str(line).strip():
+        return True
+    s = line.strip()
+    lang = (language or "").lower()
+    if lang == "python":
+        low = s.split("#")[0].strip().lower()
+        if low in ("pass", "continue", "break", "none", "..."):
+            return True
+        if s.strip() == "...":
+            return True
+    low_generic = re.sub(r"\s+", " ", s.lower())
+    if low_generic in (
+        "pass",
+        "continue",
+        "break",
+        "...",
+        "none",
+        "null",
+        "undefined",
+        ";",
+    ):
+        return True
+    return False
+
+
+def _normalize_line_for_dedup(line: str) -> str:
+    """Collapse whitespace for comparing whether two lines are the same suggestion."""
+    return re.sub(r"\s+", " ", (line or "").strip().lower())
+
+
+def _refine_next_line_suggestion(
+    raw: str, code_lines: list, language: Optional[str]
+) -> tuple[str, Optional[str]]:
+    """
+    Apply comment strip, duplicate filter, placeholder filter, blocked check.
+    Returns (sanitized text or '', None) on success, or ('', rejection_reason) for retry messaging.
+    rejection_reason: 'empty' | 'duplicate' | 'placeholder' | 'mixed_bad' | 'blocked'
+    """
+    if not raw or not str(raw).strip():
+        return "", "empty"
+    next_line = _strip_comment_only_lines(raw, language)
+    if not next_line or not str(next_line).strip():
+        return "", "empty"
+
+    existing = {_normalize_line_for_dedup(ln) for ln in code_lines if ln.strip()}
+    suggestion_lines = next_line.strip().split("\n")
+    kept: list = []
+    saw_dup = False
+    saw_ph = False
+    for ln in suggestion_lines:
+        if not ln.strip():
+            continue
+        if _line_is_placeholder_only(ln, language):
+            saw_ph = True
+            continue
+        if _normalize_line_for_dedup(ln) in existing:
+            saw_dup = True
+            continue
+        kept.append(ln)
+
+    out = "\n".join(kept).strip()
+    if out and not _contains_blocked_suggestion(out, language):
+        return out, None
+    if out and _contains_blocked_suggestion(out, language):
+        return "", "blocked"
+
+    if saw_dup and saw_ph:
+        return "", "mixed_bad"
+    if saw_dup:
+        return "", "duplicate"
+    if saw_ph:
+        return "", "placeholder"
+    return "", "empty"
+
+
+def _retry_hint_for_next_line(rejection: str) -> str:
+    """User-facing instruction appended on the second attempt."""
+    hints = {
+        "empty": (
+            "Your previous answer was empty or unusable. Output exactly 1–2 lines of real code only."
+        ),
+        "duplicate": (
+            "Your previous suggestion repeated one or more lines that already appear in the code above. "
+            "You must output a NEW line that does not duplicate any existing line (normalize spaces; "
+            "same return/print counts as duplicate)."
+        ),
+        "placeholder": (
+            "Your previous suggestion used only placeholder/no-op tokens (e.g. pass, continue, bare None, "
+            "ellipsis alone). Output a substantive line that advances the solution."
+        ),
+        "mixed_bad": (
+            "Your previous suggestion was rejected: it duplicated existing lines and/or used placeholder-only "
+            "tokens. Output one new, substantive line of code."
+        ),
+        "blocked": (
+            "Your previous suggestion used APIs not allowed in this environment (e.g. input(, unsafe imports). "
+            "Use literals and allowed APIs only."
+        ),
+    }
+    return hints.get(rejection, hints["empty"])
+
+
 def _suggestion_runtime_prompt_rule(language: Optional[str]) -> str:
     """Short rule text injected into AI prompts (per language)."""
     lang = (language or "").lower()
@@ -1942,7 +2216,7 @@ def predict_next_line(problem_description, existing_code, language=None):
         "python": [
             "    else:",
             "        return n * factorial(n - 1)",
-            "    pass",
+            "        result.append(x)",
             "def another_function():"
         ],
         "java": [
@@ -1971,7 +2245,7 @@ def predict_next_line(problem_description, existing_code, language=None):
     last_lines = code_lines[-5:] if len(code_lines) > 5 else code_lines
     last_lines_str = "\n".join(f"  {ln}" for ln in last_lines)
 
-    what_is_the_next_line = f"""
+    prompt_base = f"""
     You are an expert programmer. Based on this problem: {problem_description}
     
     Current {language} code:
@@ -1994,32 +2268,31 @@ def predict_next_line(problem_description, existing_code, language=None):
     - The suggestion must CONTINUE the program, not rewrite what exists
     - If a function body is complete (has a return), suggest calling it or defining the NEXT function
     - Focus on what is MISSING, not what is already written
+    {_suggestion_quality_prompt_rules()}
     {_suggestion_runtime_prompt_rule(language)}
     
     Examples of good responses for {language}:
     {chr(10).join([f'    - "{example}"' for example in examples[:4]])}    
     Next line:
     """
-    
-    next_line = get_response(what_is_the_next_line)
-    next_line = _strip_comment_only_lines(next_line, language)
 
-    # Post-processing: reject if the suggestion duplicates an existing line
-    if next_line:
-        existing_stripped = {ln.strip().lower() for ln in code_lines if ln.strip()}
-        suggestion_lines = next_line.strip().split("\n")
-        kept = [ln for ln in suggestion_lines if ln.strip().lower() not in existing_stripped]
-        next_line = "\n".join(kept).strip()
-        # If dedup removed every line, keep the model's first line (better than empty)
-        if not next_line and suggestion_lines:
-            for ln in suggestion_lines:
-                if ln.strip():
-                    next_line = ln.strip()
-                    break
+    last_rejection: Optional[str] = None
+    for attempt in range(2):
+        retry_extra = ""
+        if attempt == 1 and last_rejection:
+            retry_extra = f"""
 
-    if _contains_blocked_suggestion(next_line, language):
-        return ""
-    return next_line
+IMPORTANT — YOUR PREVIOUS ANSWER WAS REJECTED BY THE SYSTEM:
+{_retry_hint_for_next_line(last_rejection)}
+Reply again with ONLY the next line(s) of code — no explanation.
+"""
+        raw = get_response(prompt_base + retry_extra)
+        refined, rej = _refine_next_line_suggestion(raw, code_lines, language)
+        if refined:
+            return refined
+        last_rejection = rej or "empty"
+
+    return ""
 
 def generate_full_code_suggestion(problem_description, existing_code, is_correct_description=False, language=None):
     """Generate full code completion suggestion"""
@@ -2049,6 +2322,9 @@ def generate_full_code_suggestion(problem_description, existing_code, is_correct
     - Do NOT add comments of any kind: no line comments (#, //), block comments (/* */), HTML comments, or docstrings
     - Don't include extraneous text outside the code.
     - Output should be in markdown text.
+    - Do not pad with useless standalone `pass`, `continue`, bare `None`, or ellipsis-only lines when real logic is expected.
+    - Extend the solution logically; do not append a duplicate of an entire statement block that already exists above.
+    {_suggestion_quality_prompt_rules()}
     {_suggestion_runtime_prompt_rule(language)}
 
     Complete code:
@@ -2246,7 +2522,11 @@ async def analyze_code(request: CodeRequest):
                 code_for_suggestion, ai_full_code_suggestion, max_lines=2, language=language
             )
             if fb:
-                ai_next_line = fb
+                fb_ok, _ = _refine_next_line_suggestion(
+                    fb, _normalized_code_lines(code_for_suggestion), language
+                )
+                if fb_ok:
+                    ai_next_line = fb_ok
 
         # Clean correct next line suggestion (for condition 1)
         if session_log and session_log.condition == 1 and correct_next_line != ai_next_line:
@@ -2276,7 +2556,11 @@ async def analyze_code(request: CodeRequest):
                 code_for_suggestion, correct_full_code_suggestion, max_lines=2, language=language
             )
             if cfb:
-                correct_next_line = cfb
+                cfb_ok, _ = _refine_next_line_suggestion(
+                    cfb, _normalized_code_lines(code_for_suggestion), language
+                )
+                if cfb_ok:
+                    correct_next_line = cfb_ok
 
         # Log this analysis to session if session_id provided
         if session_log:
@@ -2395,7 +2679,7 @@ async def execute_code(request: ExecuteRequest):
                 return ExecuteResponse(
                     success=False,
                     output="",
-                    error=f"Total code across all files is too long",
+                    error="Total code across all files is too long",
                     execution_time=0.0
                 )
             files_dicts = [{"filename": f.filename, "content": f.content} for f in request.files]
@@ -2462,7 +2746,7 @@ class SubmitResponse(BaseModel):
     message: str
     submission_id: str
     timestamp: str
-    firebase_status: str
+    firebase_status: str  # success | pending | failed | not_attempted | skipped
     logout_required: bool = True
 
 @app.post("/submit", response_model=SubmitResponse)
@@ -2566,43 +2850,72 @@ async def submit_code(request: SubmitRequest):
         
         # Log submission details
         logger.info(f"CODE SUBMISSION - User: {user_id}, Assignment: {assignment_key}, Session: {session_id}")
-        
-        # FIREBASE SAVE - Upload complete session with all logged data
+
+        # 1) Durable local copies FIRST (session_logs + full JSON snapshot), then optional background Firebase
         firebase_status = "not_attempted"
         if session_log:
-            try:
-                # Save complete session data to Firebase
-                success = await save_session_to_firebase(session_log, suggestion_clicked, compiler_clicked, programming_language, request.survey_data)
-                firebase_status = "success" if success else "failed"
+            save_session_to_local(session_log)
+            sync_label = "pending" if firebase_db else "not_attempted"
+            save_full_submission_snapshot_json(
+                submission_id=submission_id,
+                user_id=user_id,
+                assignment_key=assignment_key,
+                session_id=session_id,
+                timestamp=timestamp,
+                programming_language=programming_language,
+                suggestion_clicked=suggestion_clicked,
+                compiler_clicked=compiler_clicked,
+                survey_data=request.survey_data,
+                session_log=session_log,
+                code=code,
+                submitted_files=submitted_files,
+                firebase_sync=sync_label,
+            )
+            if not session_log.quiz_id:
+                try:
+                    assignment_resume_write(
+                        session_log.assignment_id or "",
+                        session_log.user_id or "",
+                        session_id or "",
+                        completed=True,
+                    )
+                except Exception as _rw_err:
+                    logger.warning("assignment_resume_write completed=True failed: %s", _rw_err)
+            if session_id and session_id in active_sessions:
+                del active_sessions[session_id]
+            if firebase_db:
+                firebase_status = "pending"
+                asyncio.create_task(
+                    _background_firebase_submit(
+                        session_log.dict(),
+                        suggestion_clicked,
+                        compiler_clicked,
+                        programming_language,
+                        request.survey_data,
+                        submission_id,
+                    )
+                )
+            else:
+                firebase_status = "not_attempted"
+        else:
+            save_full_submission_snapshot_json(
+                submission_id=submission_id,
+                user_id=user_id,
+                assignment_key=assignment_key,
+                session_id=session_id,
+                timestamp=timestamp,
+                programming_language=programming_language,
+                suggestion_clicked=suggestion_clicked,
+                compiler_clicked=compiler_clicked,
+                survey_data=request.survey_data,
+                session_log=None,
+                code=code,
+                submitted_files=submitted_files,
+                firebase_sync="not_attempted",
+            )
+            firebase_status = "not_attempted"
 
-                # Update local backup with final data
-                save_session_to_local(session_log)
-
-                # Mark the resume pointer as completed so re-login starts fresh
-                if not session_log.quiz_id:
-                    try:
-                        assignment_resume_write(
-                            session_log.assignment_id or "",
-                            session_log.user_id or "",
-                            session_id or "",
-                            completed=True,
-                        )
-                    except Exception as _rw_err:
-                        logger.warning("assignment_resume_write completed=True failed: %s", _rw_err)
-
-                # Remove from active sessions - FORCE LOGOUT
-                if session_id:
-                    del active_sessions[session_id]
-                
-            except Exception as firebase_error:
-                logger.error(f"Firebase submission save failed: {firebase_error}")
-                firebase_status = "failed"
-                
-                # Still remove from active sessions even if Firebase fails
-                if session_id and session_id in active_sessions:
-                    del active_sessions[session_id]
-        
-        # Save submission file locally as backup
+        # Save submission file locally as backup (code / multi-file)
         try:
             submissions_dir = Path(os.getenv("SUBMISSIONS_DIR", "submissions"))
             submissions_dir.mkdir(exist_ok=True)
@@ -2634,7 +2947,7 @@ async def submit_code(request: SubmitRequest):
             else:
                 submission_file = submissions_dir / f"{submission_id}{extension}"
                 with open(submission_file, 'w', encoding='utf-8') as f:
-                    f.write(f"# Submission Details\n")
+                    f.write("# Submission Details\n")
                     f.write(f"# User ID: {user_id}\n")
                     f.write(f"# Assignment Key: {assignment_key}\n")
                     f.write(f"# Session ID: {session_id}\n")
@@ -2673,10 +2986,23 @@ async def submit_code(request: SubmitRequest):
         except Exception as email_error:
             logger.error(f"Failed to send email notification: {email_error}")
             # Don't fail the submission if email fails
-        
+
+        if firebase_status == "pending":
+            submit_msg = (
+                "Code submitted successfully! Your work is saved on the server (JSON backup); "
+                "the cloud database is syncing in the background — you can continue."
+            )
+        elif firebase_status == "not_attempted":
+            submit_msg = (
+                "Code submitted successfully! Session ended — full data saved on the server; "
+                "cloud database not configured or no session context."
+            )
+        else:
+            submit_msg = "Code submitted successfully! Session ended. Please start a new session to continue."
+
         return SubmitResponse(
             status="success",
-            message=f"Code submitted successfully! Session ended. Please start a new session to continue.",
+            message=submit_msg,
             submission_id=submission_id,
             timestamp=timestamp,
             firebase_status=firebase_status,
@@ -3474,10 +3800,9 @@ async def get_survey_status(session_id: str):
     Get current survey completion status for a session
     """
     try:
-        if session_id not in active_sessions:
+        session_log = await ensure_session_log_loaded(session_id)
+        if session_log is None:
             raise HTTPException(status_code=404, detail="Session not found")
-        
-        session_log = active_sessions[session_id]
         
         # Check if surveys are required for this assignment
         base_key = get_assignment_base_key(session_log.assignment_id)
@@ -3496,15 +3821,15 @@ async def get_survey_status(session_id: str):
             except Exception as e:
                 logger.error(f"Error loading survey config: {e}")
         
-        # Determine access permissions
+        # Determine access permissions (status values are stored as strings)
         can_access_ide = (
-            not pre_required or 
-            session_log.pre_survey_status == SurveyStatus.COMPLETED
+            not pre_required
+            or session_log.pre_survey_status in ("completed", "not_required")
         )
-        
+
         can_submit_code = (
-            not post_required or 
-            session_log.post_survey_status == SurveyStatus.COMPLETED
+            not post_required
+            or session_log.post_survey_status in ("completed", "not_required")
         )
 
         pre_ans = _survey_answers_map_from_stored_package(session_log.pre_survey_responses)
@@ -3902,8 +4227,39 @@ async def authenticate_user(request: AuthRequest):
                 total_problems=existing_sl.total_problems,
                 resumed=True,
                 editor_draft_code=existing_sl.editor_draft_checkpoint,
+                pre_survey_status=existing_sl.pre_survey_status,
+                post_survey_status=existing_sl.post_survey_status,
+                assignment_already_completed=False,
+                assignment_completed_at=None,
             )
         # ── End resume detection ─────────────────────────────────────────────
+
+        completed_info = detect_assignment_already_completed(user_id, assignment_key)
+        if completed_info:
+            return AuthResponse(
+                status="success",
+                message="Assignment already completed",
+                condition=1,
+                problem_description=None,
+                session_id=completed_info.get("session_id") or "",
+                paste_allowed=1,
+                tab_tracking_enabled=True,
+                has_pre_survey=False,
+                has_post_survey=False,
+                programming_language=programming_language,
+                starter_code=None,
+                periodic_survey_enabled=False,
+                periodic_survey_start=5,
+                final_survey_disabled=False,
+                current_problem_index=0,
+                total_problems=1,
+                resumed=False,
+                editor_draft_code=None,
+                pre_survey_status="completed",
+                post_survey_status="completed",
+                assignment_already_completed=True,
+                assignment_completed_at=completed_info.get("completed_at"),
+            )
 
         session_id = f"{user_id}_{assignment_key}_{uuid.uuid4().hex[:8]}"
         
@@ -4014,6 +4370,12 @@ async def authenticate_user(request: AuthRequest):
             final_survey_disabled=final_survey_disabled,
             current_problem_index=0,
             total_problems=1,
+            resumed=False,
+            editor_draft_code=None,
+            pre_survey_status=session_log.pre_survey_status,
+            post_survey_status=session_log.post_survey_status,
+            assignment_already_completed=False,
+            assignment_completed_at=None,
         )
         
     except HTTPException:
@@ -4130,7 +4492,7 @@ async def save_session_to_firebase(
         periodic_surveys_data = []
         
         # Log what we received
-        logger.info(f"Processing session for Firebase save:")
+        logger.info("Processing session for Firebase save:")
         logger.info(f"  - User: {session_log.user_id}")
         logger.info(f"  - Session: {session_log.session_id}")
         logger.info(f"  - Survey data received: {bool(survey_data)}")
@@ -4283,7 +4645,7 @@ async def save_session_to_firebase(
                 occurrence_type = "FINAL" if survey['is_final'] else f"#{survey['occurrence']}"
                 logger.info(f"    • Occurrence {occurrence_type}: {survey['triggered_at_analysis_count']} analyses, {len(survey['responses'])} responses")
         else:
-            logger.info(f"  - Periodic surveys: none")
+            logger.info("  - Periodic surveys: none")
             
         logger.info(f"  - AI logs: {len(logs_data.get('ai_guesses', {}))} AI analyses")
         logger.info(f"  - Activity log: {len(session_log.activity_log)} entries")
@@ -4309,6 +4671,12 @@ async def serve_survey(request: Request):
         "request": request,
         "survey_type": survey_type
     })
+
+
+@app.get("/assignment-complete.html", response_class=HTMLResponse)
+async def serve_assignment_complete(request: Request):
+    """Shown when the user has already submitted the assignment or finished the quiz."""
+    return templates.TemplateResponse("assignment_complete.html", {"request": request})
 
 
 @app.get("/admin-panel", response_class=HTMLResponse)
@@ -4726,6 +5094,8 @@ def build_quiz_join_response(
     programming_language: str,
     problem_idx: int,
     message: str,
+    *,
+    resumed: bool = False,
 ) -> Dict[str, Any]:
     """Shared JSON shape for /quiz/join and resume."""
     problems = quiz_data.get("problems", []) or []
@@ -4744,8 +5114,10 @@ def build_quiz_join_response(
     else:
         starter_code = get_starter_code(quiz_data.get("title", ""), programming_language)
 
-    has_pre = prob.get("pre_survey_enabled", False) and bool(prob.get("pre_survey"))
-    has_post = prob.get("post_survey_enabled", False) and bool(prob.get("post_survey"))
+    has_pre_cfg = prob.get("pre_survey_enabled", False) and bool(prob.get("pre_survey"))
+    has_post_cfg = prob.get("post_survey_enabled", False) and bool(prob.get("post_survey"))
+    _pre_done = session_log.pre_survey_status in ("completed", "not_required")
+    _post_done = session_log.post_survey_status in ("completed", "not_required")
     periodic_enabled = prob.get("recurrent_survey_enabled", False) and bool(prob.get("recurrent_survey"))
 
     return {
@@ -4759,8 +5131,10 @@ def build_quiz_join_response(
         "starter_files": starter_files,
         "paste_allowed": 1 if quiz_data.get("paste_allowed", True) else 0,
         "tab_tracking_enabled": quiz_data.get("tab_tracking_enabled", True),
-        "has_pre_survey": has_pre,
-        "has_post_survey": has_post,
+        "has_pre_survey": has_pre_cfg and not _pre_done,
+        "has_post_survey": has_post_cfg and not _post_done,
+        "pre_survey_status": session_log.pre_survey_status,
+        "post_survey_status": session_log.post_survey_status,
         "periodic_survey_enabled": periodic_enabled,
         "periodic_survey_start": int(prob.get("recurrent_survey_start", 5)),
         "periodic_survey_interval": int(prob.get("recurrent_survey_interval", 4)),
@@ -4770,6 +5144,8 @@ def build_quiz_join_response(
         "time_limit_minutes": quiz_data.get("time_limit_minutes", 0),
         "total_problems": len(problems),
         "current_problem_index": problem_idx,
+        "resumed": resumed,
+        "editor_draft_code": session_log.editor_draft_checkpoint,
     }
 
 
@@ -4822,7 +5198,7 @@ def try_resume_quiz_session(
     quiz_resume_write(quiz_id, user_id, sl.session_id, idx, len(problems), completed=False)
 
     return build_quiz_join_response(
-        sl, quiz_data, programming_language, idx, "Resumed quiz session"
+        sl, quiz_data, programming_language, idx, "Resumed quiz session", resumed=True
     )
 
 
@@ -4880,6 +5256,18 @@ async def student_quiz_join(request: Request):
     if resumed:
         return resumed
 
+    if firebase_db:
+        ref = quiz_resume_ref(quiz_id, user_id)
+        if ref:
+            rdata = ref.get()
+            if isinstance(rdata, dict) and rdata.get("completed"):
+                return {
+                    "status": "already_completed",
+                    "message": "You have already completed this quiz.",
+                    "quiz_id": quiz_id,
+                    "quiz_already_completed": True,
+                }
+
     import random
 
     conditions = quiz_data.get("conditions", [1])
@@ -4919,7 +5307,7 @@ async def student_quiz_join(request: Request):
     quiz_resume_write(quiz_id, user_id, session_id, 0, len(problems), completed=False)
 
     return build_quiz_join_response(
-        session_log, quiz_data, programming_language, 0, "Joined quiz successfully"
+        session_log, quiz_data, programming_language, 0, "Joined quiz successfully", resumed=False
     )
 
 

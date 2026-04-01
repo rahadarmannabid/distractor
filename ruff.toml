@@ -1,0 +1,5 @@
+# Ruff config — Pyflakes (F) only (unused imports, duplicates, etc.).
+target-version = "py311"
+
+[lint]
+select = ["F"]

@@ -16,11 +16,11 @@ import io
 import json
 import logging
 import math
-
-logger = logging.getLogger(__name__)
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 def sanitize_for_json(obj: Any) -> Any:
@@ -480,12 +480,14 @@ def derive_session_metrics(
                 survey_ts_by_pi.setdefault(pi, []).append(ts)
 
         if pi is not None and _is_editor_time_activity(at):
-            try:
-                tss = float(sc.get("time_since_start"))
-                if not math.isnan(tss) and not math.isinf(tss):
-                    tss_by_pi.setdefault(pi, []).append(tss)
-            except (TypeError, ValueError):
-                pass
+            _tss_raw = sc.get("time_since_start")
+            if _tss_raw is not None:
+                try:
+                    tss = float(_tss_raw)
+                    if not math.isnan(tss) and not math.isinf(tss):
+                        tss_by_pi.setdefault(pi, []).append(tss)
+                except (TypeError, ValueError):
+                    pass
 
         if at == "ai_analysis_complete":
             sg = ad.get("suggestion_generated")
@@ -961,6 +963,8 @@ def _first_accept_reject_between_timestamps(
         if ts is None:
             continue
         tu = _utc_for_delta(ts)
+        if tu is None:
+            continue
         if su and tu < su:
             continue
         if eu is not None and tu >= eu:
@@ -1219,7 +1223,7 @@ def _session_condition_key(d: Dict[str, Any]) -> str:
 def _resolved_participant_user_id(meta_user: Any, session_id: str) -> str:
     """Prefer real login user_id; never surface the literal 'unknown' in exports."""
     s = str(meta_user).strip() if meta_user is not None else ""
-    if len(s) >= 3 and s.lower() not in ("anonymous", "unknown"):
+    if s and s.lower() not in ("anonymous", "unknown"):
         return s
     sid = (session_id or "").strip()
     if sid:
@@ -1733,7 +1737,7 @@ def delete_user_data_for_quiz(db, quiz_id: str, user_id: str) -> Dict[str, Any]:
                         deleted_paths.append(p)
                     except Exception as e:
                         logger.warning("delete_user_data_for_quiz: delete %s failed: %s", p, e)
-    except Exception as e:
+    except Exception:
         logger.exception("delete_user_data_for_quiz: sessions scan failed")
         raise
 
@@ -1819,13 +1823,16 @@ def _survey_csv_layout(per_session: List[Dict[str, Any]]) -> Tuple[List[str], Li
         if not isinstance(ss, dict):
             continue
         pre = ss.get("pre") or {}
-        pq = pre.get("qa") if isinstance(pre.get("qa"), list) else []
+        _pre_qa = pre.get("qa")
+        pq: List[Any] = _pre_qa if isinstance(_pre_qa, list) else []
         max_pre = max(max_pre, len(pq))
         post = ss.get("post") or {}
-        poq = post.get("qa") if isinstance(post.get("qa"), list) else []
+        _post_qa = post.get("qa")
+        poq: List[Any] = _post_qa if isinstance(_post_qa, list) else []
         max_post = max(max_post, len(poq))
         per = ss.get("periodic") or {}
-        occs = per.get("occurrences") if isinstance(per.get("occurrences"), list) else []
+        _occs = per.get("occurrences")
+        occs: List[Any] = _occs if isinstance(_occs, list) else []
         for occ in occs:
             if not isinstance(occ, dict):
                 continue
@@ -1836,7 +1843,8 @@ def _survey_csv_layout(per_session: List[Dict[str, Any]]) -> Tuple[List[str], Li
                 ni = int(raw_num) if raw_num is not None else 0
             except (TypeError, ValueError):
                 ni = 0
-            qa = occ.get("qa") if isinstance(occ.get("qa"), list) else []
+            _occ_qa = occ.get("qa")
+            qa: List[Any] = _occ_qa if isinstance(_occ_qa, list) else []
             occ_max[ni] = max(occ_max.get(ni, 0), len(qa))
 
     specs: List[SurveySlot] = []

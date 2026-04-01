@@ -795,6 +795,7 @@
     <div class="survey-container">
         <div class="survey-header">
             <h1 id="surveyTitle">Loading Survey...</h1>
+            <p id="resumeContextHint" style="display:none; font-size: 13px; color: #94a3b8; margin-top: 6px;"></p>
             <p id="surveyDescription"></p>
         </div>
 
@@ -1084,6 +1085,17 @@
                 document.getElementById('surveyTitle').textContent = this.surveyConfig.title || `${this.surveyType.toUpperCase()} Survey`;
                 const descriptionText = this.surveyConfig.description || '';
                 document.getElementById('surveyDescription').textContent = descriptionText + (descriptionText ? ' ' : '') + 'All questions are mandatory.';
+                const hintEl = document.getElementById('resumeContextHint');
+                if (hintEl) {
+                    const ad = JSON.parse(sessionStorage.getItem('authData') || '{}');
+                    const pi = (ad.currentProblemIndex || 0) + 1;
+                    const tp = ad.totalProblems || 1;
+                    const label = this.surveyType === 'pre' ? 'Pre-study' : 'Post-study';
+                    hintEl.style.display = 'block';
+                    hintEl.textContent = tp > 1
+                        ? `${label} · Problem ${pi} of ${tp} — previous answers are restored when available.`
+                        : `${label} — previous answers are restored when available.`;
+                }
             }
 
             renderSurvey() {

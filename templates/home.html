@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-quiz-mode="{{ 'true' if (quiz_mode is defined and quiz_mode) else 'false' }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -812,7 +812,7 @@
         const assignmentKeyInput = document.getElementById('assignmentKey');
         const programmingLanguageSelect = document.getElementById('programmingLanguage');
         /** True when opened via /quiz/{access_code} — must use /quiz/join only, not legacy /authenticate. */
-        const IS_QUIZ_MODE = {{ (quiz_mode is defined and quiz_mode) | tojson }};
+        const IS_QUIZ_MODE = document.documentElement.dataset.quizMode === 'true';
 
         let consentGiven = false;
 
@@ -922,6 +922,27 @@
             return `${userHash}_${timestamp}_${random}`;
         }
 
+        /** Resume pre-survey, post-survey (in progress), IDE, or completion page based on server state. */
+        function redirectAfterLogin(data, sessionToken, userId) {
+            if (data.assignment_already_completed) {
+                window.location.href = '/assignment-complete.html?kind=assignment';
+                return;
+            }
+            if (data.quiz_already_completed || data.status === 'already_completed') {
+                window.location.href = '/assignment-complete.html?kind=quiz';
+                return;
+            }
+            if (data.has_pre_survey) {
+                window.location.href = '/survey.html?type=pre';
+                return;
+            }
+            if (data.post_survey_status === 'in_progress') {
+                window.location.href = '/survey.html?type=post&session=' + encodeURIComponent(sessionToken) + '&user=' + encodeURIComponent(userId);
+                return;
+            }
+            window.location.href = '/index.html?session=' + encodeURIComponent(sessionToken) + '&user=' + encodeURIComponent(userId);
+        }
+
         // Handle login form submission
         loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -974,6 +995,12 @@
                         throw new Error(quizErr.detail || 'Could not join this quiz. Check the code and try again.');
                     }
                     const data = await quizRes.json();
+                    if (data.quiz_already_completed || data.status === 'already_completed') {
+                        loginButton.innerHTML = 'You already completed this quiz. Redirecting...';
+                        loginButton.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
+                        setTimeout(() => { window.location.href = '/assignment-complete.html?kind=quiz'; }, 800);
+                        return;
+                    }
                     const sessionToken = Date.now().toString(36) + Math.random().toString(36).substring(2);
                     sessionStorage.setItem('authData', JSON.stringify({
                         userId: userId,
@@ -990,6 +1017,8 @@
                         tabTrackingEnabled: data.tab_tracking_enabled !== false,
                         hasPreSurvey: data.has_pre_survey || false,
                         hasPostSurvey: data.has_post_survey || false,
+                        preSurveyStatus: data.pre_survey_status || 'not_started',
+                        postSurveyStatus: data.post_survey_status || 'not_started',
                         starterCode: data.starter_code || null,
                         starterFiles: data.starter_files || null,
                         periodicSurveyEnabled: data.periodic_survey_enabled === true,
@@ -1008,13 +1037,7 @@
                     loginButton.innerHTML = 'Authenticated! Redirecting...';
                     loginButton.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
 
-                    let redirectUrl;
-                    if (data.has_pre_survey) {
-                        redirectUrl = '/survey.html?type=pre';
-                    } else {
-                        redirectUrl = '/index.html?session=' + sessionToken + '&user=' + encodeURIComponent(userId);
-                    }
-                    setTimeout(() => { window.location.href = redirectUrl; }, 1000);
+                    setTimeout(() => { redirectAfterLogin(data, sessionToken, userId); }, 1000);
                     return;
                 }
 
@@ -1048,6 +1071,12 @@
 
                     // Quiz join succeeded
                     const data = await quizRes.json();
+                    if (data.quiz_already_completed || data.status === 'already_completed') {
+                        loginButton.innerHTML = 'You already completed this quiz. Redirecting...';
+                        loginButton.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
+                        setTimeout(() => { window.location.href = '/assignment-complete.html?kind=quiz'; }, 800);
+                        return;
+                    }
                     const sessionToken = Date.now().toString(36) + Math.random().toString(36).substring(2);
                     sessionStorage.setItem('authData', JSON.stringify({
                         userId: userId,
@@ -1064,6 +1093,8 @@
                         tabTrackingEnabled: data.tab_tracking_enabled !== false,
                         hasPreSurvey: data.has_pre_survey || false,
                         hasPostSurvey: data.has_post_survey || false,
+                        preSurveyStatus: data.pre_survey_status || 'not_started',
+                        postSurveyStatus: data.post_survey_status || 'not_started',
                         starterCode: data.starter_code || null,
                         starterFiles: data.starter_files || null,
                         periodicSurveyEnabled: data.periodic_survey_enabled === true,
@@ -1082,18 +1113,18 @@
                     loginButton.innerHTML = 'Authenticated! Redirecting...';
                     loginButton.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
 
-                    let redirectUrl;
-                    if (data.has_pre_survey) {
-                        redirectUrl = '/survey.html?type=pre';
-                    } else {
-                        redirectUrl = '/index.html?session=' + sessionToken + '&user=' + encodeURIComponent(userId);
-                    }
-                    setTimeout(() => { window.location.href = redirectUrl; }, 1000);
+                    setTimeout(() => { redirectAfterLogin(data, sessionToken, userId); }, 1000);
                     return;
                 }
 
                 // Standard assignment key auth succeeded
                 const data = await response.json();
+                if (data.assignment_already_completed) {
+                    loginButton.innerHTML = 'You already submitted this assignment. Redirecting...';
+                    loginButton.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
+                    setTimeout(() => { window.location.href = '/assignment-complete.html?kind=assignment'; }, 800);
+                    return;
+                }
                 const sessionToken = generateSessionToken(userId, assignmentKey);
 
                 sessionStorage.setItem('authData', JSON.stringify({
@@ -1111,6 +1142,8 @@
                     tabTrackingEnabled: data.tab_tracking_enabled !== false,
                     hasPreSurvey: data.has_pre_survey || false,
                     hasPostSurvey: data.has_post_survey || false,
+                    preSurveyStatus: data.pre_survey_status || 'not_started',
+                    postSurveyStatus: data.post_survey_status || 'not_started',
                     starterCode: data.starter_code || null,
                     periodicSurveyEnabled: data.periodic_survey_enabled === true,
                     periodicSurveyStart: data.periodic_survey_start || 5,
@@ -1150,18 +1183,17 @@
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 }
 
-                let redirectUrl;
-                let successMessage;
+                let successMessage = 'Authentication successful! Redirecting...';
                 if (data.has_pre_survey) {
-                    redirectUrl = `survey.html?type=pre`;
-                    successMessage = 'Authentication successful! Redirecting to pre-study survey...';
+                    successMessage = 'Redirecting to pre-study survey...';
+                } else if (data.post_survey_status === 'in_progress') {
+                    successMessage = 'Resuming post-survey...';
                 } else {
-                    redirectUrl = `index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
-                    successMessage = 'Authentication successful! Redirecting to coding environment...';
+                    successMessage = 'Redirecting to coding environment...';
                 }
                 loginButton.innerHTML = successMessage;
                 loginButton.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
-                setTimeout(() => { window.location.href = redirectUrl; }, 1500);
+                setTimeout(() => { redirectAfterLogin(data, sessionToken, userId); }, 1500);
 
             } catch (error) {
                 console.error('Authentication error:', error);

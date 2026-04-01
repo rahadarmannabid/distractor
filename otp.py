@@ -10,7 +10,7 @@ import os
 import random
 import re
 import smtplib
-from datetime import datetime, timedelta
+from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional, Dict, Any
