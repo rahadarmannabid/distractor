@@ -2077,7 +2077,7 @@
                         <button class="copilot-popup__icon-btn copilot-popup__icon-btn--reject" id="copilotRejectBtn" title="Reject (Esc)">
                             <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                         </button>
-                        <span class="copilot-popup__hint"><kbd>Tab</kbd> accept · <kbd>Esc</kbd> reject · typing dismisses</span>
+                        <span class="copilot-popup__hint"><kbd>Tab</kbd> accept · <kbd>Esc</kbd> reject</span>
                     </div>
                 </div>
 
@@ -3955,9 +3955,6 @@ async function initializeEditor() {
 
                 // Enhanced Monaco Editor event handlers with time tracking
                 window.editor.onDidChangeModelContent((e) => {
-                    if (isCopilotPopupPending() && !_copilotSuppressTypingReject) {
-                        _copilotHandleReject('typing');
-                    }
                     _lastActivityForBlankIdle = Date.now();
                     resetBlankIdleRejectBackoff();
                     updateUserInteraction();
@@ -4574,9 +4571,12 @@ function showCopilotPopup(explanation, suggestionCode, suggestionType, suggestio
         popup.style.display = 'block';
         _copilotPopupDismissedByUser = false;
         _copilotPositionAtCursor();
-        // Keep editor editable so typing counts as reject (explicit dismiss); teaser stays read-only.
+        // Lock editor until Tab (accept) or Esc (reject); teaser overlay already keeps read-only.
         if (window.editor && !(typeof teaserActive !== 'undefined' && teaserActive)) {
-            window.editor.updateOptions({ readOnly: false, readOnlyMessage: { value: '' } });
+            window.editor.updateOptions({
+                readOnly: true,
+                readOnlyMessage: { value: 'Accept (Tab) or reject (Esc) to continue editing.' }
+            });
         }
         _copilotAttachKeyboard();
         return true;
@@ -4752,7 +4752,7 @@ function _copilotHandleReject(dismissReason) {
 }
 
 function _copilotEnsureDismissListener() {
-    // Typing/paste while popup is open dismisses via onDidChangeModelContent → _copilotHandleReject('typing').
+    // Popup dismiss: Tab / Esc / accept & reject buttons only (editor is read-only while popup is open).
 }
 
 function _copilotBindButtons() {
