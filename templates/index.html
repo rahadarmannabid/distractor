@@ -3723,6 +3723,30 @@ async function initializeFromURL() {
             }
         } else {
         }
+
+        // Post-survey in progress (e.g. user left during post-survey) → return to survey, not IDE
+        if (authData.hasPostSurvey) {
+            try {
+                const postPending = sessionStorage.getItem('postSurveySubmissionPending') === 'true';
+                const statusResponse = await fetch(`/survey-status/${currentSession.sessionId}`);
+                if (statusResponse.ok) {
+                    const statusData = await statusResponse.json();
+                    if (statusData.post_survey_status === 'in_progress' || postPending) {
+                        updateLoadingMessage('Resuming post-survey...');
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const sessionToken = urlParams.get('session');
+                        const userId = urlParams.get('user');
+                        setTimeout(() => {
+                            allowNavigation = true;
+                            window.location.href = `/survey.html?type=post&session=${sessionToken}&user=${encodeURIComponent(userId)}`;
+                        }, 800);
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.warn('Post-survey resume check failed:', e);
+            }
+        }
         
         // Add paste status indicator only (no tab tracking badge)
         const pasteStatus = authData.pasteAllowed === 1 ? 'Enabled' : 'Disabled';
@@ -6516,7 +6540,10 @@ async function proceedWithActualSubmission() {
 
         const result = await response.json();
         addTerminalOutput(`${result.message}`, 'success');
-        addTerminalOutput(`Database Status: ${result.firebase_status}`, 'info');
+        addTerminalOutput(`Cloud database status: ${result.firebase_status}`, 'info');
+        if (result.firebase_status === 'pending') {
+            addTerminalOutput('Your submission is safely stored on the server (JSON). Cloud sync continues in the background.', 'success');
+        }
         addTerminalOutput(`Submission ID: ${result.submission_id}`, 'info');
         addTerminalOutput(`Problem Guess Logs: ${currentSession.guessLogCount}`, 'info');
         addTerminalOutput(`Suggestions Clicked: ${currentSession.suggestionClickCount}`, 'info');
@@ -6529,27 +6556,28 @@ async function proceedWithActualSubmission() {
             addTerminalOutput(`AI Suggestion Logs: ${currentSession.suggestionsLogCount}`, 'info');
         }
         
-        if (result.firebase_status === 'success') {
-            addTerminalOutput(`Database save successful - logging out now...`, 'success');
-            
-            // Clear all caches including accumulated per-problem codes (final submission done)
+        // success / pending / not_attempted: server saved full JSON + session; failed only if explicit failed (legacy)
+        if (result.firebase_status === 'success' || result.firebase_status === 'pending' || result.firebase_status === 'not_attempted') {
+            const okMsg = result.firebase_status === 'pending'
+                ? 'Submission saved on server (full JSON backup). Cloud database syncing in background.\nSession ended for security.'
+                : (result.firebase_status === 'not_attempted'
+                    ? 'Submission saved on server (full JSON backup).\nSession ended for security.'
+                    : 'Code submitted successfully to cloud database!\nSession ended for security.');
+            addTerminalOutput(`Save complete — logging out now...`, 'success');
+
             clearPeriodicSurveysFromStorage();
             clearCachedSubmissionData();
             clearAllSessionCodes();
-            
+
             setTimeout(() => {
-                showSuccessMessage(
-                    'Code submitted successfully to Database!\nSession ended for security.', 
-                    3
-                );
+                showSuccessMessage(okMsg, 3);
             }, 500);
-        }else {
-            addTerminalOutput(`Database save failed but data preserved locally - logging out...`, 'warning');
-            
-            // ✅ NEW: Keep data in storage if submission failed (for retry)
+        } else {
+            addTerminalOutput(`Cloud sync reported an issue; full data still preserved on the server — logging out...`, 'warning');
+
             setTimeout(() => {
                 showSuccessMessage(
-                    'Submission completed with local backup.\nSession ended for security.', 
+                    'Submission stored on server (JSON backup).\nSession ended for security.',
                     3
                 );
             }, 500);
