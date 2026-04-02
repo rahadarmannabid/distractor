@@ -2000,6 +2000,7 @@
                                         session_id: authData.sessionId,
                                         code: code,
                                         programming_language: authData.programmingLanguage || 'python',
+                                        current_problem_index: currentProbIdx,
                                     })
                                 };
                                 const nextRes = await surveyFetchWithTimeout('/quiz/next-problem', nextFetchInit, 120000);
