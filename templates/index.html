@@ -413,6 +413,62 @@
             min-height: 0;
             overflow: hidden;
         }
+        /* Quiz flow: pre → coding → post per problem — inline in #header (scrolls horizontally if long) */
+        .header .quiz-progress-strip {
+            flex: 1 1 auto;
+            min-width: 48px;
+            max-width: 100%;
+            padding: 0 4px 0 8px;
+            margin: 0;
+            border: none;
+            background: transparent;
+            display: flex;
+            align-items: center;
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: thin;
+        }
+        .quiz-progress-strip__inner {
+            display: flex;
+            flex-wrap: nowrap;
+            align-items: center;
+            gap: 4px 6px;
+            font-size: 10px;
+            line-height: 1.25;
+            min-width: min-content;
+        }
+        .quiz-progress-strip__pill {
+            padding: 3px 8px;
+            border-radius: 999px;
+            background: #2d2d30;
+            border: 1px solid #404040;
+            color: #94a3b8;
+            white-space: nowrap;
+        }
+        .header .quiz-progress-strip__pill {
+            padding: 2px 6px;
+            font-size: 10px;
+        }
+        .header .quiz-progress-strip__sep {
+            font-size: 9px;
+        }
+        .quiz-progress-strip__pill.is-done {
+            background: rgba(22, 163, 74, 0.2);
+            border-color: #22c55e;
+            color: #86efac;
+        }
+        .quiz-progress-strip__pill.is-active {
+            background: rgba(59, 130, 246, 0.25);
+            border-color: #3b82f6;
+            color: #93c5fd;
+            font-weight: 600;
+        }
+        .quiz-progress-strip__sep {
+            color: #52525b;
+            font-size: 10px;
+            user-select: none;
+        }
         #fileTreePanel {
             flex: 1;
             min-width: 0;
@@ -1847,6 +1903,66 @@
             to { opacity: 0; transform: translateY(4px) scale(0.97); }
         }
 
+        /* Loading / “AI is thinking” state — popup opens immediately while /analyze runs */
+        #copilotPopup.copilot-popup--thinking {
+            border-color: rgba(96, 165, 250, 0.85);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 20px rgba(59, 130, 246, 0.35);
+            animation: copilotThinkingPulse 1.6s ease-in-out infinite;
+        }
+        @keyframes copilotThinkingPulse {
+            0%, 100% { box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 12px rgba(59, 130, 246, 0.2); }
+            50% { box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 22px rgba(59, 130, 246, 0.45); }
+        }
+        .copilot-thinking__title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #e0e7ff;
+            letter-spacing: 0.02em;
+        }
+        .copilot-thinking__dots {
+            display: inline-flex;
+            gap: 4px;
+            align-items: center;
+        }
+        .copilot-thinking__dots span {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #60a5fa;
+            animation: copilotThinkingDot 1.05s ease-in-out infinite;
+            box-shadow: 0 0 6px rgba(96, 165, 250, 0.6);
+        }
+        .copilot-thinking__dots span:nth-child(2) { animation-delay: 0.15s; }
+        .copilot-thinking__dots span:nth-child(3) { animation-delay: 0.3s; }
+        @keyframes copilotThinkingDot {
+            0%, 80%, 100% { opacity: 0.35; transform: translateY(0) scale(0.85); }
+            40% { opacity: 1; transform: translateY(-3px) scale(1.05); }
+        }
+        .copilot-thinking__shimmer {
+            height: 14px;
+            border-radius: 4px;
+            background: linear-gradient(
+                90deg,
+                rgba(255,255,255,0.06) 0%,
+                rgba(96, 165, 250, 0.22) 50%,
+                rgba(255,255,255,0.06) 100%
+            );
+            background-size: 200% 100%;
+            animation: copilotShimmer 1.2s ease-in-out infinite;
+        }
+        .copilot-thinking__shimmer + .copilot-thinking__shimmer { margin-top: 8px; width: 72%; }
+        @keyframes copilotShimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        #copilotPopup.copilot-popup--thinking .copilot-popup__actions {
+            opacity: 0.45;
+            pointer-events: none;
+        }
+
         .copilot-popup__section {
             padding: 10px 14px;
         }
@@ -2040,6 +2156,7 @@
             </div><!-- /#fileTreeSidebar -->
             <div id="header" class="header">
                 <h2>Code Editor</h2>
+                <div id="quizProgressStrip" class="quiz-progress-strip" style="display:none;" role="region" aria-label="Quiz progress"></div>
                 <div class="font-controls">
                     <button class="font-button" id="decreaseFontBtn">A-</button>
                     <span class="font-size-display" id="fontSizeDisplay">12px</span>
@@ -2224,6 +2341,7 @@ async function postActivityBatchToServer(activities) {
             session_id: currentSession.sessionId,
             user_id: currentSession.userId,
             assignment_key: currentSession.assignmentKey,
+            quiz_id: currentSession.quizId || null,
         })
     });
     return response.ok;
@@ -2309,6 +2427,56 @@ function scheduleServerEditorCheckpoint() {
     _serverEditorCheckpointTimer = setTimeout(function() {
         serverEditorCheckpoint();
     }, 4000);
+}
+
+/** Align with server can_access_ide / can_submit_code — avoid redirect loops when status is not_required */
+function surveyGateSurveyDone(status) {
+    return status === 'completed' || status === 'not_required';
+}
+
+/** Render quiz flow progress from /survey-status `quiz_progress` (instructor quizzes). */
+function renderQuizProgressStrip(qp) {
+    var strip = document.getElementById('quizProgressStrip');
+    if (!strip || !qp || !qp.steps || !qp.steps.length) {
+        if (strip) strip.style.display = 'none';
+        return;
+    }
+    strip.style.display = '';
+    var cur = typeof qp.current_step_index === 'number' ? qp.current_step_index : 0;
+    var esc = function (s) {
+        if (s == null) return '';
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    };
+    var html = '<div class="quiz-progress-strip__inner">';
+    for (var idx = 0; idx < qp.steps.length; idx++) {
+        var step = qp.steps[idx];
+        var done = idx < cur;
+        var active = idx === cur;
+        var cls = 'quiz-progress-strip__pill';
+        if (done) cls += ' is-done';
+        if (active) cls += ' is-active';
+        var label = step.short || step.label || ('Step ' + (idx + 1));
+        var tip = step.label || label;
+        html += '<span class="' + cls + '" title="' + esc(tip) + '">' + esc(label) + '</span>';
+        if (idx < qp.steps.length - 1) {
+            html += '<span class="quiz-progress-strip__sep" aria-hidden="true">→</span>';
+        }
+    }
+    html += '</div>';
+    strip.innerHTML = html;
+}
+
+function fetchSurveyStatusFresh(sessionId) {
+    var pi = 0;
+    try {
+        if (typeof currentSession !== 'undefined' && currentSession && typeof currentSession.currentProblemIndex === 'number') {
+            pi = currentSession.currentProblemIndex;
+        } else {
+            var ad = JSON.parse(sessionStorage.getItem('authData') || '{}');
+            pi = parseInt(String(ad.currentProblemIndex != null ? ad.currentProblemIndex : '0'), 10) || 0;
+        }
+    } catch (e) { pi = 0; }
+    return fetch('/survey-status/' + encodeURIComponent(sessionId) + '?t=' + Date.now() + '&problem_index=' + encodeURIComponent(String(pi)), { cache: 'no-store' });
 }
 
 function getAutosaveKey() {
@@ -2689,6 +2857,7 @@ let currentSession = {
     // Multi-problem tracking
     totalProblems: 1,
     currentProblemIndex: 0,
+    quizId: null,
 };
 
 
@@ -2720,8 +2889,8 @@ const ACTIVITY_BATCH_SIZE = 10;
     const minFontSize = 10;
     const maxFontSize = 24;
     let isAnalyzing = false;
-    /** After user inserts a newline, wait this long with no further edits before /analyze (reading mode). */
-    var NEWLINE_IDLE_MS = 2000;
+    /** After user inserts a newline (e.g. Enter → next line), wait this long with no further edits before /analyze (reading mode). */
+    var NEWLINE_IDLE_MS = 1000;
     var _newlineIdleTimer = null;
 
     function clearNewlineIdleTimer() {
@@ -2738,7 +2907,7 @@ const ACTIVITY_BATCH_SIZE = 10;
         if (isAnalyzing) return;
         _newlineIdleTimer = setTimeout(function() {
             _newlineIdleTimer = null;
-            analyzeCurrentCode({ skipPreviousCodeCheck: true, triggerReason: 'newline_idle_2s' });
+            analyzeCurrentCode({ skipPreviousCodeCheck: true, triggerReason: 'newline_idle_1s' });
         }, NEWLINE_IDLE_MS);
     }
 
@@ -3066,19 +3235,25 @@ function resetIdleTimer() {
 }
 
 function savePeriodicSurveysToStorage() {
-    try {
-        const storageKey = `periodicSurveys_${currentSession.sessionId}`;
-        const dataToSave = {
-            surveyResponses: surveyData.surveyResponses,
-            periodicSurveyOccurrenceCount: surveyData.periodicSurveyOccurrenceCount,
-            analysisCount: surveyData.analysisCount,
-            surveyInterval: surveyData.surveyInterval,
-            savedAt: new Date().toISOString()
-        };
-        
-        sessionStorage.setItem(storageKey, JSON.stringify(dataToSave));
-    } catch (error) {
-        console.error('❌ Failed to save periodic surveys to sessionStorage:', error);
+    var doSave = function() {
+        try {
+            const storageKey = `periodicSurveys_${currentSession.sessionId}`;
+            const dataToSave = {
+                surveyResponses: surveyData.surveyResponses,
+                periodicSurveyOccurrenceCount: surveyData.periodicSurveyOccurrenceCount,
+                analysisCount: surveyData.analysisCount,
+                surveyInterval: surveyData.surveyInterval,
+                savedAt: new Date().toISOString()
+            };
+            sessionStorage.setItem(storageKey, JSON.stringify(dataToSave));
+        } catch (error) {
+            console.error('❌ Failed to save periodic surveys to sessionStorage:', error);
+        }
+    };
+    if (typeof requestIdleCallback !== 'undefined') {
+        requestIdleCallback(doSave, { timeout: 1500 });
+    } else {
+        setTimeout(doSave, 0);
     }
 }
 
@@ -3194,11 +3369,55 @@ function captureAllSubmissionData() {
         };
         
         sessionStorage.setItem('pendingSubmissionData', JSON.stringify(submissionData));
+        // Mirror to localStorage so post-survey final step still finds data if sessionStorage was cleared
+        // (e.g. after advancing between problems). ZIP uses perProblemCodes + this snapshot.
+        try {
+            if (submissionData.session && submissionData.session.sessionId) {
+                localStorage.setItem(
+                    'quizLastSubmissionData_' + submissionData.session.sessionId,
+                    JSON.stringify(submissionData)
+                );
+            }
+        } catch (e) {
+            console.warn('quizLastSubmissionData mirror failed', e);
+        }
+        mergeCurrentProblemIntoPerProblemCodes(submissionData);
         return submissionData;
         
     } catch (error) {
         console.error('❌ Failed to capture submission data:', error);
         return null;
+    }
+}
+
+/** Upsert current problem code into localStorage for final ZIP when sessionStorage snapshot is missing. */
+function mergeCurrentProblemIntoPerProblemCodes(submissionData) {
+    try {
+        var sid = submissionData.session && submissionData.session.sessionId;
+        if (!sid) return;
+        var pi = submissionData.currentProblemIndex || 0;
+        var title = submissionData.currentProblemTitle || ('Problem ' + (pi + 1));
+        var key = 'perProblemCodes_' + sid;
+        var stored = [];
+        try {
+            var raw = localStorage.getItem(key);
+            if (raw) stored = JSON.parse(raw);
+        } catch (e) {}
+        if (!Array.isArray(stored)) stored = [];
+        stored = stored.filter(function (x) { return x && x.problemIndex !== pi; });
+        var entry = {
+            problemIndex: pi,
+            title: title,
+            code: (submissionData.code != null ? submissionData.code : '') || ''
+        };
+        if (submissionData.files && Array.isArray(submissionData.files) && submissionData.files.length > 0) {
+            entry.files = submissionData.files;
+        }
+        stored.push(entry);
+        stored.sort(function (a, b) { return a.problemIndex - b.problemIndex; });
+        localStorage.setItem(key, JSON.stringify(stored));
+    } catch (e) {
+        console.warn('mergeCurrentProblemIntoPerProblemCodes', e);
     }
 }
 
@@ -3219,6 +3438,12 @@ function retrieveCachedSubmissionData() {
 function clearCachedSubmissionData() {
     try {
         sessionStorage.removeItem('pendingSubmissionData');
+        try {
+            var ad = JSON.parse(sessionStorage.getItem('authData') || '{}');
+            if (ad.sessionId) {
+                localStorage.removeItem('quizLastSubmissionData_' + ad.sessionId);
+            }
+        } catch (e) {}
         // perProblemCodes_ is intentionally NOT cleared here — it accumulates codes
         // across all problems and must survive until the final post-quiz download + submit.
     } catch (error) {
@@ -3230,6 +3455,7 @@ function clearAllSessionCodes() {
     try {
         if (currentSession && currentSession.sessionId) {
             localStorage.removeItem(`perProblemCodes_${currentSession.sessionId}`);
+            localStorage.removeItem('quizLastSubmissionData_' + currentSession.sessionId);
         }
     } catch (error) {
         console.error('❌ Failed to clear per-problem codes:', error);
@@ -3432,6 +3658,35 @@ async function uploadActivityBatch() {
 
 // Initialize application from URL parameters
 // Initialize application from URL parameters
+var _quizHeartbeatTimer = null;
+/** Firebase-backed presence so “active now” matches across local + hosted (same Firebase project). */
+function scheduleQuizPresenceHeartbeat() {
+    if (_quizHeartbeatTimer) {
+        clearInterval(_quizHeartbeatTimer);
+        _quizHeartbeatTimer = null;
+    }
+    if (!currentSession.sessionId || !currentSession.userId || !currentSession.quizId) {
+        return;
+    }
+    var send = function() {
+        if (!currentSession.sessionId || !currentSession.userId || !currentSession.quizId) return;
+        fetch('/quiz/heartbeat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: currentSession.sessionId,
+                user_id: currentSession.userId,
+                quiz_id: currentSession.quizId,
+                current_problem_index: typeof currentSession.currentProblemIndex === 'number' ? currentSession.currentProblemIndex : 0
+            }),
+            credentials: 'same-origin',
+            keepalive: true
+        }).catch(function() {});
+    };
+    setTimeout(send, 12000);
+    _quizHeartbeatTimer = setInterval(send, 90000);
+}
+
 async function initializeFromURL() {
     updateLoadingMessage('Validating session parameters...');
     console.log('SessionStorage data:', sessionStorage.getItem('authData'));
@@ -3490,7 +3745,27 @@ async function initializeFromURL() {
             totalProblems: authData.totalProblems || 1,
             currentProblemIndex: authData.currentProblemIndex || 0,
             quizTeaser: authData.quizTeaser || '',
+            quizId: authData.quizId || null,
         };
+
+        // Quiz: align problem index with server (stale sessionStorage caused wrong post/pre problem)
+        if (currentSession.quizId && currentSession.sessionId) {
+            try {
+                var _sr = await fetch('/survey-status/' + encodeURIComponent(currentSession.sessionId) + '?t=' + Date.now(), { cache: 'no-store' });
+                if (_sr.ok) {
+                    var _sd = await _sr.json();
+                    if (typeof _sd.current_problem_index === 'number') {
+                        currentSession.currentProblemIndex = _sd.current_problem_index;
+                        authData.currentProblemIndex = _sd.current_problem_index;
+                        if (typeof _sd.total_problems === 'number' && _sd.total_problems >= 1) {
+                            currentSession.totalProblems = _sd.total_problems;
+                            authData.totalProblems = _sd.total_problems;
+                        }
+                        sessionStorage.setItem('authData', JSON.stringify(authData));
+                    }
+                }
+            } catch (_e) { console.warn('quiz problem index sync', _e); }
+        }
 
         // If returning for a new problem (not the first), reset all survey state fresh
         if (currentSession.currentProblemIndex > 0) {
@@ -3678,23 +3953,21 @@ async function initializeFromURL() {
             }
         })();
 
-        // ✅ CHECK FOR PRE-SURVEY REQUIREMENT (FLEXIBLE)
-        if (authData.hasPreSurvey) {
+        // Survey gate checks — single server call, server survey-status is the sole source of truth
+        {
             try {
-                const statusResponse = await fetch(`/survey-status/${currentSession.sessionId}`);
+                const statusResponse = await fetchSurveyStatusFresh(currentSession.sessionId);
                 if (statusResponse.ok) {
                     const statusData = await statusResponse.json();
-                    
-                    // If pre-survey is required but not completed, redirect to survey
-                    if (statusData.pre_survey_status !== 'completed') {
+                    var preStatus = statusData.pre_survey_status || 'not_required';
+                    var postStatus = statusData.post_survey_status || 'not_required';
+
+                    // Pre-survey required but not completed → redirect
+                    if (!surveyGateSurveyDone(preStatus)) {
                         updateLoadingMessage('Pre-survey required before accessing IDE...');
-                        
-                        // Get session parameters for redirect
                         const urlParams = new URLSearchParams(window.location.search);
                         const sessionToken = urlParams.get('session');
                         const userId = urlParams.get('user');
-                        
-                        // Show message in loading screen
                         setTimeout(() => {
                             const loadingDetail = document.getElementById('loadingDetail');
                             if (loadingDetail) {
@@ -3704,34 +3977,19 @@ async function initializeFromURL() {
                                 `;
                             }
                         }, 100);
-                        
-                        // Redirect to pre-survey page with session preserved
                         setTimeout(() => {
-                            allowNavigation = true;  // Allow navigation without warning
+                            allowNavigation = true;
                             window.location.href = `/survey.html?type=pre&session=${sessionToken}&user=${encodeURIComponent(userId)}`;
                         }, 2000);
-                        return; // Stop initialization here
-                    } else {
+                        return;
                     }
-                } else {
-                    console.warn('⚠️ Could not fetch survey status:', statusResponse.status);
-                    // Continue with IDE initialization if check fails (fallback)
-                }
-            } catch (error) {
-                console.error('❌ Error checking pre-survey status:', error);
-                // Continue with IDE initialization if check fails (fallback)
-            }
-        } else {
-        }
 
-        // Post-survey in progress (e.g. user left during post-survey) → return to survey, not IDE
-        if (authData.hasPostSurvey) {
-            try {
-                const postPending = sessionStorage.getItem('postSurveySubmissionPending') === 'true';
-                const statusResponse = await fetch(`/survey-status/${currentSession.sessionId}`);
-                if (statusResponse.ok) {
-                    const statusData = await statusResponse.json();
-                    if (statusData.post_survey_status === 'in_progress' || postPending) {
+                    // Only resume post-survey when the server says it is in_progress.
+                    // Do NOT use postSurveySubmissionPending + not_started — that skipped coding for the next problem.
+                    var postPending = sessionStorage.getItem('postSurveySubmissionPending') === 'true';
+                    var postDone = surveyGateSurveyDone(postStatus);
+                    if (postDone && postPending) sessionStorage.removeItem('postSurveySubmissionPending');
+                    if (postStatus === 'in_progress') {
                         updateLoadingMessage('Resuming post-survey...');
                         const urlParams = new URLSearchParams(window.location.search);
                         const sessionToken = urlParams.get('session');
@@ -3742,9 +4000,18 @@ async function initializeFromURL() {
                         }, 800);
                         return;
                     }
+                    if (postStatus !== 'in_progress' && postPending) {
+                        sessionStorage.removeItem('postSurveySubmissionPending');
+                    }
+
+                    if (statusData.quiz_progress && statusData.quiz_progress.steps && statusData.quiz_progress.steps.length) {
+                        renderQuizProgressStrip(statusData.quiz_progress);
+                    }
+                } else {
+                    console.warn('Could not fetch survey status:', statusResponse.status);
                 }
-            } catch (e) {
-                console.warn('Post-survey resume check failed:', e);
+            } catch (error) {
+                console.error('Error checking survey status:', error);
             }
         }
         
@@ -3851,6 +4118,7 @@ async function initializeFromURL() {
                 serverEditorCheckpoint();
             });
             setTimeout(function() { flushPendingActivityQueueFromStorage(); }, 2000);
+            scheduleQuizPresenceHeartbeat();
         }, 100);
         
         // Initialize enhanced activity tracking
@@ -4033,7 +4301,7 @@ async function initializeEditor() {
                         }
                     }
 
-                    // 1) Newline → wait NEWLINE_IDLE_MS idle (reading mode); no immediate /analyze.
+                    // 1) Newline (Enter) → after NEWLINE_IDLE_MS with no further edits, /analyze for next-line suggestion.
                     // While isAnalyzing, do not schedule (no API until current suggestion finishes).
                     if (eventHasNewline) {
                         _lastBlankIdleAnalyzeAt = Date.now();
@@ -4282,8 +4550,9 @@ logActivity('ai_analysis_trigger', {
     analysis_number: surveyData.analysisCount + 1
 });
 
-    // Show AI thinking animation and disable editor
+    // Show AI thinking: wait cursor + copilot box placeholder (animated) while /analyze runs
     showAIThinking();
+    showCopilotThinkingState(snapshotPos);
 
     try {
         const response = await fetch('/analyze', {
@@ -4394,25 +4663,30 @@ logActivity('ai_analysis_complete', {
                         suggestionKind: suggestionKind,
                         shownAt: new Date().toISOString()
                     };
+                } else {
+                    dismissCopilotThinkingShell();
                 }
             } catch (popupErr) {
                 _pendingSuggestionMeta = null;
+                dismissCopilotThinkingShell();
                 console.warn('Copilot popup failed (non-blocking):', popupErr);
             }
+        } else {
+            dismissCopilotThinkingShell();
         }
 
 
     } catch (error) {
         console.error('Analysis error:', error);
+        dismissCopilotThinkingShell();
     } finally {
-        // Always hide thinking animation and re-enable editor
-        setTimeout(() => {
+        // If a real suggestion is showing, _copilotThinkingPhase is already false — no-op.
+        dismissCopilotThinkingShell();
+        setTimeout(function() {
             hideAIThinking();
-            // Reset analyzing flag after animation completes
             isAnalyzing = false;
-            // Restart blank-line idle clock so we don't immediately re-trigger analyze
             _lastActivityForBlankIdle = Date.now();
-        }, 500); // Small delay to show completion
+        }, 120);
     }
 }
 
@@ -4451,6 +4725,8 @@ var _pendingSuggestionMeta = null;
 var _copilotPopupDismissedByUser = false;
 /** True during accept() programmatic executeEdits — do not treat as typing-reject. */
 var _copilotSuppressTypingReject = false;
+/** True while the copilot box shows the “AI is thinking” placeholder (before /analyze returns). */
+var _copilotThinkingPhase = false;
 
 function isCopilotPopupPending() {
     if (_copilotPopupDismissedByUser) return false;
@@ -4503,13 +4779,13 @@ function computeBaseIndentForSuggestion(model, lineNumber) {
     return base;
 }
 
-function _copilotPositionAtCursor() {
+function _copilotPositionAtCursor(originOverride) {
     try {
         if (!window.editor) return;
         var popup = document.getElementById('copilotPopup');
         if (!popup) return;
 
-        var position   = window.editor.getPosition();
+        var position   = originOverride || window.editor.getPosition();
         var scrollTop  = window.editor.getScrollTop();
         var scrollLeft = window.editor.getScrollLeft();
         var layoutInfo = window.editor.getLayoutInfo();
@@ -4564,6 +4840,67 @@ function _copilotPositionAtCursor() {
     }
 }
 
+/** Open the copilot box immediately with a thinking animation (call when /analyze starts). */
+function showCopilotThinkingState(originPosition) {
+    try {
+        if (typeof teaserActive !== 'undefined' && teaserActive) return;
+        if (!window.editor) return;
+        var popup = document.getElementById('copilotPopup');
+        var elExplanation = document.getElementById('copilotPopupExplanation');
+        var elCode = document.getElementById('copilotPopupCode');
+        var elKindLabel = document.getElementById('copilotPopupSuggestionLabel');
+        if (!popup || !elExplanation || !elCode) return;
+
+        _copilotOriginPosition = originPosition || window.editor.getPosition();
+        _copilotThinkingPhase = true;
+        _copilotPopupDismissedByUser = false;
+        popup.classList.add('copilot-popup--thinking');
+        elExplanation.innerHTML =
+            '<div class="copilot-thinking__title"><span>AI is thinking</span>' +
+            '<span class="copilot-thinking__dots" aria-hidden="true"><span></span><span></span><span></span></span></div>' +
+            '<div style="margin-top:8px;font-size:12px;color:#94a3b8;line-height:1.45;">Analyzing your code and generating a suggestion…</div>';
+        elCode.innerHTML =
+            '<div class="copilot-thinking__shimmer" style="width:100%"></div>' +
+            '<div class="copilot-thinking__shimmer"></div>';
+        if (elKindLabel) {
+            elKindLabel.textContent = currentSession.condition === 3 ? 'Generating suggestion' : 'Suggested line';
+        }
+
+        var explanationSection = elExplanation.closest('.copilot-popup__explanation');
+        if (explanationSection) {
+            explanationSection.style.display = (currentSession.condition === 3) ? 'none' : '';
+        }
+
+        popup.classList.remove('closing');
+        popup.style.display = 'block';
+        _copilotPositionAtCursor(originPosition);
+        requestAnimationFrame(function() {
+            _copilotPositionAtCursor(originPosition);
+        });
+    } catch (e) {
+        console.warn('Copilot thinking state error:', e);
+    }
+}
+
+/** Hide the thinking placeholder without logging accept/reject (error / no suggestion). */
+function dismissCopilotThinkingShell() {
+    if (!_copilotThinkingPhase) return;
+    _copilotThinkingPhase = false;
+    try {
+        var popup = document.getElementById('copilotPopup');
+        if (popup) {
+            popup.classList.remove('copilot-popup--thinking');
+            popup.style.display = 'none';
+        }
+        var elExplanation = document.getElementById('copilotPopupExplanation');
+        var elCode = document.getElementById('copilotPopupCode');
+        if (elExplanation) elExplanation.textContent = '';
+        if (elCode) elCode.textContent = '';
+    } catch (e) {
+        console.warn('dismissCopilotThinkingShell:', e);
+    }
+}
+
 function showCopilotPopup(explanation, suggestionCode, suggestionType, suggestionKind, originPosition) {
     try {
         if (!suggestionCode || !suggestionCode.trim()) return false;
@@ -4573,6 +4910,9 @@ function showCopilotPopup(explanation, suggestionCode, suggestionType, suggestio
         var elCode        = document.getElementById('copilotPopupCode');
         var elKindLabel   = document.getElementById('copilotPopupSuggestionLabel');
         if (!popup || !elExplanation || !elCode) return false;
+
+        _copilotThinkingPhase = false;
+        popup.classList.remove('copilot-popup--thinking');
 
         _copilotPopupText = suggestionCode;
         _copilotPopupType = suggestionType  || 'guess';
@@ -4594,7 +4934,7 @@ function showCopilotPopup(explanation, suggestionCode, suggestionType, suggestio
         popup.classList.remove('closing');
         popup.style.display = 'block';
         _copilotPopupDismissedByUser = false;
-        _copilotPositionAtCursor();
+        _copilotPositionAtCursor(_copilotOriginPosition);
         // Lock editor until Tab (accept) or Esc (reject); teaser overlay already keeps read-only.
         if (window.editor && !(typeof teaserActive !== 'undefined' && teaserActive)) {
             window.editor.updateOptions({
@@ -4824,20 +5164,6 @@ function showAIThinking() {
     if (wrap) wrap.classList.add('editor-wrapper--suggestion-loading');
     if (window.editor) {
         window.editor.updateOptions({ readOnly: true });
-        try {
-            var pos = window.editor.getPosition();
-            var coords = window.editor.getScrolledVisiblePosition(pos);
-            var layoutInfo = window.editor.getLayoutInfo();
-            var editorDom = window.editor.getDomNode();
-            if (coords && editorDom) {
-                var dot = document.createElement('div');
-                dot.className = 'ai-loading-indicator';
-                dot.id = 'aiLoadingDot';
-                dot.style.left = (layoutInfo.contentLeft + coords.left + 2) + 'px';
-                dot.style.top  = (coords.top + 4) + 'px';
-                editorDom.appendChild(dot);
-            }
-        } catch (e) {}
     }
 }
 
@@ -5260,15 +5586,15 @@ async function submitPeriodicSurvey() {
     try {
         await saveSurveyResponses(responses, 'periodic');
         
-        // Use the AI snapshot captured when survey was shown
         const aiSnapshot = surveyData.currentSurveyAISnapshot || collectAIHistoryContext();
+        const aiSnapshotCompact = compactAiHistoryForSurvey(aiSnapshot);
         
         const surveyEntry = {
             occurrence: surveyData.periodicSurveyOccurrenceCount,
             timestamp: new Date().toISOString(),
             analysisCount: surveyData.analysisCount,
             responses: responses,
-            ai_history_at_survey: aiSnapshot
+            ai_history_at_survey: aiSnapshotCompact
         };
         surveyData.surveyResponses.push(surveyEntry);
         
@@ -5302,8 +5628,8 @@ async function submitFinalSurvey() {
     }
     
     try {
-        // Use the AI snapshot captured when survey was shown
         const finalAISnapshot = surveyData.currentSurveyAISnapshot || collectAIHistoryContext();
+        const finalAISnapshotCompact = compactAiHistoryForSurvey(finalAISnapshot);
         
         await saveSurveyResponses(responses, 'final');
         
@@ -5313,7 +5639,7 @@ async function submitFinalSurvey() {
             timestamp: new Date().toISOString(),
             analysisCount: surveyData.analysisCount,
             responses: responses,
-            ai_history_at_survey: finalAISnapshot,
+            ai_history_at_survey: finalAISnapshotCompact,
             is_final: true,
             triggered_at_submission: true
         });
@@ -5544,6 +5870,45 @@ function collectSurveyResponses(modalId) {
     return responses;
 }
 
+
+/** Shrink AI history for /submit-survey so large sessions + long answers stay fast (matches server compact). */
+function compactAiHistoryForSurvey(ctx, maxEntries, maxChars) {
+    maxEntries = maxEntries || 24;
+    maxChars = maxChars || 6000;
+    if (!ctx || typeof ctx !== 'object') return ctx;
+    function trunc(s) {
+        if (s == null || typeof s !== 'string') return s;
+        if (s.length <= maxChars) return s;
+        return s.slice(0, maxChars - 1) + '\u2026';
+    }
+    function compactList(arr) {
+        if (!Array.isArray(arr) || !arr.length) return arr;
+        var tail = arr.length > maxEntries ? arr.slice(-maxEntries) : arr;
+        return tail.map(function(row) {
+            if (!row || typeof row !== 'object') return row;
+            var o = {};
+            for (var k in row) {
+                if (Object.prototype.hasOwnProperty.call(row, k)) {
+                    if (k === 'problem_analysis' || k === 'next_line_suggestion' || k === 'full_code_suggestion' || k === 'user_code_snapshot') {
+                        o[k] = trunc(row[k]);
+                    } else {
+                        o[k] = row[k];
+                    }
+                }
+            }
+            return o;
+        });
+    }
+    var out = {};
+    for (var k in ctx) {
+        if (Object.prototype.hasOwnProperty.call(ctx, k)) out[k] = ctx[k];
+    }
+    ['ai_guess_history', 'correct_description_history', 'suggestions_only_history'].forEach(function(key) {
+        if (out[key]) out[key] = compactList(out[key]);
+    });
+    out.ai_history_compact = true;
+    return out;
+}
 
 // Add this function to collect AI history context
 function collectAIHistoryContext() {
@@ -5811,7 +6176,8 @@ function refreshProblemPanelAiHistory() {
 
 async function saveSurveyResponses(responses, surveyType) {
     try {
-        const aiHistoryContext = collectAIHistoryContext();
+        var rawCtx = surveyData.currentSurveyAISnapshot || collectAIHistoryContext();
+        const aiHistoryContext = compactAiHistoryForSurvey(rawCtx);
         
         const response = await fetch('/submit-survey', {
             method: 'POST',
@@ -5826,7 +6192,7 @@ async function saveSurveyResponses(responses, surveyType) {
                 responses: responses,
                 analysis_count: surveyData.analysisCount,
                 timestamp: new Date().toISOString(),
-                ai_history_context: aiHistoryContext  // NEW: Include AI history
+                ai_history_context: aiHistoryContext
             })
         });
 
@@ -6000,10 +6366,10 @@ async function loadSurveyQuestions() {
        decreaseFontBtn.disabled = currentFontSize <= minFontSize;
        increaseFontBtn.disabled = currentFontSize >= maxFontSize;
 
-       // Reposition the suggestion popup if it is currently visible
+       // Reposition the suggestion popup if it is currently visible (use trigger origin)
        var popup = document.getElementById('copilotPopup');
        if (popup && popup.style.display === 'block') {
-           _copilotPositionAtCursor();
+           _copilotPositionAtCursor(_copilotOriginPosition);
        }
    }
 
@@ -6332,44 +6698,54 @@ async function submitToDatabase() {
     // Check for post-survey
     await checkAndShowPostSurvey();
 }
-// NEW FUNCTION: Check and show post survey if needed
+// Check and show post survey if needed — server survey-status is the sole source of truth
 async function checkAndShowPostSurvey() {
     const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
-    
-    if (authData.hasPostSurvey) {
-        try {
-            const statusResponse = await fetch(`/survey-status/${currentSession.sessionId}`);
-            if (statusResponse.ok) {
-                const statusData = await statusResponse.json();
-                
-                if (statusData.post_survey_status !== 'completed') {
-                    // Post-survey required but not completed - redirect to survey page
-                    addTerminalOutput('⚠️ Post-survey required before code submission!', 'warning');
-                    addTerminalOutput('Redirecting to post-survey...', 'info');
-                    
-                    // Mark that we're in submission flow
-                    sessionStorage.setItem('postSurveySubmissionPending', 'true');
-                    
-                    // Get session parameters for redirect
-                    const urlParams = new URLSearchParams(window.location.search);
-                    const sessionToken = urlParams.get('session');
-                    const userId = urlParams.get('user');
-                    
-                    // Redirect to survey page with session preserved
-                    setTimeout(() => {
-                        allowNavigation = true;  // Allow navigation without warning
-                        window.location.href = `/survey.html?type=post&session=${sessionToken}&user=${encodeURIComponent(userId)}`;
-                    }, 1500);
-                    return;
+    var statusData = null;
+    try {
+        const statusResponse = await fetchSurveyStatusFresh(currentSession.sessionId);
+        if (statusResponse.ok) {
+            statusData = await statusResponse.json();
+            if (typeof statusData.current_problem_index === 'number') {
+                currentSession.currentProblemIndex = statusData.current_problem_index;
+                authData.currentProblemIndex = statusData.current_problem_index;
+                if (typeof statusData.total_problems === 'number' && statusData.total_problems >= 1) {
+                    authData.totalProblems = statusData.total_problems;
+                    currentSession.totalProblems = statusData.total_problems;
                 }
+                sessionStorage.setItem('authData', JSON.stringify(authData));
             }
-        } catch (error) {
-            console.error('Error checking survey status:', error);
-            addTerminalOutput('⚠️ Could not verify post-survey status, proceeding with submission', 'warning');
-            // Continue with submission if check fails (fallback)
+            if (statusData.quiz_progress && statusData.quiz_progress.steps && statusData.quiz_progress.steps.length) {
+                renderQuizProgressStrip(statusData.quiz_progress);
+            }
+        }
+    } catch (error) {
+        console.error('Error checking survey status:', error);
+        addTerminalOutput('⚠️ Could not verify post-survey status, proceeding with submission', 'warning');
+    }
+
+    // Use the server's post_survey_status as the sole source of truth.
+    // "not_required" or "completed" means we can skip; anything else means the survey is needed.
+    if (statusData) {
+        var postStatus = statusData.post_survey_status || 'not_required';
+        if (!surveyGateSurveyDone(postStatus)) {
+            addTerminalOutput('⚠️ Post-survey required before code submission!', 'warning');
+            addTerminalOutput('Redirecting to post-survey...', 'info');
+
+            sessionStorage.setItem('postSurveySubmissionPending', 'true');
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const sessionToken = urlParams.get('session');
+            const userId = urlParams.get('user');
+
+            setTimeout(() => {
+                allowNavigation = true;
+                window.location.href = `/survey.html?type=post&session=${sessionToken}&user=${encodeURIComponent(userId)}`;
+            }, 1500);
+            return;
         }
     }
-    
+
     // No post survey needed or already completed — check for more problems
     const totalProblems = authData.totalProblems || 1;
     const currentProbIdx = authData.currentProblemIndex || 0;
@@ -6909,6 +7285,7 @@ window.addEventListener('beforeunload', (e) => {
                 session_id: currentSession.sessionId,
                 user_id: currentSession.userId,
                 assignment_key: currentSession.assignmentKey,
+                quiz_id: currentSession.quizId || null,
             });
             var actBlob = new Blob([actPayload], { type: 'application/json' });
             navigator.sendBeacon('/log-activities', actBlob);

@@ -4,6 +4,8 @@ Emulate many concurrent students hitting the same HTTP paths the IDE uses.
 
 Usage (API must be running):
   LOADTEST_BASE_URL=http://127.0.0.1:8000 python scripts/emulate_students_loadtest.py
+  # Remote hosting (e.g. 100 concurrent quiz students):
+  LOADTEST_BASE_URL=https://www.guide.codes LOADTEST_QUIZ_CODE=YOUR_CODE python scripts/emulate_students_loadtest.py
 
 Env:
   LOADTEST_BASE_URL   Default http://127.0.0.1:8000
@@ -38,6 +40,19 @@ TIMEOUT = float(os.environ.get("LOADTEST_TIMEOUT", "120"))
 QUIZ_CODE = os.environ.get("LOADTEST_QUIZ_CODE", "").strip()
 # Default python — many instructor quizzes only allow python; override with LOADTEST_QUIZ_LANGUAGE.
 QUIZ_LANG = os.environ.get("LOADTEST_QUIZ_LANGUAGE", "python").strip() or "python"
+
+
+async def _post_json(client: httpx.AsyncClient, url: str, payload: dict) -> httpx.Response:
+    """POST JSON; one retry after short delay on transient httpx.RequestError (common under burst load)."""
+    try:
+        return await client.post(url, json=payload)
+    except httpx.RequestError:
+        await asyncio.sleep(0.2)
+        return await client.post(url, json=payload)
+
+
+def _err(e: BaseException) -> str:
+    return f"{type(e).__name__}: {e!r}"
 
 
 def _activity(ts: str, kind: str) -> dict:
@@ -85,23 +100,24 @@ async def one_student(client: httpx.AsyncClient, student_id: int) -> StudentResu
             pg = await client.get(f"{BASE}/quiz/{QUIZ_CODE}")
             note(pg, "quiz-page")
         except Exception as e:
-            out.errors.append(f"quiz-page: {e}")
+            out.errors.append(f"quiz-page: {_err(e)}")
             return out
         try:
-            jr = await client.post(
+            jr = await _post_json(
+                client,
                 f"{BASE}/quiz/join",
-                json={"access_code": QUIZ_CODE, "user_id": uid, "programming_language": QUIZ_LANG},
+                {"access_code": QUIZ_CODE, "user_id": uid, "programming_language": QUIZ_LANG},
             )
             note(jr, "quiz-join")
         except Exception as e:
-            out.errors.append(f"quiz-join: {e}")
+            out.errors.append(f"quiz-join: {_err(e)}")
             return out
         if jr.status_code != 200:
             return out
         try:
             data = jr.json()
         except Exception as e:
-            out.errors.append(f"quiz-join json: {e}")
+            out.errors.append(f"quiz-join json: {_err(e)}")
             return out
         if data.get("quiz_already_completed") or data.get("status") == "already_completed":
             return out
@@ -135,10 +151,10 @@ async def one_student(client: httpx.AsyncClient, student_id: int) -> StudentResu
             body["assignment_key"] = aid
 
         try:
-            resp = await client.post(f"{BASE}/log-activities", json=body)
+            resp = await _post_json(client, f"{BASE}/log-activities", body)
             note(resp, f"log-activities r{r}")
         except Exception as e:
-            out.errors.append(f"log-activities r{r}: {e}")
+            out.errors.append(f"log-activities r{r}: {_err(e)}")
 
         if QUIZ_LANG.lower() == "python":
             sample_code = f"# student {student_id} r{r}\ndef f():\n    return {r}\n"
@@ -155,10 +171,10 @@ async def one_student(client: httpx.AsyncClient, student_id: int) -> StudentResu
             "current_problem_index": 0,
         }
         try:
-            resp = await client.post(f"{BASE}/checkpoint-editor", json=ck_body)
+            resp = await _post_json(client, f"{BASE}/checkpoint-editor", ck_body)
             note(resp, f"checkpoint-editor r{r}")
         except Exception as e:
-            out.errors.append(f"checkpoint-editor r{r}: {e}")
+            out.errors.append(f"checkpoint-editor r{r}: {_err(e)}")
 
         if WITH_ANALYZE:
             an_body = {
@@ -171,10 +187,10 @@ async def one_student(client: httpx.AsyncClient, student_id: int) -> StudentResu
                 "cursor_column": 1,
             }
             try:
-                resp = await client.post(f"{BASE}/analyze", json=an_body)
+                resp = await _post_json(client, f"{BASE}/analyze", an_body)
                 note(resp, f"analyze r{r}")
             except Exception as e:
-                out.errors.append(f"analyze r{r}: {e}")
+                out.errors.append(f"analyze r{r}: {_err(e)}")
 
     return out
 

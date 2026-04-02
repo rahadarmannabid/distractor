@@ -102,6 +102,48 @@
             line-height: 1.5;
         }
 
+        /* Full quiz flow: Pre → Coding → Post per problem (from server) */
+        .quiz-flow-progress {
+            width: 100%;
+            padding: 10px 12px;
+            margin-bottom: 16px;
+            background: rgba(30, 30, 30, 0.85);
+            border: 1px solid #404040;
+            border-radius: 10px;
+            overflow-x: auto;
+        }
+        .quiz-flow-progress__inner {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 4px 6px;
+            font-size: 11px;
+            line-height: 1.35;
+        }
+        .quiz-flow-progress__pill {
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: #2d2d30;
+            border: 1px solid #404040;
+            color: #94a3b8;
+            white-space: nowrap;
+        }
+        .quiz-flow-progress__pill.is-done {
+            background: rgba(22, 163, 74, 0.2);
+            border-color: #22c55e;
+            color: #86efac;
+        }
+        .quiz-flow-progress__pill.is-active {
+            background: rgba(59, 130, 246, 0.25);
+            border-color: #3b82f6;
+            color: #93c5fd;
+            font-weight: 600;
+        }
+        .quiz-flow-progress__sep {
+            color: #52525b;
+            font-size: 10px;
+        }
+
         .progress-bar {
             width: 100%;
             height: 8px;
@@ -793,6 +835,7 @@
     <div class="bg-animation"></div>
     
     <div class="survey-container">
+        <div id="quizFlowProgress" class="quiz-flow-progress" style="display:none;" role="navigation" aria-label="Quiz progress"></div>
         <div class="survey-header">
             <h1 id="surveyTitle">Loading Survey...</h1>
             <p id="resumeContextHint" style="display:none; font-size: 13px; color: #94a3b8; margin-top: 6px;"></p>
@@ -816,7 +859,7 @@
 
         <div class="info-section" style="display: none;" id="infoSection">
             <div class="info-text">
-                All questions must be completed to submit the survey. Your responses are securely stored and used for research purposes only.
+                All questions must be completed to submit the survey. Previous answers are shown when available — you can edit them before submitting. Your responses are securely stored and used for research purposes only.
             </div>
             <div class="security-badge">
                 🔒 Secure Research Survey
@@ -855,6 +898,43 @@
             return new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_');
         }
 
+        // #region agent log
+        function _agentBrowserLog(hypothesisId, location, message, data) {
+            var payload = {
+                sessionId: 'ef2d3c',
+                hypothesisId: hypothesisId,
+                location: location,
+                message: message,
+                data: data || {},
+                timestamp: Date.now()
+            };
+            try {
+                fetch('http://127.0.0.1:7245/ingest/4f9688c0-cd58-4ad9-a662-7af5846da4b7', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'ef2d3c' },
+                    body: JSON.stringify(payload)
+                }).catch(function () {});
+            } catch (e) {}
+            fetch('/_debug/agent-ingest', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).catch(function () {});
+        }
+
+        function surveyFetchWithTimeout(url, init, timeoutMs) {
+            timeoutMs = timeoutMs || 120000;
+            if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+                return fetch(url, Object.assign({}, init || {}, { signal: AbortSignal.timeout(timeoutMs) }));
+            }
+            var ctrl = new AbortController();
+            var tid = setTimeout(function () { ctrl.abort(); }, timeoutMs);
+            var p = fetch(url, Object.assign({}, init || {}, { signal: ctrl.signal }));
+            p.finally(function () { clearTimeout(tid); });
+            return p;
+        }
+        // #endregion
+
         function surveyBuildStemForProblem(userId, assignmentKey, quizId, problemNumber, timestampSeg) {
             const parts = [surveySanitizeIdPart(userId), surveySanitizeIdPart(assignmentKey)];
             if (quizId) {
@@ -890,12 +970,14 @@
                 this.sessionId = authData.sessionId;
                 this.userId = authData.userId;
                 this.assignmentKey = authData.assignmentKey;
+                // Overwritten in init() from server — stale sessionStorage can point at the wrong problem
                 this.problemIndex = authData.currentProblemIndex || 0;
 
                 this.surveyConfig = null;
                 this.responses = {};
                 this.startTime = Date.now();
                 this._surveyDraftSaveTimer = null;
+                this._serverSurveyDraftTimer = null;
                 
                 if (!this.sessionId || !this.userId || !this.assignmentKey) {
                     this.showError('Session expired. Please log in again.');
@@ -906,8 +988,66 @@
                 this.init();
             }
 
+            renderQuizFlowProgress(qp) {
+                const el = document.getElementById('quizFlowProgress');
+                if (!el || !qp || !qp.steps || !qp.steps.length) {
+                    if (el) el.style.display = 'none';
+                    return;
+                }
+                const cur = typeof qp.current_step_index === 'number' ? qp.current_step_index : 0;
+                const esc = (s) => {
+                    if (s == null) return '';
+                    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+                };
+                let html = '<div class="quiz-flow-progress__inner">';
+                for (let idx = 0; idx < qp.steps.length; idx++) {
+                    const step = qp.steps[idx];
+                    const done = idx < cur;
+                    const active = idx === cur;
+                    let cls = 'quiz-flow-progress__pill';
+                    if (done) cls += ' is-done';
+                    if (active) cls += ' is-active';
+                    const label = step.short || step.label || ('Step ' + (idx + 1));
+                    const tip = step.label || label;
+                    html += '<span class="' + cls + '" title="' + esc(tip) + '">' + esc(label) + '</span>';
+                    if (idx < qp.steps.length - 1) {
+                        html += '<span class="quiz-flow-progress__sep" aria-hidden="true">→</span>';
+                    }
+                }
+                html += '</div>';
+                el.innerHTML = html;
+                el.style.display = 'block';
+            }
+
+            async syncProblemIndexFromServer() {
+                if (!this.sessionId) return;
+                try {
+                    const res = await fetch(
+                        '/survey-status/' + encodeURIComponent(this.sessionId) + '?t=' + Date.now(),
+                        { cache: 'no-store' }
+                    );
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    if (typeof data.current_problem_index === 'number') {
+                        this.problemIndex = data.current_problem_index;
+                        const ad = JSON.parse(sessionStorage.getItem('authData') || '{}');
+                        ad.currentProblemIndex = data.current_problem_index;
+                        if (typeof data.total_problems === 'number' && data.total_problems >= 1) {
+                            ad.totalProblems = data.total_problems;
+                        }
+                        sessionStorage.setItem('authData', JSON.stringify(ad));
+                    }
+                    if (data.quiz_progress && data.quiz_progress.steps && data.quiz_progress.steps.length) {
+                        this.renderQuizFlowProgress(data.quiz_progress);
+                    }
+                } catch (e) {
+                    console.warn('syncProblemIndexFromServer:', e);
+                }
+            }
+
             async init() {
                 try {
+                    await this.syncProblemIndexFromServer();
                     await this.loadSurveyConfig();
                     await this.updateSurveyStatus('in_progress');
                     this.renderSurvey();
@@ -928,17 +1068,23 @@
                 return `surveyDraft_${this.sessionId}_${this.surveyType}_p${this.problemIndex}`;
             }
 
+            /** Same map used for localStorage draft and POST /survey-draft */
+            buildDraftResponseMap() {
+                const out = { ...this.responses };
+                if (!this.surveyConfig || !this.surveyConfig.questions) return out;
+                for (const q of this.surveyConfig.questions) {
+                    if (q.type !== 'open_ended') continue;
+                    const wrap = this.findQuestionElement(q.id);
+                    const ta = wrap && wrap.querySelector('textarea.text-input');
+                    if (ta && ta.value.length) out[q.id] = ta.value;
+                }
+                return out;
+            }
+
             persistSurveyDraft() {
                 if (!this.sessionId || !this.surveyType || !this.surveyConfig) return;
                 try {
-                    const out = { ...this.responses };
-                    // Open-ended: save textarea text even when below min_length (not yet in responses)
-                    for (const q of this.surveyConfig.questions) {
-                        if (q.type !== 'open_ended') continue;
-                        const wrap = this.findQuestionElement(q.id);
-                        const ta = wrap && wrap.querySelector('textarea.text-input');
-                        if (ta && ta.value.length) out[q.id] = ta.value;
-                    }
+                    const out = this.buildDraftResponseMap();
                     localStorage.setItem(
                         this.getSurveyDraftStorageKey(),
                         JSON.stringify({ v: 1, savedAt: Date.now(), responses: out })
@@ -954,6 +1100,38 @@
                     this._surveyDraftSaveTimer = null;
                     this.persistSurveyDraft();
                 }, 300);
+                this.scheduleServerSurveyDraft();
+            }
+
+            scheduleServerSurveyDraft() {
+                if (this._serverSurveyDraftTimer) clearTimeout(this._serverSurveyDraftTimer);
+                this._serverSurveyDraftTimer = setTimeout(() => {
+                    this._serverSurveyDraftTimer = null;
+                    this.flushSurveyDraftToServer(false);
+                }, 750);
+            }
+
+            flushSurveyDraftToServer(keepalive) {
+                if (!this.sessionId || !this.userId || !this.surveyType || !this.surveyConfig) return;
+                try {
+                    const answers = this.buildDraftResponseMap();
+                    const body = JSON.stringify({
+                        session_id: this.sessionId,
+                        user_id: this.userId,
+                        survey_type: this.surveyType,
+                        problem_index: this.problemIndex,
+                        answers: answers
+                    });
+                    const init = {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: body,
+                        keepalive: !!keepalive
+                    };
+                    fetch('/survey-draft', init).catch(function () {});
+                } catch (e) {
+                    console.warn('Server survey draft save failed:', e);
+                }
             }
 
             clearSurveyDraft() {
@@ -1038,7 +1216,7 @@
             async applyServerSavedSurveyResponses() {
                 if (!this.sessionId || !this.surveyConfig) return;
                 try {
-                    const res = await fetch(`/survey-status/${encodeURIComponent(this.sessionId)}`);
+                    const res = await fetch('/survey-status/' + encodeURIComponent(this.sessionId) + '?t=' + Date.now() + '&problem_index=' + encodeURIComponent(String(this.problemIndex)), { cache: 'no-store' });
                     if (!res.ok) return;
                     const data = await res.json();
                     const field = this.surveyType === 'pre' ? 'pre_survey_answers' : 'post_survey_answers';
@@ -1067,7 +1245,8 @@
 
             async loadSurveyConfig() {
                 const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
-                const problemIndex = authData.currentProblemIndex || 0;
+                // Use this.problemIndex (synced from server in init) as the authoritative value
+                const problemIndex = typeof this.problemIndex === 'number' ? this.problemIndex : (authData.currentProblemIndex || 0);
                 const response = await fetch(`/survey-config/${this.assignmentKey}?problem_index=${problemIndex}`);
                 if (!response.ok) throw new Error('Failed to load survey config');
                 
@@ -1084,17 +1263,18 @@
                 // Update header - add mandatory message
                 document.getElementById('surveyTitle').textContent = this.surveyConfig.title || `${this.surveyType.toUpperCase()} Survey`;
                 const descriptionText = this.surveyConfig.description || '';
-                document.getElementById('surveyDescription').textContent = descriptionText + (descriptionText ? ' ' : '') + 'All questions are mandatory.';
+                document.getElementById('surveyDescription').textContent = descriptionText + (descriptionText ? ' ' : '') + 'All questions are mandatory. You can edit your answers before submitting.';
                 const hintEl = document.getElementById('resumeContextHint');
                 if (hintEl) {
                     const ad = JSON.parse(sessionStorage.getItem('authData') || '{}');
-                    const pi = (ad.currentProblemIndex || 0) + 1;
+                    // Use this.problemIndex (synced from server) for the label
+                    const pi = (typeof this.problemIndex === 'number' ? this.problemIndex : (ad.currentProblemIndex || 0)) + 1;
                     const tp = ad.totalProblems || 1;
                     const label = this.surveyType === 'pre' ? 'Pre-study' : 'Post-study';
                     hintEl.style.display = 'block';
                     hintEl.textContent = tp > 1
-                        ? `${label} · Problem ${pi} of ${tp} — previous answers are restored when available.`
-                        : `${label} — previous answers are restored when available.`;
+                        ? `${label} · Problem ${pi} of ${tp} — previous answers are shown when available; you can change them before submitting.`
+                        : `${label} — previous answers are shown when available; you can change them before submitting.`;
                 }
             }
 
@@ -1630,12 +1810,14 @@
                 window.addEventListener('pagehide', () => {
                     try {
                         this.persistSurveyDraft();
+                        this.flushSurveyDraftToServer(true);
                     } catch (e) { /* ignore */ }
                 });
                 document.addEventListener('visibilitychange', () => {
                     if (document.visibilityState === 'hidden') {
                         try {
                             this.persistSurveyDraft();
+                            this.flushSurveyDraftToServer(true);
                         } catch (e) { /* ignore */ }
                     }
                 });
@@ -1643,6 +1825,7 @@
                 window.addEventListener('beforeunload', (e) => {
                     try {
                         this.persistSurveyDraft();
+                        this.flushSurveyDraftToServer(true);
                     } catch (err) { /* ignore */ }
                     if (allowNavigation) {
                         return undefined;
@@ -1770,38 +1953,75 @@
                         window.location.href = `/index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
                         
                     } else if (this.surveyType === 'post') {
+                        // Align quiz progress with server — stale sessionStorage breaks hasMoreProblems and /quiz/next-problem.
+                        try {
+                            const stRes = await fetch('/survey-status/' + encodeURIComponent(this.sessionId) + '?t=' + Date.now() + '&problem_index=' + encodeURIComponent(String(this.problemIndex)), { cache: 'no-store' });
+                            if (stRes.ok) {
+                                const st = await stRes.json();
+                                if (typeof st.current_problem_index === 'number') {
+                                    authData.currentProblemIndex = st.current_problem_index;
+                                }
+                                if (typeof st.total_problems === 'number' && st.total_problems >= 1) {
+                                    authData.totalProblems = st.total_problems;
+                                }
+                                sessionStorage.setItem('authData', JSON.stringify(authData));
+                                // #region agent log
+                                _agentBrowserLog('H6', 'survey.html:postSubmit:statusSync', 'survey-status after submit', { current_problem_index: st.current_problem_index, total_problems: st.total_problems });
+                                // #endregion
+                            }
+                        } catch (e) {
+                            console.warn('survey-status sync failed', e);
+                        }
+
                         const isSubmissionPending = sessionStorage.getItem('postSurveySubmissionPending') === 'true';
 
-                        // Check if there are more problems in this multi-problem quiz
-                        const totalProblems = authData.totalProblems || 1;
-                        const currentProbIdx = authData.currentProblemIndex || 0;
-                        const hasMoreProblems = isSubmissionPending && (currentProbIdx < totalProblems - 1);
+                        // Check if there are more problems in this multi-problem quiz (coerce — string/JSON can break comparisons)
+                        const totalProblems = Math.max(1, Math.floor(Number(authData.totalProblems)) || 1);
+                        const currentProbIdx = Math.max(0, Math.floor(Number(authData.currentProblemIndex)) || 0);
+                        // Advance when there are more problems — don't gate solely on postSurveySubmissionPending
+                        // so that even if the flag was lost (race, manual nav, etc.) the sequence is preserved.
+                        const hasMoreProblems = (currentProbIdx < totalProblems - 1);
+                        /** True when /quiz/next-problem returned status complete while we still expected another problem — must run final submission block below. */
+                        let nextProblemReturnedComplete = false;
 
                         if (hasMoreProblems) {
                             // Multi-problem quiz: advance to next problem
-                            sessionStorage.removeItem('postSurveySubmissionPending');
+                            // Do not clear postSurveySubmissionPending until next-problem succeeds or final block runs — avoids stuck state if fetch hangs/fails.
                             submitBtn.textContent = 'Loading Next Problem...';
 
                             try {
                                 const cachedData = this.retrieveCachedSubmissionData();
                                 const code = (cachedData && cachedData.code) ? cachedData.code : '';
 
-                                const nextRes = await fetch('/quiz/next-problem', {
+                                const nextFetchInit = {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({
                                         session_id: authData.sessionId,
                                         code: code,
                                         programming_language: authData.programmingLanguage || 'python',
+                                        current_problem_index: currentProbIdx,
                                     })
-                                });
+                                };
+                                const nextRes = await surveyFetchWithTimeout('/quiz/next-problem', nextFetchInit, 120000);
 
                                 if (!nextRes.ok) throw new Error('Failed to load next problem');
                                 const nextData = await nextRes.json();
 
+                                // #region agent log
+                                _agentBrowserLog('H1', 'survey.html:postSubmit:nextData', 'next-problem JSON', { nextStatus: nextData && nextData.status, totalProblems: totalProblems, currentProbIdx: currentProbIdx, hasMoreProblems: hasMoreProblems, isSubmissionPending: isSubmissionPending });
+                                // #endregion
+
                                 if (nextData.status === 'complete') {
                                     // All problems done — fall through to final submission
+                                    // #region agent log
+                                    _agentBrowserLog('H5', 'survey.html:postSubmit:allDoneBranch', 'throwing __ALL_DONE__', {});
+                                    // #endregion
                                     throw new Error('__ALL_DONE__');
+                                }
+
+                                if (nextData.status !== 'next') {
+                                    throw new Error(nextData.detail || nextData.message || 'Unexpected response from server');
                                 }
 
                                 // Store current problem's code for combined download at final submission.
@@ -1844,6 +2064,7 @@
                                 submitBtn.textContent = 'Next Problem Ready!';
                                 await new Promise(resolve => setTimeout(resolve, 800));
 
+                                sessionStorage.removeItem('postSurveySubmissionPending');
                                 allowNavigation = true;
                                 // If next problem has a pre-survey, go there first
                                 if (authData.hasPreSurvey) {
@@ -1854,10 +2075,15 @@
 
                             } catch (error) {
                                 if (error.message === '__ALL_DONE__') {
+                                    nextProblemReturnedComplete = true;
+                                    // #region agent log
+                                    _agentBrowserLog('H5', 'survey.html:postSubmit:catchAllDone', 'caught __ALL_DONE__; will run final block', { nextProblemReturnedComplete: true, hasMoreProblems: hasMoreProblems, runId: 'post-fix' });
+                                    // #endregion
                                     // Fall through to final submission below
                                 } else {
                                     console.error('Next problem error:', error);
-                                    this.showError('Failed to load next problem: ' + error.message);
+                                    var errMsg = error && error.name === 'AbortError' ? 'Request timed out. Check your connection and try again.' : error.message;
+                                    this.showError('Failed to load next problem: ' + errMsg);
                                     submitBtn.disabled = false;
                                     submitBtn.textContent = 'Retry';
                                     return;
@@ -1865,17 +2091,21 @@
                             }
                         }
 
-                        if (isSubmissionPending && !hasMoreProblems) {
-                            // Final problem or single-problem quiz: submit code
+                        if (!hasMoreProblems || nextProblemReturnedComplete) {
+                            // Final problem, single-problem quiz, or server returned complete while advancing (nextProblemReturnedComplete)
                             sessionStorage.removeItem('postSurveySubmissionPending');
 
                             submitBtn.textContent = 'Downloading Your Code...';
 
                             try {
-                                const cachedData = this.retrieveCachedSubmissionData();
+                                let cachedData = this.retrieveCachedSubmissionData();
+                                if (!cachedData) {
+                                    cachedData = this.buildSubmissionDataFromPerProblemStorageFallback();
+                                }
 
-                                // Download code file after post-survey completion
-                                if (cachedData && ((cachedData.code && cachedData.code.trim()) || (cachedData.files && cachedData.files.length))) {
+                                submitBtn.textContent = 'Downloading Your Code...';
+                                // ZIP includes per-problem codes from localStorage + snapshot; works even if sessionStorage was cleared.
+                                if (cachedData) {
                                     await this.downloadCodeFromCache(cachedData);
                                     await new Promise(resolve => setTimeout(resolve, 1500));
                                 }
@@ -1883,7 +2113,7 @@
                                 submitBtn.textContent = 'Submitting Your Code...';
 
                                 if (!cachedData) {
-                                    throw new Error('Could not find submission data. Please return to IDE and submit again.');
+                                    throw new Error('Could not find submission data. Please return to the IDE, click Submit once, then complete the post-survey again.');
                                 }
 
                                 const periodicSurveysData = this.restorePeriodicSurveysFromStorage();
@@ -1936,9 +2166,6 @@
                                 submitBtn.textContent = 'Retry Submission';
                             }
 
-                        } else if (!isSubmissionPending) {
-                            allowNavigation = true;
-                            window.location.href = `/index.html?session=${sessionToken}&user=${encodeURIComponent(userId)}`;
                         }
                     }
 
@@ -1956,9 +2183,75 @@
                     if (cached) {
                         return JSON.parse(cached);
                     }
-                    return null;
+                    const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
+                    const sid = authData.sessionId;
+                    if (sid) {
+                        const bak = localStorage.getItem('quizLastSubmissionData_' + sid);
+                        if (bak) {
+                            return JSON.parse(bak);
+                        }
+                    }
+                    return this.buildSubmissionDataFromPerProblemStorageFallback();
                 } catch (error) {
                     console.error('Failed to retrieve cached data:', error);
+                    return this.buildSubmissionDataFromPerProblemStorageFallback();
+                }
+            }
+
+            /** Last resort when sessionStorage/localStorage snapshot was cleared: codes in perProblemCodes_ + authData. */
+            buildSubmissionDataFromPerProblemStorageFallback() {
+                try {
+                    const authData = JSON.parse(sessionStorage.getItem('authData') || '{}');
+                    const sid = authData.sessionId;
+                    if (!sid || !authData.userId || !authData.assignmentKey) return null;
+                    const perProblemKey = 'perProblemCodes_' + sid;
+                    let stored = [];
+                    try {
+                        const raw = localStorage.getItem(perProblemKey);
+                        if (raw) stored = JSON.parse(raw);
+                    } catch (e) {}
+                    if (!Array.isArray(stored) || !stored.length) return null;
+                    stored.sort((a, b) => a.problemIndex - b.problemIndex);
+                    const last = stored[stored.length - 1];
+                    const pi = typeof last.problemIndex === 'number' ? last.problemIndex : 0;
+                    const code = (last.code != null ? last.code : '') || '';
+                    const files = last.files && last.files.length ? last.files : null;
+                    if (!code.trim() && (!files || !files.length)) return null;
+                    return {
+                        code: code,
+                        files: files,
+                        lineCount: 0,
+                        characterCount: code.length,
+                        currentProblemIndex: pi,
+                        currentProblemTitle: last.title || `Problem ${pi + 1}`,
+                        totalProblems: authData.totalProblems || 1,
+                        session: {
+                            sessionId: sid,
+                            userId: authData.userId,
+                            assignmentKey: authData.assignmentKey,
+                            sessionToken: authData.sessionToken,
+                            condition: authData.condition,
+                            programmingLanguage: authData.programmingLanguage || 'python',
+                            quizId: authData.quizId || null,
+                            startTime: authData.timestamp,
+                            endTime: new Date().toISOString()
+                        },
+                        activity: { allActivityLogs: [], guessHistory: [], descHistory: [], suggestionsHistory: [], suggestionResponses: [] },
+                        metrics: {
+                            totalKeystrokes: 0,
+                            focusTime: 0,
+                            awayTime: 0,
+                            totalAIAnalyses: 0,
+                            suggestionClicks: 0,
+                            compilerClicks: 0,
+                            peakCodeLines: 0
+                        },
+                        surveys: { periodicSurveys: [], totalOccurrences: 0, totalAnalyses: 0 },
+                        capturedAt: new Date().toISOString(),
+                        _fallbackFromPerProblemStorage: true
+                    };
+                } catch (e) {
+                    console.warn('buildSubmissionDataFromPerProblemStorageFallback', e);
                     return null;
                 }
             }
@@ -1966,6 +2259,12 @@
             clearCachedSubmissionData() {
                 try {
                     sessionStorage.removeItem('pendingSubmissionData');
+                    try {
+                        const ad = JSON.parse(sessionStorage.getItem('authData') || '{}');
+                        if (ad.sessionId) {
+                            localStorage.removeItem('quizLastSubmissionData_' + ad.sessionId);
+                        }
+                    } catch (e) {}
                     // perProblemCodes_ is intentionally NOT cleared here — it accumulates codes
                     // across all problems and must survive until the final post-quiz download + submit.
                 } catch (error) {
@@ -1981,6 +2280,7 @@
                         || authData.sessionId;
                     if (sessionId) {
                         localStorage.removeItem(`perProblemCodes_${sessionId}`);
+                        localStorage.removeItem('quizLastSubmissionData_' + sessionId);
                     }
                 } catch (error) {
                     console.error('Failed to clear per-problem codes:', error);
@@ -2009,27 +2309,45 @@
 
                     const entries = [];
 
-                    for (const p of stored) {
+                    function pushStoredProblem(p) {
                         const problemNum = p.problemIndex + 1;
                         const stem = surveyBuildStemForProblem(uid, akey, quizId, problemNum, timestampSeg);
-                        entries.push({ filename: `${stem}${ext}`, content: (p.code || '').trim() });
-                    }
-
-                    const problemNum = currentProbIdx + 1;
-                    const stem = surveyBuildStemForProblem(uid, akey, quizId, problemNum, timestampSeg);
-                    if (cachedData.files && Array.isArray(cachedData.files) && cachedData.files.length > 0) {
-                        if (cachedData.files.length === 1) {
-                            entries.push({ filename: `${stem}${ext}`, content: cachedData.files[0].content || '' });
-                        } else {
-                            for (let i = 0; i < cachedData.files.length; i++) {
+                        if (p.files && Array.isArray(p.files) && p.files.length > 1) {
+                            for (let i = 0; i < p.files.length; i++) {
                                 entries.push({
                                     filename: `${stem}_${i + 1}${ext}`,
-                                    content: cachedData.files[i].content || ''
+                                    content: (p.files[i] && p.files[i].content) ? p.files[i].content : ''
                                 });
                             }
+                        } else if (p.files && p.files.length === 1) {
+                            entries.push({ filename: `${stem}${ext}`, content: (p.files[0].content || '').trim() });
+                        } else {
+                            entries.push({ filename: `${stem}${ext}`, content: (p.code || '').trim() });
                         }
-                    } else {
-                        entries.push({ filename: `${stem}${ext}`, content: (cachedData.code || '').trim() });
+                    }
+
+                    for (const p of stored) {
+                        pushStoredProblem(p);
+                    }
+
+                    const hasStoredForCurrent = stored.some((p) => p.problemIndex === currentProbIdx);
+                    if (!hasStoredForCurrent) {
+                        const problemNum = currentProbIdx + 1;
+                        const stem = surveyBuildStemForProblem(uid, akey, quizId, problemNum, timestampSeg);
+                        if (cachedData.files && Array.isArray(cachedData.files) && cachedData.files.length > 0) {
+                            if (cachedData.files.length === 1) {
+                                entries.push({ filename: `${stem}${ext}`, content: cachedData.files[0].content || '' });
+                            } else {
+                                for (let i = 0; i < cachedData.files.length; i++) {
+                                    entries.push({
+                                        filename: `${stem}_${i + 1}${ext}`,
+                                        content: cachedData.files[i].content || ''
+                                    });
+                                }
+                            }
+                        } else {
+                            entries.push({ filename: `${stem}${ext}`, content: (cachedData.code || '').trim() });
+                        }
                     }
 
                     const totalChars = entries.reduce((s, e) => s + (e.content || '').length, 0);

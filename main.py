@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Body, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
@@ -16,10 +16,11 @@ import sys
 import tempfile
 import time
 import uuid
+import hashlib
 import json
 import mimetypes 
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Any, Iterator, Tuple, cast
+from typing import List, Dict, Optional, Any, Iterator, Tuple, cast, Union
 import firebase_admin
 from firebase_admin import credentials, db
 import asyncio
@@ -30,12 +31,45 @@ from enum import Enum
 from admin import router as admin_router
 from instructor import router as instructor_router
 from firebase_utils import fb_dict
+from survey_payload_compact import compact_survey_ai_history
 
 import logging
 import html as html_std
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _agent_debug_log(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    """Append one NDJSON line for debug mode (session ef2d3c).
+
+    Writes to `.cursor/debug-ef2d3c.log` (session path) and `debug-ef2d3c.ndjson` at repo root.
+    The latter is not matched by `*.log` in .gitignore so IDE tools can read runtime evidence.
+    """
+    line = (
+        json.dumps(
+            {
+                "sessionId": "ef2d3c",
+                "hypothesisId": hypothesis_id,
+                "location": location,
+                "message": message,
+                "data": data,
+                "timestamp": int(time.time() * 1000),
+            },
+            ensure_ascii=False,
+        )
+        + "\n"
+    )
+    root = Path(__file__).resolve().parent
+    for rel in (".cursor/debug-ef2d3c.log", "debug-ef2d3c.ndjson"):
+        try:
+            p = root / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass
+
 
 # Instructor quiz problem fields may contain HTML from the rich-text editor (Quill).
 _HTML_TAG_RE = re.compile(r"<[a-zA-Z][\w:-]*(?:\s[^>]*)?>")
@@ -952,6 +986,12 @@ class SessionLog(BaseModel):
     post_survey_status: str = "not_started"
     post_survey_timestamp: Optional[str] = None
     post_survey_responses: Optional[Dict[str, Any]] = None
+    # Autosaved partial answers while user fills pre/post (key = str(problem_index)) — survives refresh / other device via checkpoint
+    pre_survey_draft_by_problem: Optional[Dict[str, Dict[str, Any]]] = None
+    post_survey_draft_by_problem: Optional[Dict[str, Dict[str, Any]]] = None
+    # Multi-problem quizzes: explicit completion per problem index (str keys) — avoids global status ambiguity
+    pre_survey_done_by_problem: Optional[Dict[str, bool]] = None
+    post_survey_done_by_problem: Optional[Dict[str, bool]] = None
 
     periodic_survey_count: int = 0
     periodic_surveys: List[Dict[str, Any]] = Field(default_factory=list)
@@ -966,7 +1006,7 @@ class SessionLog(BaseModel):
 
 class SurveyResponse(BaseModel):
     question: str
-    response: int  # 1-5 Likert scale
+    response: Union[int, str, float, bool, None]  # Likert int or open-ended text
 
 class SurveySubmission(BaseModel):
     user_id: str
@@ -1074,27 +1114,151 @@ _analyze_semaphore: asyncio.Semaphore = asyncio.Semaphore(
 _submit_gate = asyncio.Lock()
 _submitting_sessions: set = set()
 
+# Quiz “active now” visibility across hosts (local vs deployed): heartbeats under ``quiz_presence`` in RTDB.
+_QUIZ_PRESENCE_TTL_SEC = int(os.getenv("QUIZ_PRESENCE_TTL_SECONDS", "180"))
+_QUIZ_HEARTBEAT_MIN_INTERVAL_SEC = float(os.getenv("QUIZ_HEARTBEAT_MIN_INTERVAL_SEC", "45"))
+_heartbeat_rate_limit: Dict[str, float] = {}
 
-def get_active_quiz_session_counts(quiz_id: str) -> Dict[str, Any]:
-    """Count students currently in an in-progress session for this quiz (this process only).
 
-    Sessions are held in memory until submit; multi-worker or restarted servers only see
-    their own processes' sessions.
-    """
+def _session_belongs_to_quiz_log(log: Any, sid: Any, target_lower: str) -> bool:
+    """Same rules as historical get_active_quiz_session_counts matching."""
+    prefix8 = target_lower[:8] if len(target_lower) >= 8 else target_lower
+    expected_assignment = f"quiz_{prefix8}"
+    session_id_needle = f"_quiz_{prefix8}_"
+    lid = getattr(log, "quiz_id", None)
+    match = lid is not None and str(lid).strip().lower() == target_lower
+    if not match:
+        aid = str(getattr(log, "assignment_id", "") or "").strip().lower()
+        if aid == expected_assignment:
+            match = True
+        elif isinstance(sid, str) and session_id_needle in sid.lower():
+            match = True
+    return match
+
+
+def _memory_quiz_session_map(quiz_id: str) -> Dict[str, int]:
+    """session_id -> current_problem_index for this quiz on this server process."""
     target = str(quiz_id).strip().lower()
-    by_idx: Dict[int, int] = {}
-    total = 0
-    for _sid, log in active_sessions.items():
-        lid = getattr(log, "quiz_id", None)
-        if lid is None or str(lid).strip().lower() != target:
+    if not target:
+        return {}
+    out: Dict[str, int] = {}
+    for sid, log in active_sessions.items():
+        if not _session_belongs_to_quiz_log(log, sid, target):
             continue
-        total += 1
         try:
             pi = int(getattr(log, "current_problem_index", 0) or 0)
         except (TypeError, ValueError):
             pi = 0
+        out[str(sid)] = pi
+    return out
+
+
+def _parse_presence_iso(ts: Any) -> Optional[datetime]:
+    if not ts or not isinstance(ts, str):
+        return None
+    s = ts.strip()
+    if not s:
+        return None
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _firebase_presence_session_map(quiz_id: str) -> Dict[str, int]:
+    """Fresh heartbeats from Firebase (any app instance / any region using the same project)."""
+    if not firebase_db:
+        return {}
+    qkey = _sanitize_firebase_key_segment(str(quiz_id).strip())[:96]
+    try:
+        data = firebase_db.child("quiz_presence").child(qkey).get()
+    except Exception as e:
+        logger.warning("quiz_presence read failed: %s", e)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    cutoff = datetime.now(timezone.utc).timestamp() - float(_QUIZ_PRESENCE_TTL_SEC)
+    out: Dict[str, int] = {}
+    for _k, v in data.items():
+        if not isinstance(v, dict):
+            continue
+        sid = v.get("session_id")
+        if not sid or not isinstance(sid, str):
+            continue
+        at = _parse_presence_iso(v.get("at") or v.get("last_seen"))
+        if at is None or at.timestamp() < cutoff:
+            continue
+        try:
+            _pi_raw = v.get("problem_index") if v.get("problem_index") is not None else (v.get("current_problem_index") or 0)
+            pi = int(_pi_raw) if _pi_raw is not None else 0
+        except (TypeError, ValueError):
+            pi = 0
+        out[sid.strip()] = pi
+    return out
+
+
+def _quiz_presence_doc_key(session_id: str) -> str:
+    return hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:32]
+
+
+def _heartbeat_rate_allow(session_id: str) -> bool:
+    """Throttle writes per session so heartbeats cannot stall the API or Firebase."""
+    now = time.time()
+    last = _heartbeat_rate_limit.get(session_id, 0.0)
+    if now - last < _QUIZ_HEARTBEAT_MIN_INTERVAL_SEC:
+        return False
+    _heartbeat_rate_limit[session_id] = now
+    if len(_heartbeat_rate_limit) > 8000:
+        _heartbeat_rate_limit.clear()
+    return True
+
+
+def write_quiz_presence_heartbeat(quiz_id: str, session_id: str, user_id: str, problem_index: int) -> bool:
+    """Persist one presence row under ``quiz_presence/{quiz}/…`` (caller throttles frequency)."""
+    if not firebase_db:
+        return False
+    qid = str(quiz_id).strip()
+    sid = str(session_id).strip()
+    if len(qid) < 8 or not sid:
+        return False
+    needle = f"_quiz_{qid[:8].lower()}_"
+    if needle not in sid.lower():
+        return False
+    doc_key = _quiz_presence_doc_key(sid)
+    qkey = _sanitize_firebase_key_segment(qid)[:96]
+    ref = firebase_db.child("quiz_presence").child(qkey).child(doc_key)
+    payload = {
+        "session_id": sid,
+        "user_id": str(user_id).strip(),
+        "quiz_id": qid,
+        "problem_index": int(problem_index or 0),
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+    return firebase_rtdb_set_with_retry(ref, payload, max_attempts=2)
+
+
+def get_active_quiz_session_counts(quiz_id: str) -> Dict[str, Any]:
+    """Count students in-session for this quiz: **in-memory on this server** ∪ **Firebase presence**.
+
+    Firebase heartbeats (see ``POST /quiz/heartbeat``) let the instructor see the same “active”
+    picture from localhost or the hosted site when both use the **same Firebase project**, without
+    requiring Redis for cross-process counts.
+    """
+    target = str(quiz_id).strip().lower()
+    if not target:
+        return {"total_active": 0, "by_problem_index": {}}
+    merged: Dict[str, int] = _memory_quiz_session_map(quiz_id)
+    for sid, pi in _firebase_presence_session_map(quiz_id).items():
+        merged[sid] = pi
+    by_idx: Dict[int, int] = {}
+    for _sid, pi in merged.items():
         by_idx[pi] = by_idx.get(pi, 0) + 1
-    return {"total_active": total, "by_problem_index": by_idx}
+    return {"total_active": len(merged), "by_problem_index": by_idx}
 
 
 def forget_active_sessions_for_quiz_user(quiz_id: str, user_id: str) -> int:
@@ -1151,9 +1315,17 @@ def save_session_to_local(session_log: SessionLog):
         
         log_file = logs_dir / f"{session_log.session_id}.json"
         with open(log_file, 'w', encoding='utf-8') as f:
-            json.dump(session_log.dict(), f, indent=2, default=str)
+            # Compact JSON — large survey answers make indented dumps slow and huge
+            json.dump(session_log.dict(), f, default=str, separators=(',', ':'))
     except Exception as e:
         logger.error(f"Failed to save session log locally: {e}")
+
+
+def _write_pre_post_survey_json_file(path: Path, file_data: Dict[str, Any]) -> None:
+    """Write pre/post survey backup JSON (compact; large open-ended answers)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(file_data, f, default=str, separators=(',', ':'))
 
 
 def save_full_submission_snapshot_json(
@@ -1231,32 +1403,6 @@ def write_firebase_sync_result_json(
         logger.error("write_firebase_sync_result_json failed: %s", e)
 
 
-async def _background_firebase_submit(
-    session_log_dict: Dict[str, Any],
-    suggestion_clicked: int,
-    compiler_clicked: int,
-    programming_language: str,
-    survey_data: Optional[Dict[str, Any]],
-    submission_id: str,
-) -> None:
-    """Runs after HTTP response; full user data already on disk in full_submissions + session_logs."""
-    try:
-        sl = SessionLog.model_validate(session_log_dict)
-        ok = await save_session_to_firebase(
-            sl, suggestion_clicked, compiler_clicked, programming_language, survey_data
-        )
-        write_firebase_sync_result_json(
-            submission_id, ok, None if ok else "save_session_to_firebase returned False"
-        )
-        if ok:
-            logger.info("Background Firebase submit OK for submission_id=%s", submission_id)
-        else:
-            logger.error("Background Firebase submit failed (returned False) for submission_id=%s", submission_id)
-    except Exception as e:
-        logger.exception("Background Firebase submit error for submission_id=%s", submission_id)
-        write_firebase_sync_result_json(submission_id, False, str(e))
-
-
 # ─── Firebase reliability: retries + incremental checkpoints ─────────────────
 _firebase_checkpoint_last_at: Dict[str, float] = {}
 CHECKPOINT_ACTIVITY_THROTTLE_SEC = float(os.getenv("FIREBASE_CHECKPOINT_ACTIVITY_SEC", "12"))
@@ -1292,17 +1438,13 @@ def _sanitize_firebase_key_segment(s: str) -> str:
 
 
 def append_periodic_survey_to_firebase(session_id: str, survey_data: Dict[str, Any]) -> bool:
-    """Append one periodic/final survey record under sessions/{id}/periodic_surveys."""
+    """Append one periodic/final survey under sessions/{id}/periodic_surveys (push; no read of full history)."""
     if not firebase_db:
         return False
     try:
-        session_ref = firebase_db.child("sessions").child(session_id)
-        existing = session_ref.child("periodic_surveys").get() or []
-        if not isinstance(existing, list):
-            existing = []
-        existing.append(survey_data)
-        per_ref = session_ref.child("periodic_surveys")
-        return firebase_rtdb_set_with_retry(per_ref, existing, max_attempts=3)
+        per_ref = firebase_db.child("sessions").child(session_id).child("periodic_surveys")
+        per_ref.push(survey_data)
+        return True
     except Exception as e:
         logger.error("append_periodic_survey_to_firebase failed: %s", e)
         return False
@@ -1491,7 +1633,7 @@ def checkpoint_session_to_firebase(
         return False
     sid = session_log.session_id
     now = time.time()
-    if not force and checkpoint_type in ("activity_batch", "periodic_survey_batch"):
+    if not force and checkpoint_type in ("activity_batch", "periodic_survey_batch", "survey_draft"):
         last = _firebase_checkpoint_last_at.get(sid, 0.0)
         if now - last < CHECKPOINT_ACTIVITY_THROTTLE_SEC:
             return True  # throttled — treat as OK
@@ -1509,7 +1651,7 @@ def checkpoint_session_to_firebase(
         # Under .../checkpoint so we do not overwrite sessions/{id}/periodic_surveys etc.
         ref = firebase_db.child("sessions").child(sid).child("checkpoint")
         ok = firebase_rtdb_set_with_retry(ref, payload, max_attempts=3)
-        if ok and checkpoint_type in ("activity_batch", "periodic_survey_batch"):
+        if ok and checkpoint_type in ("activity_batch", "periodic_survey_batch", "survey_draft"):
             _firebase_checkpoint_last_at[sid] = time.time()
         elif ok:
             _firebase_checkpoint_last_at[sid] = time.time()
@@ -2746,7 +2888,7 @@ class SubmitResponse(BaseModel):
     message: str
     submission_id: str
     timestamp: str
-    firebase_status: str  # success | pending | failed | not_attempted | skipped
+    firebase_status: str  # success | failed | not_attempted | skipped
     logout_required: bool = True
 
 @app.post("/submit", response_model=SubmitResponse)
@@ -2851,11 +2993,34 @@ async def submit_code(request: SubmitRequest):
         # Log submission details
         logger.info(f"CODE SUBMISSION - User: {user_id}, Assignment: {assignment_key}, Session: {session_id}")
 
-        # 1) Durable local copies FIRST (session_logs + full JSON snapshot), then optional background Firebase
+        # 1) Durable local session file first, then sync to Firebase (awaited) so code + activity_log + surveys
+        #    are in RTDB before we return — avoids losing cloud data if the client navigates away immediately.
         firebase_status = "not_attempted"
         if session_log:
             save_session_to_local(session_log)
-            sync_label = "pending" if firebase_db else "not_attempted"
+            if firebase_db:
+                try:
+                    ok = await save_session_to_firebase(
+                        session_log,
+                        suggestion_clicked,
+                        compiler_clicked,
+                        programming_language,
+                        request.survey_data,
+                    )
+                    firebase_status = "success" if ok else "failed"
+                    write_firebase_sync_result_json(
+                        submission_id,
+                        ok,
+                        None if ok else "save_session_to_firebase returned False",
+                    )
+                except Exception as fb_submit_err:
+                    logger.exception("Firebase submit failed for submission_id=%s", submission_id)
+                    firebase_status = "failed"
+                    write_firebase_sync_result_json(submission_id, False, str(fb_submit_err))
+            else:
+                firebase_status = "not_attempted"
+
+            sync_label = firebase_status
             save_full_submission_snapshot_json(
                 submission_id=submission_id,
                 user_id=user_id,
@@ -2883,20 +3048,6 @@ async def submit_code(request: SubmitRequest):
                     logger.warning("assignment_resume_write completed=True failed: %s", _rw_err)
             if session_id and session_id in active_sessions:
                 del active_sessions[session_id]
-            if firebase_db:
-                firebase_status = "pending"
-                asyncio.create_task(
-                    _background_firebase_submit(
-                        session_log.dict(),
-                        suggestion_clicked,
-                        compiler_clicked,
-                        programming_language,
-                        request.survey_data,
-                        submission_id,
-                    )
-                )
-            else:
-                firebase_status = "not_attempted"
         else:
             save_full_submission_snapshot_json(
                 submission_id=submission_id,
@@ -2987,10 +3138,14 @@ async def submit_code(request: SubmitRequest):
             logger.error(f"Failed to send email notification: {email_error}")
             # Don't fail the submission if email fails
 
-        if firebase_status == "pending":
+        if firebase_status == "success":
             submit_msg = (
-                "Code submitted successfully! Your work is saved on the server (JSON backup); "
-                "the cloud database is syncing in the background — you can continue."
+                "Code submitted successfully! Your code, activity log, and surveys are saved to the cloud database."
+            )
+        elif firebase_status == "failed":
+            submit_msg = (
+                "Code submitted successfully! Your work is saved on this server (JSON backup), "
+                "but the cloud database sync failed — contact the researcher if you need confirmation."
             )
         elif firebase_status == "not_attempted":
             submit_msg = (
@@ -3130,6 +3285,21 @@ async def debug_firebase():
         }
     }
 
+@app.post("/_debug/agent-ingest")
+async def debug_agent_ingest(payload: dict = Body(...)):
+    """Browser → same-origin → append NDJSON for Cursor debug (session ef2d3c)."""
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        data = {}
+    _agent_debug_log(
+        str(payload.get("hypothesisId") or "?"),
+        str(payload.get("location") or ""),
+        str(payload.get("message") or ""),
+        data,
+    )
+    return {"ok": True}
+
+
 @app.get("/debug/test-write")
 async def test_firebase_write():
     """Test writing to Firebase"""
@@ -3212,6 +3382,8 @@ class ActivityLogRequest(BaseModel):
     # Required when the server has no session (e.g. after restart) so we never store user_id=unknown
     user_id: Optional[str] = None
     assignment_key: Optional[str] = None
+    # Instructor Firebase quiz id (from /quiz/join) — keeps active-session counts accurate after reload
+    quiz_id: Optional[str] = None
 
 
 class EditorCheckpointRequest(BaseModel):
@@ -3331,6 +3503,7 @@ async def log_activities(request: ActivityLogRequest):
                 session_id,
                 uid,
             )
+            qid_stub = (request.quiz_id or "").strip() or None
             active_sessions[session_id] = SessionLog(
                 user_id=uid,
                 assignment_id=aid,
@@ -3338,7 +3511,8 @@ async def log_activities(request: ActivityLogRequest):
                 condition=0,
                 code_start_timestamp=datetime.now().isoformat(),
                 activity_log=[],
-                activity_summary=ActivitySummary()
+                activity_summary=ActivitySummary(),
+                quiz_id=qid_stub,
             )
         
         session_log = active_sessions[session_id]
@@ -3496,6 +3670,11 @@ async def log_activities(request: ActivityLogRequest):
     
 
 
+def _write_survey_json_file(path: Path, payload: Dict[str, Any]) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, default=str)
+
+
 @app.post("/submit-survey")
 async def submit_survey(request: SurveySubmission):
     """Submit survey responses with AI history context"""
@@ -3509,14 +3688,21 @@ async def submit_survey(request: SurveySubmission):
         # Enhance request with AI history context if not provided
         if not request.ai_history_context and session_log:
             request.ai_history_context = extract_ai_history_context(session_log)
+
+        ai_ctx = compact_survey_ai_history(
+            request.ai_history_context,
+            max_entries=int(os.getenv("SURVEY_AI_HISTORY_MAX_ENTRIES", "24")),
+            max_chars=int(os.getenv("SURVEY_AI_HISTORY_MAX_CHARS", "6000")),
+        )
         
         # Save survey data locally with AI history context
         surveys_dir = Path(os.getenv("SUBMISSIONS_DIR", "submissions")) / "surveys"
         surveys_dir.mkdir(exist_ok=True)
         
         survey_file = surveys_dir / f"{request.session_id}_{request.survey_type}_{request.analysis_count}.json"
-        with open(survey_file, 'w', encoding='utf-8') as f:
-            json.dump(request.dict(), f, indent=2, default=str)
+        disk_payload = request.dict()
+        disk_payload["ai_history_context"] = ai_ctx
+        await asyncio.to_thread(_write_survey_json_file, survey_file, disk_payload)
         
         logger.info(f"Survey with AI history saved: {request.user_id} - {request.survey_type} survey at analysis {request.analysis_count}")
 
@@ -3530,8 +3716,8 @@ async def submit_survey(request: SurveySubmission):
                 "assignment_key": request.assignment_key,
                 "responses": [r.dict() for r in request.responses],
             }
-            if request.ai_history_context:
-                fb_payload["ai_history_context"] = request.ai_history_context
+            if ai_ctx:
+                fb_payload["ai_history_context"] = ai_ctx
             if await asyncio.to_thread(append_periodic_survey_to_firebase, request.session_id, fb_payload):
                 logger.info("Periodic/final survey appended to Firebase for session %s", request.session_id)
             if request.session_id in active_sessions:
@@ -3654,6 +3840,23 @@ class PrePostSurveySubmission(BaseModel):
     completion_time_seconds: Optional[float] = None
 
 
+class SurveyDraftIn(BaseModel):
+    """Autosave partial pre/post answers while the user is still on the survey page."""
+
+    session_id: str
+    user_id: str
+    survey_type: str  # 'pre' | 'post'
+    problem_index: int = 0
+    answers: Dict[str, Any] = Field(default_factory=dict)
+
+
+class QuizProgressMeta(BaseModel):
+    """Ordered steps (pre / coding / post per problem) for quiz progress UI."""
+
+    steps: List[Dict[str, Any]] = Field(default_factory=list)
+    current_step_index: int = 0
+
+
 class SurveyStatusResponse(BaseModel):
     pre_survey_status: str
     post_survey_status: str
@@ -3664,6 +3867,10 @@ class SurveyStatusResponse(BaseModel):
     # question_id -> answer so the client can rehydrate the form when returning from the IDE
     pre_survey_answers: Optional[Dict[str, Any]] = None
     post_survey_answers: Optional[Dict[str, Any]] = None
+    # Quiz progress (authoritative server state; keeps survey page in sync with session_log)
+    current_problem_index: Optional[int] = None
+    total_problems: Optional[int] = None
+    quiz_progress: Optional[QuizProgressMeta] = None
 
 
 @app.get("/survey-config/{assignment_key}")
@@ -3794,8 +4001,180 @@ def _survey_answers_map_from_stored_package(pkg: Optional[Any]) -> Optional[Dict
     return out if out else None
 
 
+@app.post("/survey-draft")
+async def save_survey_draft(body: SurveyDraftIn):
+    """Persist partial pre/post survey answers so progress survives tab close or device change."""
+    if body.survey_type not in ("pre", "post"):
+        raise HTTPException(status_code=400, detail="survey_type must be pre or post")
+
+    session_log = await ensure_session_log_loaded(body.session_id)
+    if session_log is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session_log.user_id != body.user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    active_sessions[body.session_id] = session_log
+    pi = str(int(body.problem_index))
+
+    cur_pi = int(session_log.current_problem_index or 0)
+    prob_match = int(body.problem_index) == cur_pi
+    if body.survey_type == "pre":
+        merged = dict(session_log.pre_survey_draft_by_problem or {})
+        merged[pi] = dict(body.answers)
+        session_log.pre_survey_draft_by_problem = merged
+        if prob_match and session_log.pre_survey_status == "not_started":
+            session_log.pre_survey_status = "in_progress"
+    else:
+        merged = dict(session_log.post_survey_draft_by_problem or {})
+        merged[pi] = dict(body.answers)
+        session_log.post_survey_draft_by_problem = merged
+        if prob_match and session_log.post_survey_status == "not_started":
+            session_log.post_survey_status = "in_progress"
+
+    await asyncio.gather(
+        asyncio.to_thread(save_session_to_local, session_log),
+        asyncio.to_thread(
+            lambda: checkpoint_session_to_firebase(session_log, "survey_draft", force=False)
+        ),
+    )
+    return {"ok": True}
+
+
+def _quiz_survey_done_for_problem(session_log: SessionLog, pi: int, kind: str) -> bool:
+    """Whether pre/post for problem index ``pi`` is completed (per-problem map + legacy global for current problem)."""
+    key = str(pi)
+    if kind == "pre":
+        m = session_log.pre_survey_done_by_problem
+        if m and key in m:
+            return bool(m[key])
+    else:
+        m = session_log.post_survey_done_by_problem
+        if m and key in m:
+            return bool(m[key])
+    if int(session_log.current_problem_index or 0) != pi:
+        return False
+    st = session_log.pre_survey_status if kind == "pre" else session_log.post_survey_status
+    return st in ("completed", "not_required", "skipped")
+
+
+def _quiz_effective_survey_status(
+    session_log: SessionLog,
+    pi: int,
+    kind: str,
+    enabled: bool,
+) -> str:
+    """Per-problem status string for instructor quizzes (not_required | not_started | in_progress | completed)."""
+    if not enabled:
+        return "not_required"
+    if _quiz_survey_done_for_problem(session_log, pi, kind):
+        return "completed"
+    raw_cur = int(session_log.current_problem_index or 0)
+    tp = int(session_log.total_problems or 0)
+    if session_log.quiz_id and tp > 0:
+        cur = max(0, min(raw_cur, tp - 1))
+    else:
+        cur = raw_cur
+    if cur != pi:
+        return "not_started"
+    draft_map = (
+        session_log.pre_survey_draft_by_problem if kind == "pre" else session_log.post_survey_draft_by_problem
+    ) or {}
+    if draft_map.get(str(pi)):
+        return "in_progress"
+    st = session_log.pre_survey_status if kind == "pre" else session_log.post_survey_status
+    if st == "in_progress":
+        return "in_progress"
+    return "not_started"
+
+
+def _compute_quiz_progress_steps(
+    session_log: SessionLog,
+    problems: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Build linear steps for UI and index of the current (first incomplete) step."""
+    steps: List[Dict[str, Any]] = []
+    n = len(problems)
+    pi_server = int(session_log.current_problem_index or 0)
+    if n > 0:
+        pi_server = max(0, min(pi_server, n - 1))
+
+    for i in range(n):
+        prob = problems[i]
+        has_pre = bool(prob.get("pre_survey_enabled", False) and prob.get("pre_survey"))
+        has_post = bool(prob.get("post_survey_enabled", False) and prob.get("post_survey"))
+        title = (prob.get("title") or "").strip() or f"Problem {i + 1}"
+
+        if has_pre:
+            steps.append(
+                {
+                    "kind": "pre",
+                    "problem_index": i,
+                    "label": f"Pre-study · Problem {i + 1}",
+                    "short": f"Pre {i + 1}",
+                }
+            )
+        steps.append(
+            {
+                "kind": "coding",
+                "problem_index": i,
+                "label": f"Coding · {title}" if n > 1 else "Coding",
+                "short": f"Problem {i + 1}",
+            }
+        )
+        if has_post:
+            steps.append(
+                {
+                    "kind": "post",
+                    "problem_index": i,
+                    "label": f"Post-study · Problem {i + 1}",
+                    "short": f"Post {i + 1}",
+                }
+            )
+
+    if not steps:
+        return [], 0
+
+    def step_completed(step: Dict[str, Any]) -> bool:
+        i = int(step["problem_index"])
+        k = str(step["kind"])
+        prob_i = problems[i] if i < len(problems) else {}
+        has_pre = bool(prob_i.get("pre_survey_enabled", False) and prob_i.get("pre_survey"))
+        has_post = bool(prob_i.get("post_survey_enabled", False) and prob_i.get("post_survey"))
+
+        if k == "pre":
+            if not has_pre:
+                return True
+            return _quiz_survey_done_for_problem(session_log, i, "pre")
+
+        if k == "post":
+            if not has_post:
+                return True
+            return _quiz_survey_done_for_problem(session_log, i, "post")
+
+        # coding
+        if i < pi_server:
+            return True
+        if i > pi_server:
+            return False  # future problem — not reached yet
+        # i == pi_server — same problem as server
+        if not has_post:
+            return False
+        pst = _quiz_effective_survey_status(session_log, i, "post", has_post)
+        return pst != "not_started"
+
+    current_idx = 0
+    for idx, step in enumerate(steps):
+        if not step_completed(step):
+            current_idx = idx
+            break
+    else:
+        current_idx = max(0, len(steps) - 1)
+
+    return steps, current_idx
+
+
 @app.get("/survey-status/{session_id}")
-async def get_survey_status(session_id: str):
+async def get_survey_status(session_id: str, response: Response, problem_index: int = 0):
     """
     Get current survey completion status for a session
     """
@@ -3803,24 +4182,71 @@ async def get_survey_status(session_id: str):
         session_log = await ensure_session_log_loaded(session_id)
         if session_log is None:
             raise HTTPException(status_code=404, detail="Session not found")
-        
-        # Check if surveys are required for this assignment
+
+        # Instructor quizzes: never trust ?problem_index= from the client — it can be stale and
+        # would apply the wrong problem's pre/post (e.g. show "Problem 2" post after problem 1).
+        merge_pi = int(session_log.current_problem_index or 0) if session_log.quiz_id else int(problem_index)
+        pi_str = str(merge_pi)
+
+        pre_ans = _survey_answers_map_from_stored_package(session_log.pre_survey_responses)
+        post_ans = _survey_answers_map_from_stored_package(session_log.post_survey_responses)
+        d_pre = (session_log.pre_survey_draft_by_problem or {}).get(pi_str)
+        if d_pre:
+            pre_ans = {**(pre_ans or {}), **d_pre}
+        d_post = (session_log.post_survey_draft_by_problem or {}).get(pi_str)
+        if d_post:
+            post_ans = {**(post_ans or {}), **d_post}
+
+        # Instructor quiz: per-problem survey requirements from Firebase (not surveys/*.json)
+        if session_log.quiz_id and firebase_db:
+            quiz_data = fb_dict(db.reference(f"quizzes/{session_log.quiz_id}").get())
+            if quiz_data:
+                quiz_data = normalize_quiz_data(quiz_data)
+                problems = quiz_data.get("problems", []) or []
+                n = len(problems)
+                pi = int(session_log.current_problem_index or 0)
+                if n > 0:
+                    pi = max(0, min(pi, n - 1))
+                prob = problems[pi] if problems else {}
+                has_pre_req = bool(prob.get("pre_survey_enabled", False) and prob.get("pre_survey"))
+                has_post_req = bool(prob.get("post_survey_enabled", False) and prob.get("post_survey"))
+                pre_status = _quiz_effective_survey_status(session_log, pi, "pre", has_pre_req)
+                post_status = _quiz_effective_survey_status(session_log, pi, "post", has_post_req)
+                can_access_ide = (not has_pre_req) or pre_status in ("completed", "not_required")
+                can_submit_code = (not has_post_req) or post_status in ("completed", "not_required")
+                qp_steps, qp_idx = _compute_quiz_progress_steps(session_log, problems)
+                response.headers["Cache-Control"] = "no-store, max-age=0"
+                return SurveyStatusResponse(
+                    pre_survey_status=pre_status,
+                    post_survey_status=post_status,
+                    pre_survey_timestamp=session_log.pre_survey_timestamp,
+                    post_survey_timestamp=session_log.post_survey_timestamp,
+                    can_access_ide=can_access_ide,
+                    can_submit_code=can_submit_code,
+                    pre_survey_answers=pre_ans,
+                    post_survey_answers=post_ans,
+                    current_problem_index=int(session_log.current_problem_index or 0),
+                    total_problems=int(session_log.total_problems or n or 1),
+                    quiz_progress=QuizProgressMeta(steps=qp_steps, current_step_index=qp_idx),
+                )
+
+        # File-based assignment survey config
         base_key = get_assignment_base_key(session_log.assignment_id)
         survey_file = Path("surveys") / f"{base_key}.json"
-        
+
         has_surveys = survey_file.exists()
         pre_required = False
         post_required = False
-        
+
         if has_surveys:
             try:
-                with open(survey_file, 'r', encoding='utf-8') as f:
+                with open(survey_file, "r", encoding="utf-8") as f:
                     survey_config = json.load(f)
-                    pre_required = len(survey_config.get('pre_survey', {}).get('questions', [])) > 0
-                    post_required = len(survey_config.get('post_survey', {}).get('questions', [])) > 0
+                    pre_required = len(survey_config.get("pre_survey", {}).get("questions", [])) > 0
+                    post_required = len(survey_config.get("post_survey", {}).get("questions", [])) > 0
             except Exception as e:
                 logger.error(f"Error loading survey config: {e}")
-        
+
         # Determine access permissions (status values are stored as strings)
         can_access_ide = (
             not pre_required
@@ -3832,9 +4258,7 @@ async def get_survey_status(session_id: str):
             or session_log.post_survey_status in ("completed", "not_required")
         )
 
-        pre_ans = _survey_answers_map_from_stored_package(session_log.pre_survey_responses)
-        post_ans = _survey_answers_map_from_stored_package(session_log.post_survey_responses)
-        
+        response.headers["Cache-Control"] = "no-store, max-age=0"
         return SurveyStatusResponse(
             pre_survey_status=session_log.pre_survey_status,
             post_survey_status=session_log.post_survey_status,
@@ -3844,8 +4268,10 @@ async def get_survey_status(session_id: str):
             can_submit_code=can_submit_code,
             pre_survey_answers=pre_ans,
             post_survey_answers=post_ans,
+            current_problem_index=int(session_log.current_problem_index or 0),
+            total_problems=int(session_log.total_problems or 1),
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -3937,10 +4363,26 @@ async def update_survey_status(
 async def submit_pre_post_survey(request: PrePostSurveySubmission):
     """Submit pre or post survey with complete question data and responses"""
     try:
-        # Update session log with complete survey data
+        _agent_debug_log(
+            "H3",
+            "main.py:submit_pre_post_survey:entry",
+            "pre/post submit",
+            {
+                "survey_type": request.survey_type,
+                "in_active_sessions": request.session_id in active_sessions,
+                "session_id_suffix": (request.session_id or "")[-12:],
+            },
+        )
+        # Update session log with complete survey data (load from disk/Firebase if not in memory)
+        session_log: Optional[SessionLog] = None
         if request.session_id in active_sessions:
             session_log = active_sessions[request.session_id]
-            
+        else:
+            session_log = await ensure_session_log_loaded(request.session_id)
+            if session_log is not None:
+                active_sessions[request.session_id] = session_log
+
+        if session_log is not None:
             # Create comprehensive survey data package
             survey_package = {
                 'survey_title': request.survey_title,
@@ -3982,8 +4424,12 @@ async def submit_pre_post_survey(request: PrePostSurveySubmission):
             if request.survey_type == 'post':
                 survey_package['ai_context'] = {
                     'total_analyses': len(session_log.ai_guess_history),
-                    'suggestion_clicks': len([entry for entry in session_log.activity_log if entry.activity_type == 'suggestion_interaction']),
-                    'code_executions': len([entry for entry in session_log.activity_log if entry.activity_type == 'code_execution']),
+                    'suggestion_clicks': sum(
+                        1 for entry in session_log.activity_log if entry.activity_type == 'suggestion_interaction'
+                    ),
+                    'code_executions': sum(
+                        1 for entry in session_log.activity_log if entry.activity_type == 'code_execution'
+                    ),
                     'ai_guess_history_summary': [
                         {
                             'timestamp': entry.timestamp,
@@ -4001,26 +4447,36 @@ async def submit_pre_post_survey(request: PrePostSurveySubmission):
                 session_log.post_survey_status = SurveyStatus.COMPLETED
                 session_log.post_survey_timestamp = request.timestamp
                 session_log.post_survey_responses = survey_package
-            
-            # Save updated session
-            save_session_to_local(session_log)
-            try:
-                await asyncio.to_thread(
-                    lambda: checkpoint_session_to_firebase(
-                        session_log, f"survey_{request.survey_type}_complete", force=True
-                    )
-                )
-            except Exception as fb_e:
-                logger.warning("Firebase checkpoint after pre/post survey failed: %s", fb_e)
-        
-        # Save survey data to separate file (backup)
+
+            # Multi-problem quiz: record completion per problem so gates stay correct after advancing
+            if session_log.quiz_id:
+                _qk = str(int(session_log.current_problem_index or 0))
+                if request.survey_type == "pre":
+                    _d = dict(session_log.pre_survey_done_by_problem or {})
+                    _d[_qk] = True
+                    session_log.pre_survey_done_by_problem = _d
+                else:
+                    _d = dict(session_log.post_survey_done_by_problem or {})
+                    _d[_qk] = True
+                    session_log.post_survey_done_by_problem = _d
+
+            # Clear server autosave draft for this problem — full submission is authoritative
+            _dpi = str(int(session_log.current_problem_index or 0))
+            if request.survey_type == "pre":
+                if session_log.pre_survey_draft_by_problem and _dpi in session_log.pre_survey_draft_by_problem:
+                    _m = dict(session_log.pre_survey_draft_by_problem)
+                    del _m[_dpi]
+                    session_log.pre_survey_draft_by_problem = _m if _m else None
+            else:
+                if session_log.post_survey_draft_by_problem and _dpi in session_log.post_survey_draft_by_problem:
+                    _m = dict(session_log.post_survey_draft_by_problem)
+                    del _m[_dpi]
+                    session_log.post_survey_draft_by_problem = _m if _m else None
+
         surveys_dir = Path(os.getenv("SUBMISSIONS_DIR", "submissions")) / "pre_post_surveys"
-        surveys_dir.mkdir(exist_ok=True, parents=True)
-        
         session_id_short = request.session_id.split('_')[-1][:8] if '_' in request.session_id else request.session_id[:8]
         survey_file = surveys_dir / f"{request.user_id}_{request.assignment_key}_{session_id_short}_{request.survey_type}.json"
-        
-        # Prepare complete data for file storage
+
         file_data = {
             'user_id': request.user_id,
             'session_id': request.session_id,
@@ -4035,9 +4491,19 @@ async def submit_pre_post_survey(request: PrePostSurveySubmission):
             'questions': [q.dict() for q in request.questions],
             'responses': [r.dict() for r in request.responses]
         }
-        
-        with open(survey_file, 'w', encoding='utf-8') as f:
-            json.dump(file_data, f, indent=2, default=str)
+
+        # Run disk + Firebase work in parallel (large open-ended answers: JSON + RTDB are the bottleneck)
+        if session_log is not None:
+            chk_type = f"survey_{request.survey_type}_complete"
+            await asyncio.gather(
+                asyncio.to_thread(save_session_to_local, session_log),
+                asyncio.to_thread(_write_pre_post_survey_json_file, survey_file, file_data),
+                asyncio.to_thread(
+                    lambda: checkpoint_session_to_firebase(session_log, chk_type, force=True)
+                ),
+            )
+        else:
+            await asyncio.to_thread(_write_pre_post_survey_json_file, survey_file, file_data)
 
         if request.session_id not in active_sessions:
             try:
@@ -4987,7 +5453,59 @@ async def debug_sidebar_config():
         "split_prefixes": [p for p in processed.split(",") if p] if processed else [],
         "environment_loaded": bool(os.getenv("OPENAI_API_KEY")),
     }
-    
+
+
+
+@app.get("/debug/quiz-survey-flags/{quiz_id}")
+async def debug_quiz_survey_flags(quiz_id: str, session_id: Optional[str] = None):
+    """Diagnostic: show per-problem survey flags after normalization, and session state if provided."""
+    if not firebase_db:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    quiz_data = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
+    if not quiz_data:
+        raise HTTPException(status_code=404, detail="Quiz not found")
+
+    normalized = normalize_quiz_data(dict(quiz_data))
+    problems = normalized.get("problems", [])
+
+    per_problem = []
+    for i, prob in enumerate(problems):
+        per_problem.append({
+            "index": i,
+            "title": (prob.get("title") or "").strip()[:60],
+            "_has_surveys": prob.get("_has_surveys"),
+            "pre_survey_enabled": prob.get("pre_survey_enabled", False),
+            "post_survey_enabled": prob.get("post_survey_enabled", False),
+            "pre_survey_count": len(prob.get("pre_survey") or []),
+            "post_survey_count": len(prob.get("post_survey") or []),
+            "recurrent_survey_enabled": prob.get("recurrent_survey_enabled", False),
+            "recurrent_survey_count": len(prob.get("recurrent_survey") or []),
+        })
+
+    result: Dict[str, Any] = {
+        "quiz_id": quiz_id,
+        "quiz_level_pre_survey_count": len(normalized.get("pre_survey") or []),
+        "quiz_level_post_survey_count": len(normalized.get("post_survey") or []),
+        "total_problems": len(problems),
+        "per_problem": per_problem,
+    }
+
+    if session_id:
+        sl = active_sessions.get(session_id) or load_session_log_from_disk(session_id)
+        if sl:
+            result["session"] = {
+                "current_problem_index": sl.current_problem_index,
+                "total_problems": sl.total_problems,
+                "pre_survey_status": sl.pre_survey_status,
+                "post_survey_status": sl.post_survey_status,
+                "pre_survey_done_by_problem": sl.pre_survey_done_by_problem,
+                "post_survey_done_by_problem": sl.post_survey_done_by_problem,
+            }
+
+    return result
+
+
 # ─── Quiz data helpers ──────────────────────────────────────────────────────
 
 def normalize_quiz_data(quiz_data: dict) -> dict:
@@ -5116,8 +5634,8 @@ def build_quiz_join_response(
 
     has_pre_cfg = prob.get("pre_survey_enabled", False) and bool(prob.get("pre_survey"))
     has_post_cfg = prob.get("post_survey_enabled", False) and bool(prob.get("post_survey"))
-    _pre_done = session_log.pre_survey_status in ("completed", "not_required")
-    _post_done = session_log.post_survey_status in ("completed", "not_required")
+    _pre_done = _quiz_survey_done_for_problem(session_log, problem_idx, "pre")
+    _post_done = _quiz_survey_done_for_problem(session_log, problem_idx, "post")
     periodic_enabled = prob.get("recurrent_survey_enabled", False) and bool(prob.get("recurrent_survey"))
 
     return {
@@ -5311,6 +5829,36 @@ async def student_quiz_join(request: Request):
     )
 
 
+class QuizHeartbeatRequest(BaseModel):
+    """Client pings so instructor “active” counts work across localhost vs hosted (same Firebase project)."""
+
+    session_id: str
+    user_id: str
+    quiz_id: str
+    current_problem_index: int = 0
+
+
+@app.post("/quiz/heartbeat")
+async def quiz_session_heartbeat(hb: QuizHeartbeatRequest):
+    """Throttled presence write to RTDB; merged into :func:`get_active_quiz_session_counts` reads."""
+    if not firebase_db:
+        return {"ok": True, "recorded": False, "reason": "no_firebase"}
+    sid = hb.session_id.strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="session_id required")
+    uid = _validated_participant_user_id(hb.user_id)
+    if not _heartbeat_rate_allow(sid):
+        return {"ok": True, "recorded": False, "reason": "rate_limited"}
+    ok = await asyncio.to_thread(
+        write_quiz_presence_heartbeat,
+        hb.quiz_id,
+        sid,
+        uid,
+        int(hb.current_problem_index or 0),
+    )
+    return {"ok": True, "recorded": bool(ok)}
+
+
 @app.post("/quiz/next-problem")
 async def quiz_next_problem(request: Request):
     """Advance to the next problem in a multi-problem quiz."""
@@ -5343,6 +5891,65 @@ async def quiz_next_problem(request: Request):
 
     session_log = active_sessions[session_id]
 
+    _agent_debug_log(
+        "H2",
+        "main.py:quiz_next_problem:before_advance",
+        "state before advance",
+        {
+            "current_problem_index": session_log.current_problem_index,
+            "total_problems": session_log.total_problems,
+            "session_id_suffix": (session_id or "")[-12:],
+        },
+    )
+
+    # Idempotency guard: if client tells us which problem it thinks it's on,
+    # and the server already advanced past that, return current state without re-advancing.
+    client_problem_index = body.get("current_problem_index")
+    if client_problem_index is not None and int(client_problem_index) < session_log.current_problem_index:
+        idx = session_log.current_problem_index
+        logger.info("quiz/next-problem: idempotent hit — client on %s, server already on %s", client_problem_index, idx)
+        if idx >= session_log.total_problems:
+            return {"status": "complete", "message": "All problems completed"}
+        # Return current problem info without re-advancing
+        if not session_log.quiz_id:
+            raise HTTPException(status_code=400, detail="No quiz ID in session")
+        quiz_data = fb_dict(db.reference(f"quizzes/{session_log.quiz_id}").get())
+        if not quiz_data:
+            raise HTTPException(status_code=404, detail="Quiz not found")
+        quiz_data = normalize_quiz_data(quiz_data)
+        problems = quiz_data.get("problems", [])
+        if idx >= len(problems):
+            return {"status": "complete", "message": "All problems completed"}
+        problem = problems[idx]
+        completed_problem = problems[idx - 1] if idx > 0 else {}
+        completed_problem_title = (completed_problem.get("title") or "").strip() or f"Problem {idx}"
+        quiz_starter = problem.get("starter_code", {})
+        lang_starter = quiz_starter.get(programming_language) if quiz_starter else None
+        starter_files = None
+        starter_code = None
+        if isinstance(lang_starter, list) and lang_starter:
+            starter_files = lang_starter
+            starter_code = lang_starter[0].get("content", "") if lang_starter else ""
+        elif isinstance(lang_starter, str) and lang_starter:
+            starter_code = lang_starter
+        else:
+            starter_code = ""
+        return {
+            "status": "next",
+            "problem_index": idx,
+            "total_problems": session_log.total_problems,
+            "completed_problem_title": completed_problem_title,
+            "problem_description": problem.get("problem_statement", "") if session_log.condition == 1 else None,
+            "constraints": problem.get("constraints", ""),
+            "starter_code": starter_code,
+            "starter_files": starter_files,
+            "has_pre_survey": problem.get("pre_survey_enabled", False) and bool(problem.get("pre_survey")),
+            "has_post_survey": problem.get("post_survey_enabled", False) and bool(problem.get("post_survey")),
+            "periodic_survey_enabled": problem.get("recurrent_survey_enabled", False) and bool(problem.get("recurrent_survey")),
+            "periodic_survey_start": int(problem.get("recurrent_survey_start", 5)),
+            "periodic_survey_interval": int(problem.get("recurrent_survey_interval", 4)),
+        }
+
     # Save current problem's code
     session_log.per_problem_submissions.append({
         "problem_index": session_log.current_problem_index,
@@ -5350,9 +5957,21 @@ async def quiz_next_problem(request: Request):
         "timestamp": datetime.now().isoformat(),
     })
 
+    old_idx = int(session_log.current_problem_index or 0)
     # Advance to next problem
     session_log.current_problem_index += 1
     idx = session_log.current_problem_index
+
+    # Copy legacy global pre/post completion for the problem we left (sessions before per-problem maps)
+    if session_log.quiz_id and old_idx >= 0:
+        if session_log.pre_survey_status in ("completed", "not_required", "skipped"):
+            _pd = dict(session_log.pre_survey_done_by_problem or {})
+            _pd[str(old_idx)] = True
+            session_log.pre_survey_done_by_problem = _pd
+        if session_log.post_survey_status in ("completed", "not_required", "skipped"):
+            _pd = dict(session_log.post_survey_done_by_problem or {})
+            _pd[str(old_idx)] = True
+            session_log.post_survey_done_by_problem = _pd
 
     if idx >= session_log.total_problems:
         if session_log.quiz_id:
@@ -5364,6 +5983,12 @@ async def quiz_next_problem(request: Request):
                 session_log.total_problems,
                 completed=True,
             )
+        _agent_debug_log(
+            "H1",
+            "main.py:quiz_next_problem:return_complete_idx_ge_total",
+            "returning complete",
+            {"idx": idx, "total_problems": session_log.total_problems},
+        )
         return {"status": "complete", "message": "All problems completed"}
 
     # Reset recurrent survey counter for the new problem
@@ -5373,6 +5998,15 @@ async def quiz_next_problem(request: Request):
     session_log.pre_survey_status = "not_started"
     session_log.post_survey_status = "not_started"
     session_log.post_survey_timestamp = None
+
+    # Drop stale drafts for the problem we are entering (checkpoint may carry next-problem drafts).
+    _k = str(idx)
+    _pre_dm = dict(session_log.pre_survey_draft_by_problem or {})
+    _pre_dm.pop(_k, None)
+    session_log.pre_survey_draft_by_problem = _pre_dm if _pre_dm else None
+    _post_dm = dict(session_log.post_survey_draft_by_problem or {})
+    _post_dm.pop(_k, None)
+    session_log.post_survey_draft_by_problem = _post_dm if _post_dm else None
 
     # Load next problem from Firebase
     if not session_log.quiz_id:
@@ -5394,6 +6028,12 @@ async def quiz_next_problem(request: Request):
                 session_log.total_problems,
                 completed=True,
             )
+        _agent_debug_log(
+            "H1",
+            "main.py:quiz_next_problem:return_complete_idx_ge_len",
+            "returning complete (idx>=len(problems))",
+            {"idx": idx, "len_problems": len(problems), "total_problems": session_log.total_problems},
+        )
         return {"status": "complete", "message": "All problems completed"}
 
     problem = problems[idx]
@@ -5420,6 +6060,11 @@ async def quiz_next_problem(request: Request):
         session_log.problem_description = problem_description
 
     save_session_to_local(session_log)
+    # Checkpoint to Firebase so problem advancement survives server restart
+    try:
+        checkpoint_session_to_firebase(session_log, "next_problem_advance", force=True)
+    except Exception as e:
+        logger.warning("Firebase checkpoint after next-problem failed: %s", e)
     if session_log.quiz_id:
         quiz_resume_write(
             session_log.quiz_id,
@@ -5430,6 +6075,16 @@ async def quiz_next_problem(request: Request):
             completed=False,
         )
 
+    _agent_debug_log(
+        "H1",
+        "main.py:quiz_next_problem:return_next",
+        "returning next problem",
+        {
+            "problem_index": idx,
+            "total_problems": session_log.total_problems,
+            "has_pre": problem.get("pre_survey_enabled", False) and bool(problem.get("pre_survey")),
+        },
+    )
     return {
         "status": "next",
         "problem_index": idx,
