@@ -4173,8 +4173,10 @@ async def submit_pre_post_survey(request: PrePostSurveySubmission):
             'responses': [r.dict() for r in request.responses]
         }
         
-        with open(survey_file, 'w', encoding='utf-8') as f:
-            json.dump(file_data, f, indent=2, default=str)
+        def _write_pre_post_survey_file():
+            with open(survey_file, 'w', encoding='utf-8') as f:
+                json.dump(file_data, f, indent=2, default=str)
+        await asyncio.to_thread(_write_pre_post_survey_file)
 
         if request.session_id not in active_sessions:
             try:
@@ -5510,6 +5512,54 @@ async def quiz_next_problem(request: Request):
 
     session_log = active_sessions[session_id]
 
+    # Idempotency guard: if client tells us which problem it thinks it's on,
+    # and the server already advanced past that, return current state without re-advancing.
+    client_problem_index = body.get("current_problem_index")
+    if client_problem_index is not None and int(client_problem_index) < session_log.current_problem_index:
+        idx = session_log.current_problem_index
+        logger.info("quiz/next-problem: idempotent hit — client on %s, server already on %s", client_problem_index, idx)
+        if idx >= session_log.total_problems:
+            return {"status": "complete", "message": "All problems completed"}
+        # Return current problem info without re-advancing
+        if not session_log.quiz_id:
+            raise HTTPException(status_code=400, detail="No quiz ID in session")
+        quiz_data = fb_dict(db.reference(f"quizzes/{session_log.quiz_id}").get())
+        if not quiz_data:
+            raise HTTPException(status_code=404, detail="Quiz not found")
+        quiz_data = normalize_quiz_data(quiz_data)
+        problems = quiz_data.get("problems", [])
+        if idx >= len(problems):
+            return {"status": "complete", "message": "All problems completed"}
+        problem = problems[idx]
+        completed_problem = problems[idx - 1] if idx > 0 else {}
+        completed_problem_title = (completed_problem.get("title") or "").strip() or f"Problem {idx}"
+        quiz_starter = problem.get("starter_code", {})
+        lang_starter = quiz_starter.get(programming_language) if quiz_starter else None
+        starter_files = None
+        starter_code = None
+        if isinstance(lang_starter, list) and lang_starter:
+            starter_files = lang_starter
+            starter_code = lang_starter[0].get("content", "") if lang_starter else ""
+        elif isinstance(lang_starter, str) and lang_starter:
+            starter_code = lang_starter
+        else:
+            starter_code = ""
+        return {
+            "status": "next",
+            "problem_index": idx,
+            "total_problems": session_log.total_problems,
+            "completed_problem_title": completed_problem_title,
+            "problem_description": problem.get("problem_statement", "") if session_log.condition == 1 else None,
+            "constraints": problem.get("constraints", ""),
+            "starter_code": starter_code,
+            "starter_files": starter_files,
+            "has_pre_survey": problem.get("pre_survey_enabled", False) and bool(problem.get("pre_survey")),
+            "has_post_survey": problem.get("post_survey_enabled", False) and bool(problem.get("post_survey")),
+            "periodic_survey_enabled": problem.get("recurrent_survey_enabled", False) and bool(problem.get("recurrent_survey")),
+            "periodic_survey_start": int(problem.get("recurrent_survey_start", 5)),
+            "periodic_survey_interval": int(problem.get("recurrent_survey_interval", 4)),
+        }
+
     # Save current problem's code
     session_log.per_problem_submissions.append({
         "problem_index": session_log.current_problem_index,
@@ -5587,6 +5637,11 @@ async def quiz_next_problem(request: Request):
         session_log.problem_description = problem_description
 
     save_session_to_local(session_log)
+    # Checkpoint to Firebase so problem advancement survives server restart
+    try:
+        checkpoint_session_to_firebase(session_log, "next_problem_advance", force=True)
+    except Exception as e:
+        logger.warning("Firebase checkpoint after next-problem failed: %s", e)
     if session_log.quiz_id:
         quiz_resume_write(
             session_log.quiz_id,

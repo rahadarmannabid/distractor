@@ -1793,6 +1793,7 @@
                                         session_id: authData.sessionId,
                                         code: code,
                                         programming_language: authData.programmingLanguage || 'python',
+                                        current_problem_index: currentProbIdx,
                                     })
                                 });
 
@@ -1840,9 +1841,6 @@
 
                                 // Clear periodic survey storage so recurrent survey resets fresh
                                 sessionStorage.removeItem(`periodicSurveys_${authData.sessionId}`);
-
-                                submitBtn.textContent = 'Next Problem Ready!';
-                                await new Promise(resolve => setTimeout(resolve, 800));
 
                                 allowNavigation = true;
                                 // If next problem has a pre-survey, go there first

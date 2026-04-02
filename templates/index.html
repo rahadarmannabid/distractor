@@ -2723,7 +2723,7 @@ const ACTIVITY_BATCH_SIZE = 10;
     const maxFontSize = 24;
     let isAnalyzing = false;
     /** After user inserts a newline, wait this long with no further edits before /analyze (reading mode). */
-    var NEWLINE_IDLE_MS = 2000;
+    var NEWLINE_IDLE_MS = 1000;
     var _newlineIdleTimer = null;
 
     function clearNewlineIdleTimer() {
@@ -2740,7 +2740,7 @@ const ACTIVITY_BATCH_SIZE = 10;
         if (isAnalyzing) return;
         _newlineIdleTimer = setTimeout(function() {
             _newlineIdleTimer = null;
-            analyzeCurrentCode({ skipPreviousCodeCheck: true, triggerReason: 'newline_idle_2s' });
+            analyzeCurrentCode({ skipPreviousCodeCheck: true, triggerReason: 'newline_idle_1s' });
         }, NEWLINE_IDLE_MS);
     }
 
