@@ -3,14 +3,17 @@
 Mounted as a sub-router in main.py at prefix /instructor.
 """
 
+import os
 import shutil
 import copy
+import threading
+import time
 
 from fastapi import APIRouter, Request, HTTPException, Body, File, UploadFile, Form, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import json
 import logging
 import re
@@ -55,6 +58,103 @@ _ANALYTICS_JSON_NO_CACHE = {
     "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     "Pragma": "no-cache",
 }
+
+# In-memory aggregate cache (Firebase session scan + aggregate_quiz_analytics).
+# live_now is merged on every request — not cached.
+_analytics_aggregate_cache: Dict[str, Dict[str, Any]] = {}
+_analytics_aggregate_cache_lock = threading.Lock()
+
+
+def _analytics_cache_ttl_seconds() -> float:
+    try:
+        return max(5.0, float(os.getenv("ANALYTICS_AGGREGATE_CACHE_SECONDS", "120")))
+    except (TypeError, ValueError):
+        return 120.0
+
+
+def invalidate_quiz_analytics_cache(quiz_id: str) -> None:
+    """Drop cached aggregates for this quiz (e.g. after delete-user or quiz edit)."""
+    q = (quiz_id or "").strip()
+    if not q:
+        return
+    with _analytics_aggregate_cache_lock:
+        _analytics_aggregate_cache.pop(q, None)
+
+
+def _get_cached_analytics_aggregate(quiz_id: str, quiz_updated_at: Optional[str]) -> Optional[dict]:
+    with _analytics_aggregate_cache_lock:
+        ent = _analytics_aggregate_cache.get(quiz_id)
+        if not ent:
+            return None
+        if time.monotonic() > float(ent.get("expires", 0)):
+            _analytics_aggregate_cache.pop(quiz_id, None)
+            return None
+        if (quiz_updated_at or "") != str(ent.get("quiz_updated_at") or ""):
+            _analytics_aggregate_cache.pop(quiz_id, None)
+            return None
+        return copy.deepcopy(ent.get("data"))
+
+
+def _set_cached_analytics_aggregate(
+    quiz_id: str, quiz_updated_at: Optional[str], data: dict
+) -> None:
+    """Store aggregate without live_now (caller must not rely on live_now in data)."""
+    payload = copy.deepcopy(data)
+    payload.pop("live_now", None)
+    ttl = _analytics_cache_ttl_seconds()
+    with _analytics_aggregate_cache_lock:
+        _analytics_aggregate_cache[quiz_id] = {
+            "expires": time.monotonic() + ttl,
+            "quiz_updated_at": quiz_updated_at or "",
+            "data": payload,
+        }
+
+
+def _compute_analytics_aggregate(db, quiz_id: str, labels: List[str]) -> dict:
+    sessions = collect_quiz_sessions_from_firebase(db, quiz_id)
+    return aggregate_quiz_analytics(sessions, quiz_id, labels)
+
+
+def _attach_live_now_to_analytics(data: dict, quiz_id: str, labels: List[str]) -> None:
+    from main import get_active_quiz_session_counts
+
+    live = get_active_quiz_session_counts(quiz_id)
+    live_by_problem = [0] * len(labels)
+    for idx, c in (live.get("by_problem_index") or {}).items():
+        try:
+            i = int(idx)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= i < len(live_by_problem):
+            live_by_problem[i] = int(c)
+    data["live_now"] = {
+        "total_active": int(live.get("total_active") or 0),
+        "by_problem": live_by_problem,
+        "scope_note": "“Active now” merges this server’s in-memory sessions with Firebase presence heartbeats (same project as localhost and production). Optional REDIS_URL shares counts across workers on one deployment.",
+    }
+
+
+def _load_analytics_payload_for_request(
+    db,
+    quiz_id: str,
+    quiz: dict,
+    labels: List[str],
+    *,
+    bypass_cache: bool,
+) -> Tuple[dict, bool]:
+    """Return (payload, cache_hit). Always includes fresh live_now."""
+    quiz_updated_at = quiz.get("updated_at")
+    if not bypass_cache:
+        cached = _get_cached_analytics_aggregate(quiz_id, quiz_updated_at)
+        if cached is not None:
+            _attach_live_now_to_analytics(cached, quiz_id, labels)
+            return cached, True
+
+    data = _compute_analytics_aggregate(db, quiz_id, labels)
+    _set_cached_analytics_aggregate(quiz_id, quiz_updated_at, data)
+    _attach_live_now_to_analytics(data, quiz_id, labels)
+    return data, False
+
 
 # Instructor quiz builder: default survey question banks (editable JSON on disk)
 _DEFAULT_SURVEY_TEMPLATE_FILES = {
@@ -662,6 +762,7 @@ async def update_quiz(request: Request, quiz_id: str, payload: dict = Body(...))
     updates["updated_at"] = datetime.utcnow().isoformat()
 
     db.reference(f"quizzes/{quiz_id}").update(updates)
+    invalidate_quiz_analytics_cache(quiz_id)
     return JSONResponse({"success": True, "quiz_id": quiz_id})
 
 
@@ -692,6 +793,7 @@ async def delete_quiz(request: Request, quiz_id: str):
     if qdir.exists() and qdir.is_dir():
         shutil.rmtree(qdir, ignore_errors=True)
 
+    invalidate_quiz_analytics_cache(quiz_id)
     return JSONResponse({"success": True})
 
 
@@ -714,6 +816,7 @@ async def toggle_publish(request: Request, quiz_id: str):
 
     new_status = not existing.get("published", False)
     db.reference(f"quizzes/{quiz_id}/published").set(new_status)
+    invalidate_quiz_analytics_cache(quiz_id)
     return JSONResponse({"success": True, "published": new_status})
 
 
@@ -996,7 +1099,11 @@ async def quiz_activity_log_export(
 
 
 @router.get("/quiz/{quiz_id}/analytics-data")
-async def quiz_analytics_data(request: Request, quiz_id: str):
+async def quiz_analytics_data(
+    request: Request,
+    quiz_id: str,
+    refresh: int = Query(0, description="Set to 1 to bypass server aggregate cache"),
+):
     email = _require_instructor(request)
     if not email:
         return JSONResponse({"error": "Not authenticated"}, status_code=401)
@@ -1016,26 +1123,13 @@ async def quiz_analytics_data(request: Request, quiz_id: str):
 
         quiz = _normalize_quiz_data(quiz)
         labels = _quiz_problem_labels(quiz)
-        sessions = collect_quiz_sessions_from_firebase(db, quiz_id)
-        data = aggregate_quiz_analytics(sessions, quiz_id, labels)
-
-        from main import get_active_quiz_session_counts
-
-        live = get_active_quiz_session_counts(quiz_id)
-        live_by_problem = [0] * len(labels)
-        for idx, c in (live.get("by_problem_index") or {}).items():
-            try:
-                i = int(idx)
-            except (TypeError, ValueError):
-                continue
-            if 0 <= i < len(live_by_problem):
-                live_by_problem[i] = int(c)
-        data["live_now"] = {
-            "total_active": int(live.get("total_active") or 0),
-            "by_problem": live_by_problem,
-            "scope_note": "“Active now” merges this server’s in-memory sessions with Firebase presence heartbeats (same project as localhost and production). Optional REDIS_URL shares counts across workers on one deployment.",
-        }
-        return JSONResponse(content=data, headers=_ANALYTICS_JSON_NO_CACHE)
+        bypass = bool(refresh) or bool(request.query_params.get("nocache"))
+        data, cache_hit = _load_analytics_payload_for_request(
+            db, quiz_id, quiz, labels, bypass_cache=bypass
+        )
+        h = dict(_ANALYTICS_JSON_NO_CACHE)
+        h["X-Analytics-Aggregate-Cache"] = "hit" if cache_hit else "miss"
+        return JSONResponse(content=data, headers=h)
     except Exception as e:
         logger.exception("quiz_analytics_data failed for quiz_id=%s", quiz_id)
         return JSONResponse({"error": f"Server error: {e!s}"}, status_code=500)
@@ -1071,6 +1165,7 @@ async def quiz_analytics_delete_user(
         from main import forget_active_sessions_for_quiz_user
 
         result["cleared_active_sessions"] = forget_active_sessions_for_quiz_user(quiz_id, user_id)
+        invalidate_quiz_analytics_cache(quiz_id)
         return JSONResponse(content={"success": True, **result}, headers=_ANALYTICS_JSON_NO_CACHE)
     except ValueError as ve:
         return JSONResponse({"success": False, "error": str(ve)}, status_code=400)
@@ -1080,7 +1175,12 @@ async def quiz_analytics_delete_user(
 
 
 @router.get("/quiz/{quiz_id}/analytics-export")
-async def quiz_analytics_export(request: Request, quiz_id: str, fmt: str = "csv"):
+async def quiz_analytics_export(
+    request: Request,
+    quiz_id: str,
+    fmt: str = "csv",
+    refresh: int = Query(0, description="Set to 1 to bypass server aggregate cache"),
+):
     """Download per-session CSV (flattened) or full aggregate JSON for this quiz."""
     email = _require_instructor(request)
     if not email:
@@ -1105,25 +1205,10 @@ async def quiz_analytics_export(request: Request, quiz_id: str, fmt: str = "csv"
 
         quiz = _normalize_quiz_data(quiz)
         labels = _quiz_problem_labels(quiz)
-        sessions = collect_quiz_sessions_from_firebase(db, quiz_id)
-        data = aggregate_quiz_analytics(sessions, quiz_id, labels)
-
-        from main import get_active_quiz_session_counts
-
-        live = get_active_quiz_session_counts(quiz_id)
-        live_by_problem = [0] * len(labels)
-        for idx, c in (live.get("by_problem_index") or {}).items():
-            try:
-                i = int(idx)
-            except (TypeError, ValueError):
-                continue
-            if 0 <= i < len(live_by_problem):
-                live_by_problem[i] = int(c)
-        data["live_now"] = {
-            "total_active": int(live.get("total_active") or 0),
-            "by_problem": live_by_problem,
-            "scope_note": "“Active now” merges this server’s in-memory sessions with Firebase presence heartbeats (same project as localhost and production). Optional REDIS_URL shares counts across workers on one deployment.",
-        }
+        bypass = bool(refresh) or bool(request.query_params.get("nocache"))
+        data, _cache_hit = _load_analytics_payload_for_request(
+            db, quiz_id, quiz, labels, bypass_cache=bypass
+        )
 
         slug = _safe_quiz_export_slug(quiz_id)
         if kind == "json":

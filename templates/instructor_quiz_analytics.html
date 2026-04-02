@@ -47,6 +47,17 @@
       border-color: rgba(56, 189, 248, 0.35);
     }
     .nav-actions a.nav-export:hover { color: #e0f2fe; border-color: #38bdf8; }
+    .nav-actions button.nav-refresh {
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 0.8rem;
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .nav-actions button.nav-refresh:hover { color: var(--text); border-color: #475569; }
 
     .wrap { max-width: 1320px; margin: 0 auto; padding: 20px 16px 48px; }
 
@@ -522,6 +533,7 @@
     <div class="nav-actions">
       <span style="font-size:0.75rem;color:var(--muted);">{{ instructor_email }}</span>
       {% if firebase_available %}
+      <button type="button" class="nav-refresh" id="analytics-refresh-btn" title="Reload submission aggregates from Firebase (bypasses server cache)">Refresh data</button>
       <a class="nav-export" href="/instructor/quiz/{{ quiz_id }}/analytics-export?fmt=csv">Download sessions (CSV)</a>
       <a class="nav-export" href="/instructor/quiz/{{ quiz_id }}/analytics-export?fmt=json">Download full (JSON)</a>
       {% endif %}
@@ -837,10 +849,25 @@
     }
     window.addEventListener('resize', resizeAll);
 
-    fetch('/instructor/quiz/' + encodeURIComponent(quizId) + '/analytics-data', {
-      credentials: 'same-origin',
-      cache: 'no-store',
-    })
+    var urlParams = new URLSearchParams(window.location.search);
+    var initialForceRefresh = urlParams.get('refresh') === '1';
+
+    function fetchAnalyticsData(forceRefresh) {
+      var q = (forceRefresh ? '?refresh=1' : '');
+      return fetch('/instructor/quiz/' + encodeURIComponent(quizId) + '/analytics-data' + q, {
+        credentials: 'same-origin',
+        cache: 'no-store',
+      });
+    }
+
+    var refreshBtn = document.getElementById('analytics-refresh-btn');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', function() {
+        window.location.href = window.location.pathname + '?refresh=1';
+      });
+    }
+
+    fetchAnalyticsData(initialForceRefresh)
       .then(function(r) {
         return r.text().then(function(text) {
           var ct = (r.headers.get('content-type') || '');
