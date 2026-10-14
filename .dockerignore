@@ -182,3 +182,5 @@ yarn.lock
 # ✅ main.py
 # ✅ admin.py
 # ✅ requirements.txt
+# Firebase service account keys (secret)
+*firebase-adminsdk*.json

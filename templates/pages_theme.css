@@ -1,0 +1,167 @@
+/* Login / consent (home.html) and survey (survey.html) pages, on the shared design system
+   (ui_tokens.css). Loaded after each page's own styles, so it overrides them. */
+body {
+    background: var(--ui-page) !important; color: var(--ui-text) !important;
+    font: var(--fs-md)/var(--lh) var(--ui-font) !important; -webkit-font-smoothing: antialiased;
+}
+.bg-animation { display: none !important; }
+
+/* ── Cards ─────────────────────────────────────────────────────────────── */
+.container, .survey-container {
+    background: var(--ui-surface) !important; border: 1px solid var(--ui-border) !important;
+    border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-modal) !important;
+    backdrop-filter: none !important; animation: ui-modal-in var(--dur-slow) var(--ease-out) both;
+}
+.container::before, .survey-container::before { display: none !important; }
+.container::-webkit-scrollbar-thumb, .survey-container::-webkit-scrollbar-thumb { background: rgba(121, 121, 121, 0.35) !important; border-radius: 10px; }
+.container::-webkit-scrollbar-track, .survey-container::-webkit-scrollbar-track { background: transparent !important; }
+.consent-screen:not(.hidden), .login-screen:not(.hidden) { animation: ui-rise-in var(--dur-slow) var(--ease-out); }
+
+/* ── Headings: one page title size, one section size ───────────────────── */
+.consent-title, .login-title, .survey-header h1 {
+    font: var(--fw-semibold) var(--fs-2xl)/1.3 var(--ui-font) !important; color: var(--ui-text-strong) !important;
+    background: none !important; -webkit-text-fill-color: currentColor !important; letter-spacing: -0.01em; text-shadow: none !important;
+}
+.consent-subtitle, .login-subtitle, .survey-header p {
+    font: var(--fs-md)/1.5 var(--ui-font) !important; color: var(--ui-text-muted) !important;
+}
+.consent-section h3, .highlight-box h3, .warning-box h3 {
+    font: var(--fw-semibold) var(--fs-lg)/1.4 var(--ui-font) !important; color: var(--ui-text-strong) !important;
+    background: none !important; -webkit-text-fill-color: currentColor !important; margin-bottom: 6px !important;
+}
+.consent-section, .highlight-box, .warning-box {
+    background: transparent !important; border: 0 !important; border-bottom: 1px solid var(--ui-border) !important;
+    border-radius: 0 !important; padding: 14px 0 !important; margin: 0 !important; box-shadow: none !important;
+}
+.highlight-box, .warning-box {
+    background: var(--ui-raised) !important; border: 1px solid var(--ui-border-strong) !important;
+    border-radius: var(--radius-lg) !important; padding: 14px 16px !important; margin-top: 14px !important;
+}
+.consent-section p, .consent-section ul, .consent-section li, .highlight-box p, .warning-box p {
+    font: var(--fs-md)/1.65 var(--ui-font) !important; color: var(--ui-text) !important;
+}
+.consent-section strong, .highlight-box strong { color: var(--ui-text-strong); font-weight: var(--fw-semibold); }
+
+/* ── Consent checkbox ──────────────────────────────────────────────────── */
+.checkbox-container {
+    background: var(--ui-raised) !important; border: 1px solid var(--ui-border-strong) !important; border-radius: var(--radius-lg) !important;
+    padding: 12px 14px !important; gap: 12px; box-shadow: none !important; transform: none !important;
+    transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) !important;
+}
+.checkbox-container:hover { border-color: #5a5a5a !important; }
+.checkbox-container.checked { border-color: var(--ui-accent) !important; background: var(--ui-accent-soft) !important; }
+.checkbox {
+    width: 16px !important; height: 16px !important; min-width: 16px; border-radius: var(--radius-sm) !important;
+    border: 1.5px solid #6b6b6b !important; background: transparent !important; box-shadow: none !important;
+    transition: background-color var(--dur-fast), border-color var(--dur-fast) !important;
+}
+.checkbox.checked { background: var(--ui-accent) !important; border-color: var(--ui-accent) !important; }
+.checkbox.checked::after { color: #fff !important; font-size: 11px !important; animation: ui-fade-in var(--dur-fast); }
+.checkbox-label { font: var(--fs-md)/1.55 var(--ui-font) !important; color: var(--ui-text) !important; }
+
+/* ── Form fields ───────────────────────────────────────────────────────── */
+.form-label { font: var(--fw-medium) var(--fs-sm)/1.4 var(--ui-font) !important; color: var(--ui-text) !important; background: none !important; -webkit-text-fill-color: currentColor !important; margin-bottom: 6px !important; }
+.form-input, .text-input {
+    height: var(--h-btn-lg); background: var(--ui-input) !important; border: 1px solid var(--ui-border-strong) !important;
+    border-radius: var(--radius) !important; color: var(--ui-text-strong) !important; padding: 0 10px !important;
+    font: var(--fs-md) var(--ui-font) !important; box-shadow: none !important;
+    transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out) !important;
+}
+select.form-input { padding-right: 28px !important; }
+.text-input { height: auto; min-height: 96px; padding: 8px 10px !important; line-height: 1.55; }
+.form-input:focus, .text-input:focus { border-color: var(--ui-focus) !important; box-shadow: 0 0 0 2px var(--ui-accent-soft) !important; outline: none !important; background: var(--ui-input) !important; }
+.form-input::placeholder, .text-input::placeholder { color: var(--ui-text-faint) !important; font-style: normal !important; }
+.info-text, .char-counter, .question-help-text { font: var(--fs-sm)/1.5 var(--ui-font) !important; color: var(--ui-text-muted) !important; font-style: normal !important; }
+.question-help-text { background: transparent !important; border: 0 !important; padding: 0 !important; margin: -6px 0 10px !important; }
+
+/* ── Buttons: same sizes and colours as the IDE ────────────────────────── */
+.continue-button, .login-button, .btn, .btn-primary {
+    height: var(--h-btn-lg) !important; padding: 0 16px !important; border-radius: var(--radius) !important;
+    background: var(--ui-accent) !important; color: #fff !important; border: 1px solid transparent !important;
+    font: var(--fw-medium) var(--fs-md)/1 var(--ui-font) !important; letter-spacing: 0 !important; text-transform: none !important;
+    box-shadow: none !important; display: inline-flex !important; align-items: center; justify-content: center; gap: 8px;
+    transition: background-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out), opacity var(--dur-fast) !important;
+}
+.continue-button, .login-button { width: 100%; }
+.continue-button::before, .login-button::before, .btn::before { display: none !important; }
+.continue-button:hover:not(:disabled), .login-button:hover:not(:disabled), .btn:hover:not(:disabled) { background: var(--ui-accent-hover) !important; transform: none !important; box-shadow: none !important; }
+.continue-button:active:not(:disabled), .login-button:active:not(:disabled), .btn:active:not(:disabled) { transform: scale(0.98) !important; }
+.continue-button:disabled, .login-button:disabled, .btn:disabled { opacity: 0.45 !important; background: var(--ui-accent) !important; cursor: not-allowed !important; }
+.back-button {
+    height: var(--h-btn) !important; padding: 0 10px !important; border-radius: var(--radius) !important;
+    background: transparent !important; border: 1px solid var(--ui-border-strong) !important; color: var(--ui-text) !important;
+    font: var(--fw-medium) var(--fs-sm)/1 var(--ui-font) !important; box-shadow: none !important; transform: none !important;
+    transition: background-color var(--dur-fast) var(--ease-out) !important;
+}
+.back-button:hover { background: var(--ui-hover) !important; }
+.spinner { border-color: rgba(255, 255, 255, 0.3) !important; border-top-color: #fff !important; width: 14px !important; height: 14px !important; border-width: 2px !important; }
+
+/* ── Small print, badges, toasts, errors ───────────────────────────────── */
+.info-section { border-top: 1px solid var(--ui-border) !important; }
+.security-badge {
+    background: transparent !important; border: 1px solid var(--ui-border-strong) !important; color: var(--ui-text-muted) !important;
+    border-radius: 999px !important; font: var(--fw-medium) var(--fs-xs)/1 var(--ui-font) !important; padding: 5px 10px !important;
+}
+.info-section a, .login-screen a { color: #3794ff !important; font-size: var(--fs-sm) !important; text-decoration: none; }
+.info-section a:hover, .login-screen a:hover { text-decoration: underline; }
+.error-message {
+    background: #5a1d1d !important; border: 1px solid var(--ui-error-strong) !important; border-radius: var(--radius) !important;
+    color: #fff !important; font: var(--fs-md)/1.5 var(--ui-font) !important; font-weight: var(--fw-regular) !important;
+    padding: 8px 12px !important; animation: ui-pop-in-down var(--dur) var(--ease-out) !important; box-shadow: none !important;
+}
+.toast-notification {
+    background: var(--ui-raised) !important; border: 1px solid var(--ui-border-strong) !important; border-left: 3px solid var(--ui-accent) !important;
+    border-radius: var(--radius-lg) !important; box-shadow: var(--shadow-pop) !important; color: var(--ui-text) !important;
+}
+.toast-notification.warning { border-left-color: var(--ui-warning) !important; }
+.toast-notification.error { border-left-color: var(--ui-error) !important; }
+.toast-title { font: var(--fw-semibold) var(--fs-md)/1.4 var(--ui-font) !important; color: var(--ui-text-strong) !important; }
+.toast-message { font: var(--fs-sm)/1.5 var(--ui-font) !important; color: var(--ui-text-muted) !important; }
+
+/* ── Survey page ───────────────────────────────────────────────────────── */
+.survey-header { margin-bottom: 20px !important; }
+.progress-bar { height: 3px !important; background: var(--ui-border) !important; border: 0 !important; border-radius: 3px !important; margin-bottom: 20px !important; }
+.progress-fill { background: var(--ui-accent) !important; box-shadow: none !important; transition: width var(--dur-slow) var(--ease-out) !important; }
+.quiz-flow-progress { background: transparent !important; border: 1px solid var(--ui-border) !important; border-radius: var(--radius-lg) !important; }
+.quiz-flow-progress__pill { background: transparent !important; border-color: var(--ui-border-strong) !important; color: var(--ui-text-muted) !important; font: var(--fs-xs)/1.2 var(--ui-font) !important; }
+.quiz-flow-progress__pill.is-active { border-color: var(--ui-accent) !important; background: var(--ui-accent-soft) !important; color: #fff !important; font-weight: var(--fw-medium) !important; }
+.quiz-flow-progress__pill.is-done { border-color: #2f6f3e !important; color: var(--ui-success) !important; }
+.question {
+    background: var(--ui-header) !important; border: 1px solid var(--ui-border) !important; border-left: 1px solid var(--ui-border) !important;
+    border-radius: var(--radius-lg) !important; padding: 16px 18px !important; margin-bottom: 12px !important;
+    transition: border-color var(--dur) var(--ease-out) !important; animation: ui-rise-in var(--dur-slow) var(--ease-out) both;
+}
+.question:hover { background: var(--ui-header) !important; border-color: var(--ui-border-strong) !important; }
+.question.answered, .question.answered:hover { background: var(--ui-header) !important; border-color: var(--ui-border) !important; box-shadow: inset 2px 0 0 var(--ui-success); }
+.question-label { font: var(--fw-medium) var(--fs-lg)/1.5 var(--ui-font) !important; color: var(--ui-text-strong) !important; margin-bottom: 12px !important; }
+.required { color: var(--ui-error) !important; }
+.likert-option label, .choice-option {
+    background: var(--ui-surface) !important; border: 1px solid var(--ui-border-strong) !important; border-radius: var(--radius) !important;
+    color: var(--ui-text) !important; font: var(--fs-sm)/1.35 var(--ui-font) !important; box-shadow: none !important; transform: none !important;
+    transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out) !important;
+}
+.likert-option label { min-height: 58px !important; padding: 10px 6px !important; }
+.likert-option label strong { font: var(--fw-semibold) var(--fs-lg)/1.2 var(--ui-font) !important; margin-bottom: 2px !important; }
+.likert-option label small { font-size: var(--fs-xs) !important; color: var(--ui-text-muted); opacity: 1 !important; }
+.likert-option label:hover, .choice-option:hover { border-color: #5a5a5a !important; background: var(--ui-hover) !important; transform: none !important; }
+.likert-option input[type="radio"]:checked + label, .choice-option:has(input:checked) {
+    background: var(--ui-accent-soft) !important; border-color: var(--ui-accent) !important; color: #fff !important; transform: none !important; box-shadow: none !important;
+}
+.likert-option input[type="radio"]:checked + label small { color: #d6e7f7 !important; }
+.choice-option { padding: 0 12px !important; min-height: var(--h-btn-lg); }
+.choice-option label { font: var(--fs-md)/1.4 var(--ui-font) !important; color: inherit !important; padding: 8px 0; }
+.choice-option input[type="radio"] { accent-color: var(--ui-accent) !important; }
+.slider-input { accent-color: var(--ui-accent); }
+.slider-value { color: var(--ui-text-strong) !important; font: var(--fw-semibold) var(--fs-xl)/1.2 var(--ui-font) !important; background: none !important; -webkit-text-fill-color: currentColor !important; }
+.slider-labels { color: var(--ui-text-muted) !important; font-size: var(--fs-sm) !important; }
+.button-group { margin-top: 24px !important; }
+.slider-container { background: transparent !important; border: 1px solid var(--ui-border) !important; border-radius: var(--radius-lg) !important; }
+.slider-input { height: 4px !important; border-radius: 4px !important; background: var(--ui-border-strong) !important; }
+.slider-input::-webkit-slider-thumb {
+    width: 16px !important; height: 16px !important; border-radius: 50% !important; background: var(--ui-text-strong) !important;
+    border: 3px solid var(--ui-accent) !important; box-shadow: none !important; transition: transform var(--dur-fast) var(--ease-out) !important;
+}
+.slider-input::-webkit-slider-thumb:hover { transform: scale(1.15) !important; box-shadow: 0 0 0 6px var(--ui-accent-soft) !important; }
+.slider-input::-moz-range-thumb { width: 12px !important; height: 12px !important; background: var(--ui-text-strong) !important; border: 3px solid var(--ui-accent) !important; box-shadow: none !important; }
+/* Same height for every Likert box, with or without an end label */
+.likert-option label { height: 64px !important; min-height: 0 !important; justify-content: center !important; }

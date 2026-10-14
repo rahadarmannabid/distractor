@@ -174,3 +174,6 @@ yarn-error.log*
 package-lock.json
 yarn.lock
 
+
+# Firebase service account keys (secret)
+*firebase-adminsdk*.json

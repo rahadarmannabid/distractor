@@ -830,6 +830,10 @@
             }
         }
     </style>
+    <style>
+{% include 'ui_tokens.css' %}
+{% include 'pages_theme.css' %}
+    </style>
 </head>
 <body>
     <div class="bg-animation"></div>
@@ -898,30 +902,6 @@
             return new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_');
         }
 
-        // #region agent log
-        function _agentBrowserLog(hypothesisId, location, message, data) {
-            var payload = {
-                sessionId: 'ef2d3c',
-                hypothesisId: hypothesisId,
-                location: location,
-                message: message,
-                data: data || {},
-                timestamp: Date.now()
-            };
-            try {
-                fetch('http://127.0.0.1:7245/ingest/4f9688c0-cd58-4ad9-a662-7af5846da4b7', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'ef2d3c' },
-                    body: JSON.stringify(payload)
-                }).catch(function () {});
-            } catch (e) {}
-            fetch('/_debug/agent-ingest', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            }).catch(function () {});
-        }
-
         function surveyFetchWithTimeout(url, init, timeoutMs) {
             timeoutMs = timeoutMs || 120000;
             if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
@@ -933,7 +913,6 @@
             p.finally(function () { clearTimeout(tid); });
             return p;
         }
-        // #endregion
 
         function surveyBuildStemForProblem(userId, assignmentKey, quizId, problemNumber, timestampSeg) {
             const parts = [surveySanitizeIdPart(userId), surveySanitizeIdPart(assignmentKey)];
@@ -1965,9 +1944,6 @@
                                     authData.totalProblems = st.total_problems;
                                 }
                                 sessionStorage.setItem('authData', JSON.stringify(authData));
-                                // #region agent log
-                                _agentBrowserLog('H6', 'survey.html:postSubmit:statusSync', 'survey-status after submit', { current_problem_index: st.current_problem_index, total_problems: st.total_problems });
-                                // #endregion
                             }
                         } catch (e) {
                             console.warn('survey-status sync failed', e);
@@ -2008,15 +1984,9 @@
                                 if (!nextRes.ok) throw new Error('Failed to load next problem');
                                 const nextData = await nextRes.json();
 
-                                // #region agent log
-                                _agentBrowserLog('H1', 'survey.html:postSubmit:nextData', 'next-problem JSON', { nextStatus: nextData && nextData.status, totalProblems: totalProblems, currentProbIdx: currentProbIdx, hasMoreProblems: hasMoreProblems, isSubmissionPending: isSubmissionPending });
-                                // #endregion
 
                                 if (nextData.status === 'complete') {
                                     // All problems done — fall through to final submission
-                                    // #region agent log
-                                    _agentBrowserLog('H5', 'survey.html:postSubmit:allDoneBranch', 'throwing __ALL_DONE__', {});
-                                    // #endregion
                                     throw new Error('__ALL_DONE__');
                                 }
 
@@ -2076,9 +2046,6 @@
                             } catch (error) {
                                 if (error.message === '__ALL_DONE__') {
                                     nextProblemReturnedComplete = true;
-                                    // #region agent log
-                                    _agentBrowserLog('H5', 'survey.html:postSubmit:catchAllDone', 'caught __ALL_DONE__; will run final block', { nextProblemReturnedComplete: true, hasMoreProblems: hasMoreProblems, runId: 'post-fix' });
-                                    // #endregion
                                     // Fall through to final submission below
                                 } else {
                                     console.error('Next problem error:', error);

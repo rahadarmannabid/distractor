@@ -606,6 +606,10 @@
             }
         }
     </style>
+    <style>
+{% include 'ui_tokens.css' %}
+{% include 'pages_theme.css' %}
+    </style>
 </head>
 <body>
     <div class="bg-animation"></div>
@@ -710,7 +714,7 @@
                 {% endif %}
                 <div class="form-group">
                     <label class="form-label" for="userId">
-                        👤 User ID
+                        User ID
                     </label>
                     <input 
                         type="text" 
@@ -726,7 +730,7 @@
                 
                 <div class="form-group">
     <label class="form-label" for="assignmentKey">
-        🔑 Assignment Key
+        Assignment Key
     </label>
     <input
         type="text"
@@ -746,7 +750,7 @@
 
 <div class="form-group">
     <label class="form-label" for="programmingLanguage">
-        💻 Programming Language
+        Programming Language
     </label>
     <select 
         id="programmingLanguage" 
@@ -758,12 +762,14 @@
         <option value="">Select your preferred language</option>
         {% if quiz_mode is defined and quiz_mode and allowed_languages %}
             {% for lang in allowed_languages %}
-            <option value="{{ lang }}">{{ lang|capitalize }}</option>
+            <option value="{{ lang }}">{{ {'python': 'Python', 'javascript': 'JavaScript', 'c': 'C', 'cpp': 'C++', 'java': 'Java'}.get(lang, lang|capitalize) }}</option>
             {% endfor %}
         {% else %}
             <option value="javascript">JavaScript</option>
             <option value="python">Python</option>
             <option value="c">C</option>
+            <option value="cpp">C++</option>
+            <option value="java">Java</option>
         {% endif %}
     </select>
     <small class="info-text">
@@ -787,7 +793,7 @@
                     This is a secure research environment. All sessions are logged and monitored for research purposes.
                 </div>
                 <div class="security-badge">
-                    🛡️ Research Database Integration Active
+                    Research database integration active
                 </div>
                 <div style="text-align:center;margin-top:12px;">
                     <a href="/instructor/login" style="color:#58a6ff;font-size:13px;text-decoration:none;">Instructor Login</a>
@@ -1032,6 +1038,10 @@
                         currentProblemIndex: data.current_problem_index || 0,
                         resumed: data.resumed === true,
                         editorDraftCode: data.editor_draft_code || null,
+                        editorDraftFiles: data.editor_draft_files || null,
+                        editorDraftActiveFile: data.editor_draft_active_file || null,
+                        agentSkillsInstructor: data.agent_skills_instructor || [],
+                        agentSkillsStudent: data.agent_skills_student || [],
                     }));
 
                     loginButton.innerHTML = 'Authenticated! Redirecting...';
@@ -1108,6 +1118,10 @@
                         currentProblemIndex: data.current_problem_index || 0,
                         resumed: data.resumed === true,
                         editorDraftCode: data.editor_draft_code || null,
+                        editorDraftFiles: data.editor_draft_files || null,
+                        editorDraftActiveFile: data.editor_draft_active_file || null,
+                        agentSkillsInstructor: data.agent_skills_instructor || [],
+                        agentSkillsStudent: data.agent_skills_student || [],
                     }));
 
                     loginButton.innerHTML = 'Authenticated! Redirecting...';
@@ -1152,6 +1166,10 @@
                     totalProblems: typeof data.total_problems === 'number' ? data.total_problems : 1,
                     resumed: data.resumed === true,
                     editorDraftCode: data.editor_draft_code || null,
+                    editorDraftFiles: data.editor_draft_files || null,
+                    editorDraftActiveFile: data.editor_draft_active_file || null,
+                    agentSkillsInstructor: data.agent_skills_instructor || [],
+                    agentSkillsStudent: data.agent_skills_student || [],
                 }));
 
                 // Download assignment PDF

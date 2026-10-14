@@ -1,7 +1,7 @@
-from fastapi import Body, FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 import os
 from pathlib import Path
@@ -9,21 +9,21 @@ from dotenv import load_dotenv
 
 # Load project .env first; override=True so repo config wins over stale shell/IDE env (e.g. old FIREBASE_*).
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=True)
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 import re
 import keyword
 import sys
-import tempfile
 import time
 import uuid
 import hashlib
 import json
 import mimetypes 
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Any, Iterator, Tuple, cast, Union
+from typing import List, Dict, Optional, Any, Callable, Iterator, Tuple, cast, Union
 import firebase_admin
 from firebase_admin import credentials, db
 import asyncio
+from contextvars import ContextVar
 import smtplib
 from email.message import EmailMessage
 import traceback
@@ -32,43 +32,15 @@ from admin import router as admin_router
 from instructor import router as instructor_router
 from firebase_utils import fb_dict
 from survey_payload_compact import compact_survey_ai_history
+import ai_assist
+import httpx
+import sandbox
 
 import logging
 import html as html_std
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-def _agent_debug_log(hypothesis_id: str, location: str, message: str, data: dict) -> None:
-    """Append one NDJSON line for debug mode (session ef2d3c).
-
-    Writes to `.cursor/debug-ef2d3c.log` (session path) and `debug-ef2d3c.ndjson` at repo root.
-    The latter is not matched by `*.log` in .gitignore so IDE tools can read runtime evidence.
-    """
-    line = (
-        json.dumps(
-            {
-                "sessionId": "ef2d3c",
-                "hypothesisId": hypothesis_id,
-                "location": location,
-                "message": message,
-                "data": data,
-                "timestamp": int(time.time() * 1000),
-            },
-            ensure_ascii=False,
-        )
-        + "\n"
-    )
-    root = Path(__file__).resolve().parent
-    for rel in (".cursor/debug-ef2d3c.log", "debug-ef2d3c.ndjson"):
-        try:
-            p = root / rel
-            p.parent.mkdir(parents=True, exist_ok=True)
-            with open(p, "a", encoding="utf-8") as f:
-                f.write(line)
-        except Exception:
-            pass
 
 
 # Instructor quiz problem fields may contain HTML from the rich-text editor (Quill).
@@ -257,9 +229,9 @@ firebase_db = initialize_firebase()
 
 def get_condition_keys():
     """Get condition keys from environment variables"""
-    condition_1_keys = os.getenv("CONDITION_1_PREFIXES", "Condition1_all").split(",")
-    condition_2_keys = os.getenv("CONDITION_2_PREFIXES", "Condition2_partial,fdasdfsa").split(",")
-    condition_3_keys = os.getenv("CONDITION_3_PREFIXES", "Condition3_suggestions").split(",")
+    condition_1_keys = os.getenv("CONDITION_1_PREFIXES", "").split(",")
+    condition_2_keys = os.getenv("CONDITION_2_PREFIXES", "").split(",")
+    condition_3_keys = os.getenv("CONDITION_3_PREFIXES", "").split(",")
     
     # Clean up the keys (remove spaces and empty strings)
     condition_1_keys = [key.strip() for key in condition_1_keys if key.strip()]
@@ -292,7 +264,9 @@ def get_starter_code(prefix, language):
     language_extensions = {
         'javascript': 'js',
         'python': 'py',
-        'c': 'c'
+        'c': 'c',
+        'cpp': 'cpp',
+        'java': 'java'
     }
     
     extension = language_extensions.get(language.lower())
@@ -404,7 +378,7 @@ def get_assignment_base_key(assignment_key):
 def get_assignment_condition(assignment_key):
     """
     Determine which condition the assignment key belongs to
-    Returns: 1 for full UI, 2 for partial UI (guess only), 3 for suggestions only, None for invalid
+    Returns: 1 for No AI, 2 for inline code suggestions, 3 for the AI agent, None for invalid
     EXACT MATCH ONLY: Case-insensitive and whitespace-trimmed, but no prefix/suffix variations allowed
     Examples:
       - "pattern", "Pattern", " pattern " → Valid (exact match)
@@ -597,286 +571,53 @@ def detect_programming_language(code):
     # Default to generic programming language
     return "code"
 
+# ─── Code execution ──────────────────────────────────────────────────────────
+# Production: RUNNER_URL points at runner.py in its own container (no secrets, no internet).
+# Development: without RUNNER_URL, code runs locally under sandbox.py's limits.
+
+RUNNER_URL = (os.getenv("RUNNER_URL") or "").rstrip("/")
+RUNNER_TOKEN = os.getenv("RUNNER_TOKEN", "")
+
+
+def code_runner_mode() -> str:
+    return "service" if RUNNER_URL else "local"
+
+
+if not RUNNER_URL:
+    logger.warning(
+        "RUNNER_URL is not set: student code runs on this server under sandbox.py limits. "
+        "Fine for development; in production run runner.py separately (see DOCKER.md)."
+    )
+
+
 async def execute_code_safely(
-    code: str, language: str, timeout: int = 10, files: Optional[List[Dict[str, str]]] = None
-):
-    """
-    Execute code safely in a subprocess with timeout and security restrictions.
-    When files is provided, all files are written to a shared temp directory
-    so they can import/include each other.
-    """
-    if not code.strip():
-        return {"success": False, "output": "", "error": "No code provided"}
-    
+    code: str, language: str, timeout: int = 10, files: Optional[List[Dict[str, str]]] = None,
+    key: str = "anonymous", stdin: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Run code non-interactively (optional `stdin` text, then end-of-input) and collect its output."""
+    language = (language or "").lower()
+    if language == "javascript":
+        return {"success": False, "output": "", "error": "JavaScript runs in the browser: use the Run button."}
+    if files and len(files) > 1:
+        entry = next((f["filename"] for f in files if f.get("content") == code), None)
+    else:
+        name = {"python": "main.py", "c": "main.c", "cpp": "main.cpp", "java": "Main.java"}.get(language, "main.txt")
+        files = [{"filename": name, "content": code}]
+        entry = files[0]["filename"]
+    if not RUNNER_URL:
+        return await sandbox.run_batch(key=key, language=language, files=files, entry=entry, stdin=stdin)
     try:
-        if language == "python":
-            return await execute_python_code(code, timeout, files=files)
-        elif language == "c":
-            return await execute_c_code(code, timeout, files=files)
-        elif language == "javascript":
-            return {"success": False, "output": "", "error": "JavaScript should be executed in frontend"}
-        else:
-            return {"success": False, "output": "", "error": f"Language '{language}' not supported for backend execution"}
-    except Exception as e:
-        logger.error(f"Code execution error: {e}")
-        return {"success": False, "output": "", "error": f"Execution failed: {str(e)}"}
-
-async def execute_python_code(code: str, timeout: int = 10, files: Optional[List[Dict[str, str]]] = None):
-    """
-    Execute Python code safely with restrictions.
-    When `files` is provided, all files are written to a shared temp directory
-    so they can import each other. The active file (code) is executed.
-    """
-    dangerous_patterns = [
-        'import os', 'import sys', 'import subprocess', 'import shutil',
-        'import socket', 'import urllib', 'import requests', 'import http',
-        'open(', 'file(', '__import__', 'eval(', 'exec(',
-        'compile(', 'globals()', 'locals()', 'vars()', 'dir(',
-        'getattr(', 'setattr(', 'delattr(', 'hasattr(',
-        'input(', 'raw_input('
-    ]
-
-    all_code_to_check = [code] + ([f.get("content", "") for f in files] if files else [])
-    for src in all_code_to_check:
-        src_lower = src.lower()
-        for pattern in dangerous_patterns:
-            if pattern in src_lower:
-                return {
-                    "success": False,
-                    "output": "",
-                    "error": f"Security restriction: '{pattern}' is not allowed for safety reasons"
-                }
-
-    tmpdir = tempfile.mkdtemp()
-    try:
-        if files and len(files) > 1:
-            main_file_path = None
-            for f in files:
-                fname = f.get("filename", "main.py")
-                if not fname.endswith(".py"):
-                    fname += ".py"
-                fpath = os.path.join(tmpdir, fname)
-                with open(fpath, 'w', encoding='utf-8') as fh:
-                    fh.write(f.get("content", ""))
-                if f.get("content", "") == code:
-                    main_file_path = fpath
-
-            if not main_file_path:
-                main_file_path = os.path.join(tmpdir, files[0].get("filename", "main.py"))
-                if not main_file_path.endswith(".py"):
-                    main_file_path += ".py"
-                with open(main_file_path, 'w', encoding='utf-8') as fh:
-                    fh.write(code)
-        else:
-            main_file_path = os.path.join(tmpdir, 'main.py')
-            with open(main_file_path, 'w', encoding='utf-8') as fh:
-                fh.write(code)
-
-        process = await asyncio.create_subprocess_exec(
-            sys.executable, main_file_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=tmpdir,
-            env={'PYTHONPATH': tmpdir, 'PATH': '/usr/bin:/bin'}
-        )
-
-        try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-            stdout_str = stdout.decode('utf-8', errors='replace')
-            stderr_str = stderr.decode('utf-8', errors='replace')
-
-            if process.returncode == 0:
-                return {
-                    "success": True,
-                    "output": stdout_str,
-                    "error": stderr_str if stderr_str else ""
-                }
-            else:
-                return {
-                    "success": False,
-                    "output": stdout_str,
-                    "error": stderr_str or f"Process exited with code {process.returncode}"
-                }
-
-        except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
-            return {
-                "success": False,
-                "output": "",
-                "error": f"Code execution timed out after {timeout} seconds"
-            }
-
-    except Exception as e:
-        return {
-            "success": False,
-            "output": "",
-            "error": f"Execution error: {str(e)}"
-        }
-    finally:
-        try:
-            import shutil as _shutil
-            _shutil.rmtree(tmpdir)
-        except Exception:
-            pass
-async def execute_c_code(code: str, timeout: int = 10, files: Optional[List[Dict[str, str]]] = None):
-    """
-    Execute C code safely with security restrictions and async compilation.
-    When `files` is provided, all files are written to a shared temp directory
-    so they can #include each other. All .c files are compiled together.
-    """
-    dangerous_patterns = [
-        '#include <unistd.h>',
-        '#include <sys/',
-        '#include <stdlib.h>',
-        '#include <fcntl.h>',
-        '#include <dirent.h>',
-        '#include <pwd.h>',
-        '#include <grp.h>',
-        '#include <signal.h>',
-        '#include <sys/socket.h>',
-        '#include <netinet/',
-        '#include <arpa/',
-        'system(',
-        'exec(',
-        'fork(',
-        'popen(',
-        'chroot(',
-        'setuid(',
-        'setgid(',
-        'chmod(',
-        'chown(',
-        'remove(',
-        'unlink(',
-        'rmdir(',
-        'rename(',
-        'tmpnam(',
-        'mkstemp(',
-        'fopen(',
-        'freopen(',
-        'fdopen(',
-        'socket(',
-        'bind(',
-        'connect(',
-    ]
-
-    all_code_to_check = [code] + ([f.get("content", "") for f in files] if files else [])
-    for src in all_code_to_check:
-        src_lower = src.lower()
-        for pattern in dangerous_patterns:
-            if pattern.lower() in src_lower:
-                return {
-                    "success": False,
-                    "output": "",
-                    "error": f"Security restriction: '{pattern}' is not allowed for safety reasons"
-                }
-
-    tmpdir = tempfile.mkdtemp()
-
-    try:
-        c_file_paths = []
-        if files and len(files) > 1:
-            for f in files:
-                fname = f.get("filename", "main.c")
-                fpath = os.path.join(tmpdir, fname)
-                with open(fpath, 'w', encoding='utf-8') as fh:
-                    fh.write(f.get("content", ""))
-                if fname.endswith('.c'):
-                    c_file_paths.append(fpath)
-        else:
-            c_file_path = os.path.join(tmpdir, 'main.c')
-            with open(c_file_path, 'w', encoding='utf-8') as c_file:
-                c_file.write(code)
-            c_file_paths = [c_file_path]
-
-        exe_file_path = os.path.join(tmpdir, 'temp.out')
-
-        compile_args = ['gcc'] + c_file_paths + ['-o', exe_file_path, '-std=c11', '-I', tmpdir]
-        compile_process = await asyncio.create_subprocess_exec(
-            *compile_args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-
-        try:
-            # Wait for compilation with timeout
-            compile_stdout, compile_stderr = await asyncio.wait_for(
-                compile_process.communicate(), 
-                timeout=10
+        async with httpx.AsyncClient(timeout=sandbox.LIMITS["batch_wall_seconds"] + sandbox.LIMITS["queue_seconds"] + 30) as hc:
+            resp = await hc.post(
+                f"{RUNNER_URL}/execute", headers={"X-Runner-Token": RUNNER_TOKEN},
+                json={"key": key, "language": language, "files": files, "entry": entry, "stdin": stdin},
             )
-            
-            compile_stderr_str = compile_stderr.decode('utf-8', errors='replace')
-            
-            # Check if compilation was successful
-            if compile_process.returncode != 0:
-                return {
-                    "success": False,
-                    "output": "",
-                    "error": f"Compilation failed:\n{compile_stderr_str}"
-                }
-                
-        except asyncio.TimeoutError:
-            compile_process.kill()
-            await compile_process.wait()
-            return {
-                "success": False,
-                "output": "",
-                "error": "Compilation timed out after 10 seconds"
-            }
-
-        # Execute the compiled binary
-        exec_process = await asyncio.create_subprocess_exec(
-            exe_file_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env={'PATH': '/usr/bin:/bin'}
-        )
-
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                exec_process.communicate(), 
-                timeout=timeout
-            )
-            
-            stdout_str = stdout.decode('utf-8', errors='replace')
-            stderr_str = stderr.decode('utf-8', errors='replace')
-            
-            if exec_process.returncode == 0:
-                return {
-                    "success": True,
-                    "output": stdout_str,
-                    "error": stderr_str if stderr_str else ""
-                }
-            else:
-                return {
-                    "success": False,
-                    "output": stdout_str,
-                    "error": stderr_str or f"Process exited with code {exec_process.returncode}"
-                }
-                
-        except asyncio.TimeoutError:
-            exec_process.kill()
-            await exec_process.wait()
-            return {
-                "success": False,
-                "output": "",
-                "error": f"Code execution timed out after {timeout} seconds"
-            }
-                
+            resp.raise_for_status()
+            return resp.json()
     except Exception as e:
-        logger.error(f"C code execution error: {e}")
-        return {
-            "success": False,
-            "output": "",
-            "error": f"Execution error: {str(e)}"
-        }
-    finally:
-        # Clean up temporary directory
-        try:
-            import shutil
-            shutil.rmtree(tmpdir)
-        except Exception as e:
-            logger.warning(f"Failed to clean up temp directory {tmpdir}: {e}")
+        logger.error("Code runner unavailable: %s", e)
+        return {"success": False, "output": "", "error": "The code runner is unavailable. Please try again shortly."}
+
 # Data Models
 class AuthRequest(BaseModel):
     user_id: str
@@ -920,6 +661,8 @@ class AuthResponse(BaseModel):
     # Session-resume fields: set when an incomplete prior session is found
     resumed: bool = False
     editor_draft_code: Optional[str] = None
+    editor_draft_files: Optional[List[Dict[str, str]]] = None
+    editor_draft_active_file: Optional[str] = None
     # Exact survey phase (login redirect: e.g. post survey in progress → survey page)
     pre_survey_status: str = "not_started"
     post_survey_status: str = "not_started"
@@ -971,6 +714,10 @@ class SessionLog(BaseModel):
     # Latest server-side editor draft (within-phase durability)
     editor_draft_checkpoint: Optional[str] = None
     editor_draft_updated_at: Optional[str] = None
+    # All workspace files ([{filename, content}]) for the problem the draft was saved on
+    editor_draft_files: Optional[List[Dict[str, str]]] = None
+    editor_draft_active_file: Optional[str] = None
+    editor_draft_problem_index: Optional[int] = None
 
     # Multi-problem tracking
     current_problem_index: int = 0
@@ -1003,6 +750,10 @@ class SessionLog(BaseModel):
     activity_log: List[ActivityEntry] = []
     activity_summary: ActivitySummary = ActivitySummary()
 
+    # Condition 3 (agent): one record per student message, and the student's own skills
+    agent_log: List[Dict[str, Any]] = Field(default_factory=list)
+    agent_skills: List[Dict[str, str]] = Field(default_factory=list)
+
 
 class SurveyResponse(BaseModel):
     question: str
@@ -1021,6 +772,14 @@ class SurveySubmission(BaseModel):
 class SurveyConfig(BaseModel):
     questions: List[str]
     feedback_interval: int
+
+
+# Per-request cache of sessions loaded from Redis: session_id -> (SessionLog, JSON as loaded).
+# Endpoints mutate the SessionLog they get from active_sessions in place (as with the in-memory
+# store); persist_session_mutations() writes changed sessions back to Redis when the request ends.
+_request_sessions: ContextVar[Optional[Dict[str, Tuple["SessionLog", str]]]] = ContextVar(
+    "_request_sessions", default=None
+)
 
 
 class ActiveSessionMap:
@@ -1048,23 +807,67 @@ class ActiveSessionMap:
     def __getitem__(self, k: str) -> SessionLog:
         if self._redis is None:
             return self._local[k]
+        cache = _request_sessions.get()
+        if cache is not None and k in cache:
+            return cache[k][0]
         raw = self._redis.get(self._prefix + k)
         if raw is None:
             raise KeyError(k)
         # Redis stubs may type .get() loosely; session JSON is always str with decode_responses=True.
-        return SessionLog.model_validate_json(cast(str, raw))
+        sl = SessionLog.model_validate_json(cast(str, raw))
+        if cache is not None:
+            cache[k] = (sl, cast(str, raw))
+        return sl
 
     def __setitem__(self, k: str, v: SessionLog) -> None:
         if self._redis is None:
             self._local[k] = v
             return
-        self._redis.setex(self._prefix + k, self._ttl, v.model_dump_json())
+        dumped = v.model_dump_json()
+        self._redis.setex(self._prefix + k, self._ttl, dumped)
+        cache = _request_sessions.get()
+        if cache is not None:
+            cache[k] = (v, dumped)
 
     def __delitem__(self, k: str) -> None:
         if self._redis is None:
             del self._local[k]
             return
         self._redis.delete(self._prefix + k)
+        cache = _request_sessions.get()
+        if cache is not None:
+            cache.pop(k, None)
+
+    def update_fresh(self, k: str, fn: Callable[[SessionLog], None]) -> None:
+        """Apply fn to the latest stored session and save it, bypassing the per-request cache.
+
+        Used by streaming endpoints that finish long after the session was first read, so
+        changes other requests made in the meantime are not overwritten.
+        """
+        if self._redis is None:
+            fn(self._local[k])
+            return
+        raw = self._redis.get(self._prefix + k)
+        if raw is None:
+            raise KeyError(k)
+        sl = SessionLog.model_validate_json(cast(str, raw))
+        fn(sl)
+        dumped = sl.model_dump_json()
+        self._redis.setex(self._prefix + k, self._ttl, dumped)
+        cache = _request_sessions.get()
+        if cache is not None and k in cache:
+            cache[k] = (sl, dumped)
+
+    def flush_request_sessions(self) -> None:
+        """Write sessions mutated during this request back to Redis."""
+        cache = _request_sessions.get()
+        if self._redis is None or not cache:
+            return
+        for k, (sl, loaded) in cache.items():
+            current = sl.model_dump_json()
+            if current != loaded:
+                self._redis.setex(self._prefix + k, self._ttl, current)
+                cache[k] = (sl, current)
 
     def __contains__(self, k: str) -> bool:
         if self._redis is None:
@@ -1103,6 +906,7 @@ class ActiveSessionMap:
 
 # Global session storage (Redis if REDIS_URL, else in-memory; sent to Firebase on submit)
 active_sessions: ActiveSessionMap = ActiveSessionMap()
+
 
 # Limit concurrent OpenAI calls to avoid rate-limit / 500 errors under heavy load.
 # Configurable via OPENAI_CONCURRENCY env var (default 5).
@@ -1302,6 +1106,20 @@ app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET_KEY", "change-me-in-production"),
 )
+
+
+@app.middleware("http")
+async def persist_session_mutations(request: Request, call_next):
+    token = _request_sessions.set({})
+    try:
+        return await call_next(request)
+    finally:
+        try:
+            await asyncio.to_thread(active_sessions.flush_request_sessions)
+        except Exception as exc:
+            logger.error("Failed to persist session changes to Redis: %s", exc)
+        _request_sessions.reset(token)
+
 
 app.include_router(admin_router)
 app.include_router(instructor_router)
@@ -1729,6 +1547,7 @@ if not API_KEY:
     raise ValueError("OPENAI_API_KEY not found in environment variables")
 
 client = OpenAI(api_key=API_KEY)
+async_client = AsyncOpenAI(api_key=API_KEY)
 
 # Sidebar hidden prefixes
 SIDE_PANEL_HIDDEN = os.getenv("SIDE_PANEL_HIDDEN", "").lower().split(",")
@@ -2568,6 +2387,9 @@ async def analyze_code(request: CodeRequest):
         if len(code_full) > max_code_length:
             raise HTTPException(status_code=400, detail=f"Code too long - please keep under {max_code_length} characters")
         
+        if await _session_condition(session_id) == CONDITION_NO_AI:
+            raise HTTPException(status_code=403, detail="AI assistance is disabled for this session")
+
         if not code_full.strip():
             return CodeResponse(
                 analysis="Start typing code to get AI-powered problem analysis...",
@@ -2826,8 +2648,12 @@ async def execute_code(request: ExecuteRequest):
                 )
             files_dicts = [{"filename": f.filename, "content": f.content} for f in request.files]
 
+        if await _session_condition(request.session_id) is None:
+            return ExecuteResponse(success=False, output="", error="Session not found. Please log in again.",
+                                   execution_time=0.0)
+
         start_time = time.time()
-        result = await execute_code_safely(code, language, timeout=10, files=files_dicts)
+        result = await execute_code_safely(code, language, files=files_dicts, key=str(request.session_id))
         execution_time = time.time() - start_time
         
         return ExecuteResponse(
@@ -2882,6 +2708,210 @@ def _merge_client_activity_logs(session_log: SessionLog, raw_logs: Optional[List
     for e in parsed:
         merged[(e.timestamp, e.activity_type)] = e
     session_log.activity_log = sorted(merged.values(), key=lambda x: x.timestamp)
+
+@app.websocket("/ws/run")
+async def run_terminal(ws: WebSocket):
+    """Interactive terminal: streams program output and forwards the student's input.
+
+    Client sends {"session_id", "language", "files", "entry"} first, then
+    {"type": "stdin", "data"} / {"type": "eof"} / {"type": "stop"} (see runner.py).
+    """
+    await ws.accept()
+    try:
+        start = await asyncio.wait_for(ws.receive_json(), timeout=10)
+        session_id = str(start.get("session_id") or "")
+    except Exception:
+        await ws.close()
+        return
+    if await _session_condition(session_id) is None:
+        await ws.send_json({"type": "rejected", "message": "Session not found. Please log in again."})
+        await ws.close()
+        return
+    start = {"type": "start", "key": session_id, "language": start.get("language"),
+             "files": start.get("files") or [], "entry": start.get("entry"),
+             "compile_only": bool(start.get("compile_only"))}
+
+    if not RUNNER_URL:
+        await sandbox.serve_websocket(ws, start)
+        return
+
+    from websockets.asyncio.client import connect as ws_connect
+
+    try:
+        async with ws_connect(
+            RUNNER_URL.replace("http", "ws", 1) + "/run",
+            additional_headers={"X-Runner-Token": RUNNER_TOKEN}, open_timeout=10, max_size=2 ** 20,
+        ) as upstream:
+            await upstream.send(json.dumps(start))
+
+            async def client_to_runner():
+                try:
+                    while True:
+                        msg = await ws.receive_json()
+                        if msg.get("type") in ("stdin", "eof", "stop"):
+                            await upstream.send(json.dumps(
+                                {"type": msg["type"], "data": str(msg.get("data", ""))[:4000]}))
+                except (WebSocketDisconnect, RuntimeError, ValueError):
+                    try:
+                        await upstream.send(json.dumps({"type": "stop"}))
+                    except Exception:
+                        pass
+
+            forward = asyncio.create_task(client_to_runner())
+            try:
+                async for msg in upstream:
+                    await ws.send_text(msg if isinstance(msg, str) else msg.decode())
+            finally:
+                forward.cancel()
+    except Exception as e:
+        logger.error("Code runner unavailable: %s", e)
+        try:
+            await ws.send_json({"type": "rejected", "message": "The code runner is unavailable. Please try again shortly."})
+        except Exception:
+            pass
+    try:
+        await ws.close()
+    except Exception:
+        pass
+
+
+# ─── Study conditions: 1 = No AI, 2 = inline code suggestion, 3 = coding agent ───
+
+CONDITION_NO_AI = 1
+CONDITION_SUGGESTION = 2
+CONDITION_AGENT = 3
+
+# A session's condition never changes, so cache it per worker: /complete runs on every
+# typing pause and should not fetch the whole session from Redis each time.
+_session_condition_cache: Dict[str, int] = {}
+
+
+async def _session_condition(session_id: Optional[str]) -> Optional[int]:
+    if not session_id:
+        return None
+    cached = _session_condition_cache.get(session_id)
+    if cached is not None:
+        return cached
+    sl = await ensure_session_log_loaded(session_id)
+    if sl is None:
+        return None
+    _session_condition_cache[session_id] = int(sl.condition)
+    return int(sl.condition)
+
+
+class CompletionRequest(BaseModel):
+    session_id: str
+    language: str = "python"
+    filename: str = "main.py"
+    prefix: str
+    suffix: str = ""
+
+
+@app.post("/complete")
+async def inline_complete(request: CompletionRequest):
+    """Copilot-style ghost-text completion (condition 2)."""
+    if await _session_condition(request.session_id) != CONDITION_SUGGESTION:
+        raise HTTPException(status_code=403, detail="Inline suggestions are not enabled for this session")
+    if not request.prefix.strip():
+        return {"completion": ""}
+    try:
+        async with _analyze_semaphore:
+            completion = await ai_assist.inline_completion(
+                async_client,
+                language=request.language,
+                filename=request.filename,
+                prefix=request.prefix,
+                suffix=request.suffix,
+            )
+        return {"completion": completion, "id": uuid.uuid4().hex[:12]}
+    except Exception as e:
+        logger.warning("Inline completion failed: %s", e)
+        return {"completion": ""}
+
+
+class AgentSkill(BaseModel):
+    name: str = Field(max_length=60)
+    instructions: str = Field(max_length=4000)
+    source: str = "student"  # "student" | "instructor"
+
+
+class AgentChatRequest(BaseModel):
+    session_id: str
+    mode: str = "agent"
+    message: str = Field(max_length=8000)
+    language: str = "python"
+    files: List[FileItem]
+    active_file: Optional[str] = None
+    history: List[Dict[str, str]] = []
+    skills: List[AgentSkill] = []
+    terminal_output: Optional[str] = None
+
+
+
+
+@app.post("/agent/chat")
+async def agent_chat(request: AgentChatRequest):
+    """Cursor-style agent turn (condition 3), streamed as server-sent events."""
+    if await _session_condition(request.session_id) != CONDITION_AGENT:
+        raise HTTPException(status_code=403, detail="The agent is not enabled for this session")
+    if not request.message.strip():
+        raise HTTPException(status_code=400, detail="Empty message")
+    if len(request.files) > ai_assist.MAX_FILES:
+        raise HTTPException(status_code=400, detail="Too many files")
+
+    turn = ai_assist.AgentTurn(
+        async_client,
+        mode=request.mode,
+        message=request.message,
+        history=request.history,
+        files=[{"filename": f.filename, "content": f.content} for f in request.files],
+        active_file=request.active_file or "",
+        language=request.language,
+        skills=[s.model_dump() for s in request.skills],
+        terminal_output=request.terminal_output,
+        run_code=lambda code, files, language, stdin: execute_code_safely(
+            code, language, files=files, key=f"{request.session_id}:agent", stdin=stdin
+        ),
+    )
+
+    async def events():
+        try:
+            async for ev in turn.run():
+                yield f"data: {json.dumps(ev)}\n\n"
+        except Exception as e:
+            logger.error("Agent turn failed: %s", e)
+            turn.record["error"] = str(e)
+            yield f"data: {json.dumps({'type': 'error', 'message': 'The agent hit an error. Please try again.'})}\n\n"
+        finally:
+            try:
+                await asyncio.to_thread(
+                    active_sessions.update_fresh, request.session_id, lambda sl: sl.agent_log.append(turn.record)
+                )
+            except Exception as e:
+                logger.error("Failed to log agent turn for %s: %s", request.session_id, e)
+
+    return StreamingResponse(
+        events(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+class AgentSkillsRequest(BaseModel):
+    session_id: str
+    skills: List[AgentSkill] = Field(max_length=20)
+
+
+@app.post("/agent/skills")
+async def save_agent_skills(request: AgentSkillsRequest):
+    """Save the student's own skills (instructor skills come from the quiz)."""
+    if await _session_condition(request.session_id) != CONDITION_AGENT:
+        raise HTTPException(status_code=403, detail="The agent is not enabled for this session")
+    skills = [{"name": s.name.strip(), "instructions": s.instructions.strip()} for s in request.skills if s.name.strip()]
+    await asyncio.to_thread(
+        active_sessions.update_fresh, request.session_id, lambda sl: setattr(sl, "agent_skills", skills)
+    )
+    return {"status": "ok", "skills": skills}
+
 
 class SubmitResponse(BaseModel):
     status: str
@@ -3220,6 +3250,8 @@ async def health_check():
         "service": "AI Code Assistant with Firebase Integration",
         "firebase_status": firebase_status,
         "session_store": active_sessions.session_store_backend(),
+        "code_runner": code_runner_mode(),
+        "code_runs_local": sandbox.stats if not RUNNER_URL else None,
         "active_sessions": len(active_sessions),
         "environment": {
             "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
@@ -3262,9 +3294,9 @@ async def get_stats():
             "cors_origins": os.getenv("CORS_ORIGINS", "*"),
             "api_host": os.getenv("API_HOST", "0.0.0.0"),
             "api_port": int(os.getenv("API_PORT", "8000")),
-            "condition_1_prefixes": os.getenv("CONDITION_1_PREFIXES", "Condition1_all"),
-            "condition_2_prefixes": os.getenv("CONDITION_2_PREFIXES", "Condition2_partial,fdasdfsa"),
-            "condition_3_prefixes": os.getenv("CONDITION_3_PREFIXES", "Condition3_suggestions"),
+            "condition_1_prefixes": os.getenv("CONDITION_1_PREFIXES", ""),
+            "condition_2_prefixes": os.getenv("CONDITION_2_PREFIXES", ""),
+            "condition_3_prefixes": os.getenv("CONDITION_3_PREFIXES", ""),
             "submissions_dir": os.getenv("SUBMISSIONS_DIR", "submissions")
         }
     }
@@ -3284,21 +3316,6 @@ async def debug_firebase():
             "GOOGLE_APPLICATION_CREDENTIALS": bool(os.getenv("GOOGLE_APPLICATION_CREDENTIALS")),
         }
     }
-
-@app.post("/_debug/agent-ingest")
-async def debug_agent_ingest(payload: dict = Body(...)):
-    """Browser → same-origin → append NDJSON for Cursor debug (session ef2d3c)."""
-    data = payload.get("data")
-    if not isinstance(data, dict):
-        data = {}
-    _agent_debug_log(
-        str(payload.get("hypothesisId") or "?"),
-        str(payload.get("location") or ""),
-        str(payload.get("message") or ""),
-        data,
-    )
-    return {"ok": True}
-
 
 @app.get("/debug/test-write")
 async def test_firebase_write():
@@ -3397,6 +3414,17 @@ class EditorCheckpointRequest(BaseModel):
     cursor_column: Optional[int] = None
     scroll_top: Optional[float] = None
     current_problem_index: Optional[int] = None
+    files: Optional[List[FileItem]] = Field(default=None, max_length=20)
+    active_file: Optional[str] = None
+
+
+def _draft_files_for(sl: "SessionLog") -> Optional[List[Dict[str, str]]]:
+    """Saved workspace files, only if they belong to the session's current problem."""
+    if not sl.editor_draft_files:
+        return None
+    if sl.editor_draft_problem_index not in (None, sl.current_problem_index):
+        return None
+    return sl.editor_draft_files
 
 
 @app.post("/checkpoint-editor")
@@ -3423,6 +3451,12 @@ async def checkpoint_editor(request: EditorCheckpointRequest):
             raise HTTPException(status_code=403, detail="user_id does not match this session")
         session_log.editor_draft_checkpoint = request.code
         session_log.editor_draft_updated_at = datetime.now(timezone.utc).isoformat()
+        if request.files:
+            if sum(len(f.content) for f in request.files) > max_len:
+                raise HTTPException(status_code=400, detail=f"Code too long (max {max_len} chars)")
+            session_log.editor_draft_files = [{"filename": f.filename[:64], "content": f.content} for f in request.files]
+            session_log.editor_draft_active_file = request.active_file
+            session_log.editor_draft_problem_index = request.current_problem_index
         if aid and session_log.assignment_id == "unknown":
             session_log.assignment_id = aid
         save_session_to_local(session_log)
@@ -3435,6 +3469,8 @@ async def checkpoint_editor(request: EditorCheckpointRequest):
             "programming_language": request.programming_language,
             "updated_at_utc": datetime.now(timezone.utc).isoformat(),
             "code": request.code,
+            "files": [{"filename": f.filename[:64], "content": f.content} for f in request.files] if request.files else None,
+            "active_file": request.active_file,
             "cursor_line": request.cursor_line,
             "cursor_column": request.cursor_column,
             "scroll_top": request.scroll_top,
@@ -4320,7 +4356,17 @@ async def update_survey_status(
 
         session_log = active_sessions[session_id]
         timestamp = datetime.now().isoformat()
-        
+
+        # survey.html reports in_progress on every open; never downgrade a completed survey
+        # (quiz_next_problem resets statuses directly when advancing).
+        current = session_log.pre_survey_status if survey_type == 'pre' else session_log.post_survey_status
+        if current == SurveyStatus.COMPLETED and status != SurveyStatus.COMPLETED:
+            return {
+                "status": "ok",
+                "message": f"{survey_type.title()} survey already completed",
+                "timestamp": timestamp
+            }
+
         if survey_type == 'pre':
             session_log.pre_survey_status = status
             if status == SurveyStatus.COMPLETED or status == SurveyStatus.IN_PROGRESS:
@@ -4363,16 +4409,6 @@ async def update_survey_status(
 async def submit_pre_post_survey(request: PrePostSurveySubmission):
     """Submit pre or post survey with complete question data and responses"""
     try:
-        _agent_debug_log(
-            "H3",
-            "main.py:submit_pre_post_survey:entry",
-            "pre/post submit",
-            {
-                "survey_type": request.survey_type,
-                "in_active_sessions": request.session_id in active_sessions,
-                "session_id_suffix": (request.session_id or "")[-12:],
-            },
-        )
         # Update session log with complete survey data (load from disk/Firebase if not in memory)
         session_log: Optional[SessionLog] = None
         if request.session_id in active_sessions:
@@ -4693,6 +4729,8 @@ async def authenticate_user(request: AuthRequest):
                 total_problems=existing_sl.total_problems,
                 resumed=True,
                 editor_draft_code=existing_sl.editor_draft_checkpoint,
+                editor_draft_files=_draft_files_for(existing_sl),
+                editor_draft_active_file=existing_sl.editor_draft_active_file,
                 pre_survey_status=existing_sl.pre_survey_status,
                 post_survey_status=existing_sl.post_survey_status,
                 assignment_already_completed=False,
@@ -5506,6 +5544,22 @@ async def debug_quiz_survey_flags(quiz_id: str, session_id: Optional[str] = None
     return result
 
 
+def _message_page(title: str, detail: str = "", status_code: int = 200) -> HTMLResponse:
+    """Small page in the app's design (used for quiz link errors)."""
+    body = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>{html_std.escape(title)}</title>
+<style>
+  body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#181818;color:#cccccc;
+       font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}}
+  .card{{max-width:420px;margin:16px;padding:28px;background:#1f1f1f;border:1px solid #2b2b2b;border-radius:12px;
+        box-shadow:0 18px 48px rgba(0,0,0,.55);animation:in .24s cubic-bezier(.2,0,0,1)}}
+  h1{{margin:0 0 6px;font-size:16px;font-weight:600;color:#e7e7e7}} p{{margin:0;color:#8b8b8b}}
+  @keyframes in{{from{{opacity:0;transform:translateY(8px) scale(.97)}}to{{opacity:1;transform:none}}}}
+</style></head><body><div class="card"><h1>{html_std.escape(title)}</h1>
+<p>{html_std.escape(detail)}</p></div></body></html>"""
+    return HTMLResponse(body, status_code=status_code)
+
+
 # ─── Quiz data helpers ──────────────────────────────────────────────────────
 
 def normalize_quiz_data(quiz_data: dict) -> dict:
@@ -5573,10 +5627,10 @@ async def student_quiz_entry(request: Request, access_code: str):
             quiz_data = fb_dict(db.reference(f"quizzes/{quiz_id}").get()) if quiz_id else None
 
     if not quiz_data:
-        return HTMLResponse("<h2>Quiz not found or link is invalid.</h2>", status_code=404)
+        return _message_page("Quiz not found", "This link is invalid. Please check it with your instructor.", 404)
 
     if not quiz_data.get("published", False):
-        return HTMLResponse("<h2>This quiz is not currently available.</h2>", status_code=403)
+        return _message_page("This quiz is not available", "It is not open right now. Please contact your instructor.", 403)
 
     # Check availability window
     now = datetime.utcnow()
@@ -5585,17 +5639,17 @@ async def student_quiz_entry(request: Request, access_code: str):
     if avail_start:
         try:
             if now < datetime.fromisoformat(avail_start):
-                return HTMLResponse("<h2>This quiz has not started yet.</h2>", status_code=403)
+                return _message_page("This quiz has not started yet", "Please come back when it opens.", 403)
         except ValueError:
             pass
     if avail_end:
         try:
             if now > datetime.fromisoformat(avail_end):
-                return HTMLResponse("<h2>This quiz is no longer available.</h2>", status_code=403)
+                return _message_page("This quiz has closed", "It is no longer accepting responses.", 403)
         except ValueError:
             pass
 
-    allowed_langs = quiz_data.get("allowed_languages", ["python", "javascript", "c"])
+    allowed_langs = quiz_data.get("allowed_languages", ["python", "javascript", "c", "cpp", "java"])
     quiz_teaser = quiz_data.get("teaser", "")
     return templates.TemplateResponse("home.html", {
         "request": request,
@@ -5664,6 +5718,10 @@ def build_quiz_join_response(
         "current_problem_index": problem_idx,
         "resumed": resumed,
         "editor_draft_code": session_log.editor_draft_checkpoint,
+        "editor_draft_files": _draft_files_for(session_log),
+        "editor_draft_active_file": session_log.editor_draft_active_file,
+        "agent_skills_instructor": quiz_data.get("agent_skills", []) if session_log.condition == CONDITION_AGENT else [],
+        "agent_skills_student": session_log.agent_skills if session_log.condition == CONDITION_AGENT else [],
     }
 
 
@@ -5763,7 +5821,7 @@ async def student_quiz_join(request: Request):
             pass
 
     # Validate language
-    allowed_langs = quiz_data.get("allowed_languages", ["python", "javascript", "c"])
+    allowed_langs = quiz_data.get("allowed_languages", ["python", "javascript", "c", "cpp", "java"])
     if programming_language not in allowed_langs:
         raise HTTPException(status_code=400, detail=f"Language not allowed. Choose from: {allowed_langs}")
 
@@ -5891,16 +5949,6 @@ async def quiz_next_problem(request: Request):
 
     session_log = active_sessions[session_id]
 
-    _agent_debug_log(
-        "H2",
-        "main.py:quiz_next_problem:before_advance",
-        "state before advance",
-        {
-            "current_problem_index": session_log.current_problem_index,
-            "total_problems": session_log.total_problems,
-            "session_id_suffix": (session_id or "")[-12:],
-        },
-    )
 
     # Idempotency guard: if client tells us which problem it thinks it's on,
     # and the server already advanced past that, return current state without re-advancing.
@@ -5983,12 +6031,6 @@ async def quiz_next_problem(request: Request):
                 session_log.total_problems,
                 completed=True,
             )
-        _agent_debug_log(
-            "H1",
-            "main.py:quiz_next_problem:return_complete_idx_ge_total",
-            "returning complete",
-            {"idx": idx, "total_problems": session_log.total_problems},
-        )
         return {"status": "complete", "message": "All problems completed"}
 
     # Reset recurrent survey counter for the new problem
@@ -6028,12 +6070,6 @@ async def quiz_next_problem(request: Request):
                 session_log.total_problems,
                 completed=True,
             )
-        _agent_debug_log(
-            "H1",
-            "main.py:quiz_next_problem:return_complete_idx_ge_len",
-            "returning complete (idx>=len(problems))",
-            {"idx": idx, "len_problems": len(problems), "total_problems": session_log.total_problems},
-        )
         return {"status": "complete", "message": "All problems completed"}
 
     problem = problems[idx]
@@ -6075,16 +6111,6 @@ async def quiz_next_problem(request: Request):
             completed=False,
         )
 
-    _agent_debug_log(
-        "H1",
-        "main.py:quiz_next_problem:return_next",
-        "returning next problem",
-        {
-            "problem_index": idx,
-            "total_problems": session_log.total_problems,
-            "has_pre": problem.get("pre_survey_enabled", False) and bool(problem.get("pre_survey")),
-        },
-    )
     return {
         "status": "next",
         "problem_index": idx,

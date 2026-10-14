@@ -16,9 +16,9 @@ Web-based coding environment for research studies: participants write code in a 
 
 | Area | Functionality |
 |------|----------------|
-| **IDE** | Multi-file tree, Monaco editor, font controls, terminal with Run / Clear / Submit |
-| **AI assist** | Debounced analysis of editor content; floating **Copilot-style popup** with **AI’s interpretation** (conditions 1–2) and **suggested line**; `Tab` accept / `Esc` reject |
-| **Conditions** | Assignment key **prefixes** map to study arms: full interpretation + optional “correct” hints (1), interpretation + suggestion (2), **suggestion-only** like Copilot (3) |
+| **IDE** | Multi-file tree, Monaco editor, font controls, **interactive terminal** (live output, typing input for `input()` / `scanf` / `cin` / `Scanner`, Stop) with Run / Clear / Submit. Python, C (gcc), C++ (g++, C++17) and Java (javac + java) compile and run in a sandboxed runner; JavaScript runs in a browser worker |
+| **AI assist** | Condition 2: inline **ghost-text** suggestions (single or multi-line) as you type, `Tab` accept / `Esc` dismiss. Condition 3: **Cursor-style agent** chat with Ask / Agent / Plan / Debug modes that reads, edits, creates, deletes and runs files, with per-file Keep/Undo review and skills (instructor- and student-defined). Logic lives in `ai_assist.py` and `templates/ai_modes.js` |
+| **Conditions** | **1 = No AI**, **2 = code suggestion** (ghost text), **3 = AI agent**. Instructors pick one or more per quiz (students are randomly assigned); legacy assignment keys map via `CONDITION_*_PREFIXES` |
 | **Problem panel** | Assignment text, **AI history** tab with newest-first pagination (5 + “See more”) |
 | **Surveys** | Pre/post/periodic surveys (content configurable via env and Firebase-backed quiz config where used) |
 | **Persistence** | Code submissions and logs under configurable dirs; optional **Firebase** for live session/checkpoint data |
@@ -58,8 +58,11 @@ Optional but common:
 | `SESSION_SECRET_KEY` | Session signing — **set a strong value in production** |
 | `CORS_ORIGINS` | Comma-separated origins or `*` (default) |
 | `SUBMISSIONS_DIR` | Where submissions/logs go (default `submissions`) |
-| `CONDITION_1_PREFIXES`, `CONDITION_2_PREFIXES`, `CONDITION_3_PREFIXES` | Comma-separated assignment key prefixes → study condition |
+| `CONDITION_1_PREFIXES`, `CONDITION_2_PREFIXES`, `CONDITION_3_PREFIXES` | Optional, legacy: assignment keys → study condition. Unset = only instructor quiz links work |
 | `MAX_CODE_LENGTH`, `MIN_CODE_CHARS_FOR_SUGGESTION` | Editor / suggestion limits |
+| `COMPLETION_MODEL`, `AGENT_MODEL`, `AGENT_MAX_STEPS` | Ghost-text model (default `gpt-4.1-nano`), agent model (default `gpt-4.1-mini`), max agent tool steps per message (default 15) |
+| `RUNNER_URL`, `RUNNER_TOKEN` | Address and shared secret of the separate code-runner service (`runner.py`). Unset = run code locally (development). See [DOCKER.md](./DOCKER.md#student-code-runner-required-in-production) |
+| `CODE_MAX_CONCURRENT`, `CODE_RUNS_PER_MINUTE`, `CODE_CPU_SECONDS`, `CODE_WALL_SECONDS`, `CODE_IDLE_SECONDS`, `CODE_MEMORY_MB`, `CODE_OUTPUT_BYTES` | Terminal guardrails (defaults 40, 20, 10 s, 120 s, 60 s, 256 MB, 100 KB) — see `sandbox.py` |
 
 **Firebase (optional)** — if omitted, the app runs without cloud DB; local features still work.
 

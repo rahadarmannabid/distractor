@@ -270,6 +270,19 @@ def _require_instructor(request: Request):
     return request.session.get("instructor_email") if request.session.get("is_instructor") else None
 
 
+def _clean_agent_skills(raw: Any) -> List[Dict[str, str]]:
+    """Instructor-defined skills for the agent condition: [{name, instructions}], at most 20."""
+    skills: List[Dict[str, str]] = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()[:60]
+        instructions = str(item.get("instructions") or "").strip()[:4000]
+        if name and instructions:
+            skills.append({"name": name, "instructions": instructions})
+    return skills[:20]
+
+
 def _generate_access_code(length: int = 8) -> str:
     """Generate a high-entropy alphanumeric access code."""
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"
@@ -553,9 +566,10 @@ async def save_quiz(request: Request, payload: dict = Body(...)):
         "description": "",
         "teaser": teaser,
         "problems": problems,
-        "allowed_languages": payload.get("allowed_languages", ["python", "javascript", "c"]),
+        "allowed_languages": payload.get("allowed_languages", ["python", "javascript", "c", "cpp", "java"]),
         "time_limit_minutes": int(payload.get("time_limit_minutes", 0)),
         "conditions": conditions,
+        "agent_skills": _clean_agent_skills(payload.get("agent_skills")),
         "recurrent_survey": payload.get("recurrent_survey", []),
         "recurrent_survey_interval": int(payload.get("recurrent_survey_interval", 4)),
         "recurrent_survey_start": int(payload.get("recurrent_survey_start", 5)),
@@ -648,9 +662,10 @@ async def duplicate_quiz(request: Request, quiz_id: str):
         "description": "",
         "teaser": teaser,
         "problems": problems,
-        "allowed_languages": src_quiz.get("allowed_languages", ["python", "javascript", "c"]),
+        "allowed_languages": src_quiz.get("allowed_languages", ["python", "javascript", "c", "cpp", "java"]),
         "time_limit_minutes": int(src_quiz.get("time_limit_minutes", 0)),
         "conditions": conditions,
+        "agent_skills": copy.deepcopy(src_quiz.get("agent_skills", [])),
         "recurrent_survey": copy.deepcopy(src_quiz.get("recurrent_survey", [])),
         "recurrent_survey_interval": int(src_quiz.get("recurrent_survey_interval", 4)),
         "recurrent_survey_start": int(src_quiz.get("recurrent_survey_start", 5)),
@@ -753,6 +768,8 @@ async def update_quiz(request: Request, quiz_id: str, payload: dict = Body(...))
         "paste_allowed", "tab_tracking_enabled",
     ]
     updates = {k: payload[k] for k in updatable_fields if k in payload}
+    if "agent_skills" in payload:
+        updates["agent_skills"] = _clean_agent_skills(payload.get("agent_skills"))
     # Derive title from teaser or first problem
     teaser = (payload.get("teaser") or "").strip()
     problems = payload.get("problems") or existing.get("problems", [])

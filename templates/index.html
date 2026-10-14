@@ -903,6 +903,27 @@
         .output-line {
             margin: 2px 0;
         }
+        .term-line {
+            white-space: pre-wrap;
+        }
+        .term-stdin {
+            color: #9cdcfe;
+        }
+        .term-input {
+            display: inline-block;
+            width: 40ch;
+            max-width: 100%;
+            background: transparent;
+            border: 0;
+            outline: none;
+            color: #9cdcfe;
+            font: inherit;
+            padding: 0;
+            caret-color: #ffffff;
+        }
+        .run-button.run-button--stop {
+            background: #b91c1c;
+        }
         .output-prompt {
             color: #f97316;
             font-weight: bold;
@@ -2106,6 +2127,10 @@
         }
 
     </style>
+    <style>
+{% include 'ui_tokens.css' %}
+{% include 'cursor_theme.css' %}
+    </style>
 </head>
 <body>
     <!-- Active Session Warning Banner -->
@@ -2142,38 +2167,85 @@
 
     <!-- Main App (Initially Hidden) -->
     <div id="application" class="hidden">
+            <div id="header" class="header topnav">
+                <div class="topnav__left">
+                    <span class="topnav__brand" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M8.6 16.6 4 12l4.6-4.6L7.2 6 1.2 12l6 6 1.4-1.4zm6.8 0L20 12l-4.6-4.6L16.8 6l6 6-6 6-1.4-1.4z"/></svg>
+                    </span>
+                    <span class="nav-chip nav-chip--strong" id="problemProgress" style="display:none;">Problem 1/1</span>
+                    <div id="quizProgressStrip" class="quiz-progress-strip" style="display:none;" role="region" aria-label="Quiz progress"></div>
+                </div>
+                <div class="topnav__center">
+                    <div class="nav-btn-group">
+                        <button class="nav-btn run-button" id="runButton" title="Run the current file"><svg viewBox="0 0 16 16"><path fill="currentColor" d="M4 2.5v11l9-5.5z"/></svg><span>Run</span></button>
+                        <button class="nav-btn submit-button" id="submitButton" title="Submit your code (ends the coding phase)"><svg viewBox="0 0 16 16"><path fill="currentColor" d="M8 1.5 3.5 6l1 1L7.3 4.2V12h1.4V4.2L11.5 7l1-1zM2.5 13h11v1.5h-11z"/></svg><span>Submit</span></button>
+                    </div>
+                </div>
+                <div class="topnav__right user-info">
+                    <div class="font-controls nav-seg" title="Editor font size">
+                        <button class="font-button" id="decreaseFontBtn" aria-label="Smaller font">A-</button>
+                        <span class="font-size-display" id="fontSizeDisplay">12px</span>
+                        <button class="font-button" id="increaseFontBtn" aria-label="Larger font">A+</button>
+                    </div>
+                    <span class="session-indicator nav-chip" id="sessionIndicator">Session: --</span>
+                    <span class="condition-indicator nav-chip" id="conditionIndicator">Condition ?</span>
+                    <div class="user-info__identity nav-chip" title="Anonymous session icon (not a person)">
+                        <img id="userAvatar" class="user-avatar" src="" alt="" width="20" height="20" decoding="async" referrerpolicy="no-referrer" />
+                        <span id="userDisplay">--</span>
+                    </div>
+                    <button class="nav-btn logout-btn" id="logoutBtn">End Session</button>
+                </div>
+            </div>
+
+        <!-- Left: problem description / agent -->
+        <div id="problemPanel" class="lc-card">
+            <div class="problem-panel__tabs lc-card__header" role="tablist" aria-label="Problem panel">
+                <button type="button" class="problem-panel__tab problem-panel__tab--active" id="problemTabProblem" role="tab" aria-selected="true" aria-controls="problemPanelBody" tabindex="0"><svg viewBox="0 0 16 16" class="tab-icon" style="color:#3b9eff"><path fill="currentColor" d="M3 1.5h7l3 3v10H3zm1.3 1.3v10.4h7.4V5.1H9.4V2.8zM5.5 7h5v1.2h-5zm0 2.5h5v1.2h-5z"/></svg>Description</button>
+                <button type="button" class="problem-panel__tab" id="problemTabAiHistory" role="tab" aria-selected="false" aria-controls="problemPanelAiHistory" tabindex="-1">
+                    AI history <span class="problem-panel__tab-count" id="aiHistoryTabCount">0</span>
+                </button>
+            </div>
+            <div class="problem-panel__header">
+                <span id="problemPanelHeading" class="problem-panel__current-label">Loading…</span>
+            </div>
+            <div class="problem-panel__stack">
+            <div class="problem-panel__body problem-panel__tabpanel" id="problemPanelBody" role="tabpanel" aria-labelledby="problemTabProblem">
+                Loading problem...
+            </div>
+            <div class="problem-panel__body problem-panel__tabpanel problem-panel__ai-history-embed" id="problemPanelAiHistory" role="tabpanel" aria-labelledby="problemTabAiHistory" hidden>
+            </div>
+            </div>
+        </div>
+
+        <div id="resize-problem"></div>
+
+        <!-- Right: code card + terminal card -->
+        <div class="workspace-col">
+        <div class="code-card lc-card">
+            <div class="lc-card__header code-card__header">
+                <span class="lc-card__title"><svg viewBox="0 0 16 16" class="tab-icon" style="color:#2cbb5d"><path fill="currentColor" d="M5.3 4.2 1.5 8l3.8 3.8.9-.9L3.3 8l2.9-2.9zm5.4 0-.9.9L12.7 8l-2.9 2.9.9.9L14.5 8zM9.2 2.5 5.6 13.2l1.2.3L10.4 2.8z"/></svg>Code</span>
+                <span class="code-card__lang" id="codeLangLabel">—</span>
+                <span id="autosaveIndicator" class="autosave-indicator saved" role="status" aria-live="polite" title="Your code is saved automatically as you type">
+                    <span class="autosave-icon"></span><span class="autosave-text">Saved</span>
+                </span>
+            </div>
+            <div class="code-card__body">
             <div id="fileTreeSidebar" class="file-tree-sidebar">
             <div class="file-tree__header">
                 <button type="button" class="file-tree__collapse-btn" id="fileTreeToggleBtn" aria-expanded="true" aria-controls="fileTreePanel" title="Collapse files panel">
                     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
                 </button>
-                <h3>Files</h3>
+                <h3>Explorer</h3>
             </div>
             <div id="fileTreePanel">
                 <ul class="file-tree__list" id="fileTreeList">
                 </ul>
             </div>
             </div><!-- /#fileTreeSidebar -->
-            <div id="header" class="header">
-                <h2>Code Editor</h2>
-                <div id="quizProgressStrip" class="quiz-progress-strip" style="display:none;" role="region" aria-label="Quiz progress"></div>
-                <div class="font-controls">
-                    <button class="font-button" id="decreaseFontBtn">A-</button>
-                    <span class="font-size-display" id="fontSizeDisplay">12px</span>
-                    <button class="font-button" id="increaseFontBtn">A+</button>
-                </div>
-                <div class="user-info">
-                    <span class="session-indicator" id="sessionIndicator">Session: --</span>
-                    <span class="condition-indicator" id="conditionIndicator">Condition ?</span>
-                    <span class="condition-indicator" id="problemProgress" style="display:none;background:linear-gradient(135deg,#7c3aed,#a78bfa);">Problem 1/1</span>
-                    <div class="user-info__identity" title="Anonymous session icon (not a person)">
-                        <img id="userAvatar" class="user-avatar" src="" alt="" width="32" height="32" decoding="async" referrerpolicy="no-referrer" />
-                        <span id="userDisplay">--</span>
-                    </div>
-                    <button class="logout-btn" id="logoutBtn">End Session</button>
-                </div>
-            </div>
             <div class="editor-col">
+            <div class="editor-tabs-bar">
+                <div id="editorTabs" class="editor-tabs" role="tablist" aria-label="Open files"></div>
+            </div>
             <div class="editor-wrapper">
                 <div id="editor"></div>
 
@@ -2226,55 +2298,30 @@
                     </div>
                 </div>
             </div>
+            </div><!-- /.editor-col -->
+            </div><!-- /.code-card__body -->
+        </div><!-- /.code-card -->
             <div id="resize-terminal"></div>
-            <div class="terminal" id="terminal">
-                <div class="header">
-                    <h2>Terminal</h2>
+            <div class="terminal lc-card" id="terminal">
+                <div class="header terminal-header lc-card__header">
+                    <div class="panel-tabs" role="tablist">
+                        <span class="panel-tab panel-tab--active" role="tab" aria-selected="true"><svg viewBox="0 0 16 16" class="tab-icon" style="color:#2cbb5d"><path fill="currentColor" d="M2.5 4.3l.9-.9L7.9 8l-4.5 4.6-.9-.9L6.1 8zM8 11.5h5.5v1.3H8z"/></svg>Terminal</span>
+                    </div>
                     <div class="terminal-controls">
-                        <button class="run-button" id="runButton">▶ Run</button>
-                        <button class="clear-button" id="clearButton">✕ Clear</button>
-                        <button class="submit-button" id="submitButton">SUBMIT</button>
+                        <button class="clear-button" id="clearButton" title="Clear terminal (Ctrl+L)" aria-label="Clear terminal">
+                            <svg viewBox="0 0 16 16" width="18" height="18"><path fill="currentColor" d="M10 3h3v1h-1v9l-1 1H5l-1-1V4H3V3h3V2a1 1 0 011-1h2a1 1 0 011 1v1zM9 2H7v1h2V2zM5 4v9h6V4H5zm1 2h1v5H6V6zm3 0h1v5H9V6z"/></svg>
+                        </button>
                     </div>
                 </div>
                 <div class="terminal-output" id="terminalOutput">
-                    <div class="output-line">
-                        <span class="output-info">Secure Database-Integrated Code Assistant Terminal</span>
-                    </div>
-                    <div class="output-line">
-                        <span class="output-info">All coding activity is logged. Automatic logout after submission.</span>
-                    </div>
-                    <div class="output-line">
-                        <span class="output-prompt">>>> </span><span class="output-info">Ready to start coding!</span>
-                    </div>
+                    <div class="output-line"><span class="term-muted">Type "help" to see commands, or press Run. Coding activity is logged for the study.</span></div>
                 </div>
             </div>
-            </div><!-- /.editor-col -->
-
-        <div id="resize-problem"></div>
-        <!-- Right Problem Description Panel -->
-        <div id="problemPanel">
-            <div class="problem-panel__header">
-                <span id="problemPanelHeading" class="problem-panel__current-label">Loading…</span>
-            </div>
-            <div class="problem-panel__tabs" role="tablist" aria-label="Problem panel">
-                <button type="button" class="problem-panel__tab problem-panel__tab--active" id="problemTabProblem" role="tab" aria-selected="true" aria-controls="problemPanelBody" tabindex="0">Problem</button>
-                <button type="button" class="problem-panel__tab" id="problemTabAiHistory" role="tab" aria-selected="false" aria-controls="problemPanelAiHistory" tabindex="-1">
-                    AI history <span class="problem-panel__tab-count" id="aiHistoryTabCount">0</span>
-                </button>
-            </div>
-            <div class="problem-panel__stack">
-            <div class="problem-panel__body problem-panel__tabpanel" id="problemPanelBody" role="tabpanel" aria-labelledby="problemTabProblem">
-                Loading problem...
-            </div>
-            <div class="problem-panel__body problem-panel__tabpanel problem-panel__ai-history-embed" id="problemPanelAiHistory" role="tabpanel" aria-labelledby="problemTabAiHistory" hidden>
-            </div>
-            </div>
-        </div>
+        </div><!-- /.workspace-col -->
 
     </div>
 
-    <!-- Survey Modal -->
-<div id="surveyModal" class="survey-modal hidden">
+    <div id="surveyModal" class="survey-modal hidden">
     <div class="survey-container">
         <div class="survey-header">
             <h2>Quick Survey</h2>
@@ -2297,6 +2344,12 @@
 
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs/loader.min.js"></script>
+<script>
+{% include 'workspace.js' %}
+</script>
+<script>
+{% include 'terminal.js' %}
+</script>
 
 <script>
 // Global session management
@@ -2389,7 +2442,6 @@ async function serverEditorCheckpoint() {
     var now = Date.now();
     if (now - _lastServerEditorCheckpointAt < SERVER_EDITOR_CHECKPOINT_MIN_MS) return;
     try {
-        updateAutosaveIndicator('syncing', 'Syncing…');
         var ed = window.editor;
         var pos = ed.getPosition();
         var body = {
@@ -2397,6 +2449,8 @@ async function serverEditorCheckpoint() {
             user_id: currentSession.userId,
             assignment_key: currentSession.assignmentKey,
             code: ed.getValue(),
+            files: window.WS && WS.files.length ? WS.list() : null,
+            active_file: window.WS ? WS.activeName() : null,
             programming_language: currentSession.programmingLanguage || 'javascript',
             cursor_line: pos ? pos.lineNumber : null,
             cursor_column: pos ? pos.column : null,
@@ -2410,8 +2464,6 @@ async function serverEditorCheckpoint() {
         });
         _lastServerEditorCheckpointAt = Date.now();
         if (resp.ok) {
-            var t = document.querySelector('.autosave-text');
-            if (t) t.textContent = 'Saved locally & at ' + new Date().toLocaleTimeString();
             updateAutosaveIndicator('saved');
         } else {
             updateAutosaveIndicator('error', 'Cloud sync failed — retrying');
@@ -2484,50 +2536,81 @@ function getAutosaveKey() {
     return `${AUTOSAVE_KEY_PREFIX}${currentSession.userId}_${currentSession.sessionId}`;
 }
 
+var _autosaveSavedTimer = null;
+var _autosaveIcons = {
+    saving: '<span class="autosave-spinner"></span>',
+    saved: '<svg viewBox="0 0 16 16"><path fill="currentColor" d="M6.3 11.6 2.7 8l1-1 2.6 2.6 6-6 1 1z"/></svg>',
+    error: '<svg viewBox="0 0 16 16"><path fill="currentColor" d="M8 1.5 15 14H1zm0 2.6L3.2 12.7h9.6zM7.4 6.5h1.2v3.3H7.4zm0 4.2h1.2v1.2H7.4z"/></svg>',
+    pending: '<svg viewBox="0 0 16 16"><path fill="currentColor" d="M12.2 7A4.3 4.3 0 0 0 4 5.6 3.2 3.2 0 0 0 4.4 12h7.4a2.5 2.5 0 0 0 .4-5zm-.4 3.8H4.4a2 2 0 0 1-.1-4l.4-.1.2-.4a3.1 3.1 0 0 1 6 1l.1.6h.7a1.4 1.4 0 0 1 0 2.9z"/></svg>'
+};
+
+/** Code-card status chip: "Saving…" while typing, "Saved" once the files are stored. */
 function updateAutosaveIndicator(status, message) {
     const indicator = document.getElementById('autosaveIndicator');
     if (!indicator) return;
     const icon = indicator.querySelector('.autosave-icon');
     const text = indicator.querySelector('.autosave-text');
-    
-    indicator.className = 'autosave-indicator ' + status;
-    
-    switch(status) {
-        case 'saving':
-            icon.textContent = '⏳';
-            text.textContent = 'Saving...';
-            break;
-        case 'saved':
-            icon.textContent = '✓';
-            const now = new Date();
-            text.textContent = `Saved at ${now.toLocaleTimeString()}`;
-            lastSaveTime = now;
-            break;
-        case 'error':
-            icon.textContent = '⚠️';
-            text.textContent = message || 'Save failed';
-            break;
-        case 'pending':
-            icon.textContent = '☁';
-            text.textContent = message || 'Offline — will sync when online';
-            break;
-        case 'syncing':
-            icon.textContent = '⏳';
-            text.textContent = message || 'Syncing to server...';
-            break;
-        default:
-            icon.textContent = '💾';
-            text.textContent = 'Not saved';
-    }
+    if (status === 'syncing') status = 'saving';
+    // Saving flashes are delayed a little so fast saves don't flicker.
+    clearTimeout(_autosaveSavedTimer);
+    const apply = function () {
+        indicator.className = 'autosave-indicator ' + status;
+        icon.innerHTML = _autosaveIcons[status] || '';
+        if (status === 'saving') {
+            text.textContent = 'Saving…';
+        } else if (status === 'saved') {
+            lastSaveTime = new Date();
+            text.textContent = 'Saved';
+            indicator.title = 'Saved automatically at ' + lastSaveTime.toLocaleTimeString() + '. No need to press Save.';
+        } else {
+            text.textContent = message || (status === 'error' ? 'Save failed' : 'Saved locally');
+            indicator.title = text.textContent;
+        }
+    };
+    if (status === 'saved') _autosaveSavedTimer = setTimeout(apply, 350); else apply();
 }
+
+/** Small toast (bottom-right) — used to tell students their work saves by itself. */
+function showIdeToast(message, kind) {
+    var old = document.querySelector('.ide-toast');
+    if (old) old.remove();
+    var el = document.createElement('div');
+    el.className = 'ide-toast' + (kind ? ' ide-toast--' + kind : '');
+    el.setAttribute('role', 'status');
+    el.innerHTML = '<svg viewBox="0 0 16 16"><path fill="currentColor" d="M6.3 11.6 2.7 8l1-1 2.6 2.6 6-6 1 1z"/></svg><span></span>';
+    el.querySelector('span').textContent = message;
+    document.body.appendChild(el);
+    setTimeout(function () { el.classList.add('ide-toast--out'); }, 3200);
+    setTimeout(function () { el.remove(); }, 3600);
+}
+
+/** First edit of a session: tell the student once that saving is automatic. */
+function noteAutosaveOnce() {
+    var key = 'autosave_hint_' + (currentSession.sessionId || '');
+    try { if (sessionStorage.getItem(key)) return; sessionStorage.setItem(key, '1'); } catch (e) { return; }
+    showIdeToast('Your code is saved automatically. No need to press Save.');
+}
+
+/** Ctrl/Cmd+S: nothing to do, but answer the habit instead of opening the browser's save dialog. */
+function onManualSaveShortcut() {
+    if (window.WS && WS.saveLocal) WS.saveLocal();
+    updateAutosaveIndicator('saved');
+    showIdeToast('Already saved. Your code saves automatically as you type.');
+    try { logActivity('manual_save_shortcut', {}); } catch (e) { /* ignore */ }
+}
+document.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 's' || e.key === 'S')) {
+        if (!document.getElementById('application') || document.getElementById('application').classList.contains('hidden')) return;
+        e.preventDefault();
+        onManualSaveShortcut();
+    }
+}, true);
 
 function saveProgress() {
     const key = getAutosaveKey();
     if (!key) return;
     
     try {
-        updateAutosaveIndicator('saving');
-        
         const progressData = {
             timestamp: Date.now(),
             session: {
@@ -2946,6 +3029,8 @@ const ACTIVITY_BATCH_SIZE = 10;
 
 // ADD submission state flag
 let isSubmissionInProgress = false;
+const SUBMIT_BUTTON_HTML = '<svg viewBox="0 0 16 16"><path fill="currentColor" d="M8 1.5 3.5 6l1 1L7.3 4.2V12h1.4V4.2L11.5 7l1-1zM2.5 13h11v1.5h-11z"/></svg><span>Submit</span>';
+
 /** Prevents double submit while /analyze and download run before submitButton is disabled. */
 let _submitInflight = false;
 
@@ -3147,7 +3232,28 @@ var ALLOWED_ACTIVITY_TYPES = {
     copilot_popup_reject: true,
     code_execution: true,
     terminal_clear: true,
-    history_check: true
+    history_check: true,
+    // Condition 2: inline ghost-text suggestions (ai_modes.js)
+    inline_suggestion_shown: true,
+    inline_suggestion_accepted: true,
+    // Condition 3: coding agent (ai_modes.js)
+    agent_panel_opened: true,
+    agent_mode_changed: true,
+    agent_message_sent: true,
+    agent_response_received: true,
+    agent_stopped: true,
+    agent_new_chat: true,
+    agent_file_change: true,
+    agent_edit_decision: true,
+    agent_plan_build: true,
+    agent_skill_toggled: true,
+    agent_skill_created: true,
+    agent_skill_deleted: true,
+    // Workspace + terminal (workspace.js, terminal.js)
+    terminal_command: true,
+    file_created: true,
+    file_renamed: true,
+    file_deleted: true
 };
 
 // Core Activity Logging Function
@@ -3732,6 +3838,10 @@ async function initializeFromURL() {
             // Session-resume fields
             resumed: authData.resumed === true,
             editorDraftCode: authData.editorDraftCode || null,
+            editorDraftFiles: authData.editorDraftFiles || null,
+            editorDraftActiveFile: authData.editorDraftActiveFile || null,
+            agentSkillsInstructor: authData.agentSkillsInstructor || [],
+            agentSkillsStudent: authData.agentSkillsStudent || [],
             guessLogCount: 0,
             descLogCount: 0,
             suggestionsLogCount: 0,
@@ -3813,14 +3923,17 @@ async function initializeFromURL() {
         })();
         sessionIndicator.textContent = `Session: ${authData.sessionId.substring(0, 16)}...`;
         conditionIndicator.textContent = `Condition ${authData.condition}`;
+        var codeLangLabel = document.getElementById('codeLangLabel');
+        if (codeLangLabel) {
+            codeLangLabel.textContent = ({ python: 'Python', javascript: 'JavaScript', c: 'C', cpp: 'C++', java: 'Java' })[authData.programmingLanguage] || authData.programmingLanguage || '';
+        }
 
         // Show problem progress indicator for multi-problem quizzes
-        if (currentSession.totalProblems > 1) {
-            const progEl = document.getElementById('problemProgress');
-            if (progEl) {
-                progEl.textContent = `Problem ${currentSession.currentProblemIndex + 1}/${currentSession.totalProblems}`;
-                progEl.style.display = '';
-            }
+        const progEl = document.getElementById('problemProgress');
+        if (progEl) {
+            const n = (currentSession.currentProblemIndex || 0) + 1;
+            progEl.textContent = currentSession.totalProblems > 1 ? `Problem ${n} of ${currentSession.totalProblems}` : `Problem ${n}`;
+            progEl.style.display = '';
         }
         
         // Update URL display
@@ -3910,48 +4023,7 @@ async function initializeFromURL() {
                 });
         })();
 
-        // Populate file tree sidebar (supports multiple files from starter_files)
-        (function loadFileTree() {
-            var fileTreeList = document.getElementById('fileTreeList');
-            if (!fileTreeList || !authData.assignmentKey) return;
-            var extMap = { javascript: 'js', python: 'py', c: 'c' };
-            var lang = authData.programmingLanguage || 'javascript';
-            var ext = extMap[lang] || 'txt';
-            var fileIcon = '<svg class="file-tree__icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>';
-
-            var starterFiles = currentSession.starterFiles;
-            if (starterFiles && Array.isArray(starterFiles) && starterFiles.length > 0) {
-                // Multi-file mode: store file contents for switching
-                window._quizFiles = starterFiles;
-                starterFiles.forEach(function(f, idx) {
-                    var li = document.createElement('li');
-                    li.className = 'file-tree__item' + (idx === 0 ? ' active' : '');
-                    li.innerHTML = fileIcon + f.filename;
-                    li.dataset.fileIdx = idx;
-                    li.onclick = function() {
-                        fileTreeList.querySelectorAll('.file-tree__item').forEach(function(el) { el.classList.remove('active'); });
-                        li.classList.add('active');
-                        if (window.editor && window._quizFiles) {
-                            // Save current file content
-                            var prevActive = window._activeFileIdx || 0;
-                            window._quizFiles[prevActive].content = window.editor.getValue();
-                            // Load selected file
-                            window._activeFileIdx = idx;
-                            window.editor.setValue(window._quizFiles[idx].content || '');
-                        }
-                    };
-                    fileTreeList.appendChild(li);
-                });
-                window._activeFileIdx = 0;
-            } else {
-                // Single file mode (default)
-                var fileName = authData.assignmentKey + '.' + ext;
-                var li = document.createElement('li');
-                li.className = 'file-tree__item active';
-                li.innerHTML = fileIcon + fileName;
-                fileTreeList.appendChild(li);
-            }
-        })();
+        // Files, the Explorer and editor tabs are set up by workspace.js once the editor exists.
 
         // Survey gate checks — single server call, server survey-status is the sole source of truth
         {
@@ -4018,9 +4090,10 @@ async function initializeFromURL() {
         // Add paste status indicator only (no tab tracking badge)
         const pasteStatus = authData.pasteAllowed === 1 ? 'Enabled' : 'Disabled';
         const pasteIndicator = document.createElement('span');
-        pasteIndicator.className = authData.pasteAllowed === 1 ? 'session-indicator' : 'condition-indicator';
-        pasteIndicator.textContent = `Paste: ${pasteStatus}`;
-        pasteIndicator.style.marginRight = '10px';
+        pasteIndicator.id = 'pasteIndicator';
+        pasteIndicator.className = 'nav-chip ' + (authData.pasteAllowed === 1 ? 'nav-chip--ok' : 'nav-chip--off');
+        pasteIndicator.innerHTML = '<span class="nav-chip__dot"></span>Paste ' + pasteStatus.toLowerCase();
+        pasteIndicator.title = authData.pasteAllowed === 1 ? 'Pasting into the editor is allowed' : 'Pasting into the editor is disabled for this study';
         
         const conditionIndicatorElement = document.getElementById('conditionIndicator');
         conditionIndicatorElement.parentNode.insertBefore(pasteIndicator, conditionIndicatorElement);
@@ -4176,7 +4249,9 @@ async function initializeEditor() {
                 const languageDefaults = {
                     javascript: '// Start coding here...\n',
                     python: '# Start coding here...\n',
-                    c: '#include <stdio.h>\n\n// Start coding here...\n'
+                    c: '#include <stdio.h>\n\nint main(void) {\n    // Start coding here...\n    return 0;\n}\n',
+                    cpp: '#include <iostream>\nusing namespace std;\n\nint main() {\n    // Start coding here...\n    return 0;\n}\n',
+                    java: 'import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        // Start coding here...\n    }\n}\n'
                 };
 
                 const selectedLanguage = currentSession.programmingLanguage || 'javascript';
@@ -4241,6 +4316,12 @@ async function initializeEditor() {
                 if (teaserActive) {
                     window.editor.updateOptions({ readOnly: true });
                 }
+
+                // Multi-file workspace (Explorer + tabs), the shell terminal, then condition-specific AI:
+                // ghost-text suggestions (2) or the coding agent (3)
+                window.WS.init(monaco, window.editor, initialCode);
+                window.initTerminal();
+                window.AIModes.init(monaco, window.editor);
 
                 _lastActivityForBlankIdle = Date.now();
                 _prevCursorLineBlankIdle = window.editor.getPosition().lineNumber;
@@ -4500,11 +4581,9 @@ function resetBlankIdleAfterSuggestionDismiss() {
 // opts.force — clear any open suggestion popup and run (e.g. final analysis before submit)
 async function analyzeCurrentCode(opts) {
     opts = opts || {};
-    // Check if AI is disabled for this assignment
-    if (aiDisabled) {
-        console.log('AI analysis skipped - disabled for this assignment');
-        return;
-    }
+    // The interpretation/next-line popup is retired: condition 2 uses inline ghost text
+    // and condition 3 the agent (see ai_modes.js); condition 1 has no AI.
+    return;
     
     if (!currentSession.sessionId) {
         console.warn('No active session for code analysis');
@@ -6161,6 +6240,7 @@ function initProblemPanelTabs() {
     tabProblem.addEventListener('click', function () { selectTab('problem'); });
     tabAi.addEventListener('click', function () { selectTab('ai'); });
     selectTab('problem');
+    window.AIModes.onProblemTabsReady();
 }
 
 function refreshProblemPanelAiHistory() {
@@ -6389,246 +6469,11 @@ function decreaseFontSize() {
    const submitButton = document.getElementById("submitButton");
    const logoutBtn = document.getElementById("logoutBtn");
    
-   let isRunning = false;
-
+/** All workspace files for submission (null when there is a single file: `code` covers it). */
 function getAllFileContents() {
-    if (window._quizFiles && Array.isArray(window._quizFiles) && window._quizFiles.length > 1) {
-        var activeIdx = window._activeFileIdx || 0;
-        window._quizFiles[activeIdx].content = window.editor.getValue();
-        return window._quizFiles.map(function(f) {
-            return { filename: f.filename, content: f.content || '' };
-        });
-    }
-    return null;
-}
-
-async function executeCode() {
-    if (isRunning) return;
-    
-    const executionStartTime = Date.now();
-    currentSession.compilerClickCount++;
-    
-    const code = window.editor.getValue();
-    if (!code) {
-        logActivity('code_execution', {
-            start_time: new Date(executionStartTime).toISOString(),
-            end_time: new Date().toISOString(),
-            duration: Date.now() - executionStartTime,
-            execution_trigger: 'run_button',
-            execution_result: 'no_code',
-            output_summary: 'No code to execute',
-            error_message: 'No code provided'
-        });
-        addTerminalOutput('No code to execute. Please write some code first.', 'warning');
-        return;
-    }
-    
-    isRunning = true;
-    runButton.disabled = true;
-    runButton.innerHTML = '<div class="terminal-loading"><span class="terminal-spinner"></span>Running...</div>';
-
-    try {
-        let executionResult, outputSummary, errorMessage = '';
-        const allFiles = getAllFileContents();
-        
-        if (currentSession.programmingLanguage === 'javascript') {
-            const result = await executeJavaScriptInBrowser(code);
-            executionResult = result.success ? 'success' : 'error';
-            outputSummary = result.output || 'No output';
-            errorMessage = result.error || '';
-        } else if (currentSession.programmingLanguage === 'python') {
-            const result = await executeOnBackend(code, 'python', allFiles);
-            executionResult = result.success ? 'success' : 'error';
-            outputSummary = result.output || 'No output';
-            errorMessage = result.error || '';
-        } else if (currentSession.programmingLanguage === 'c') {
-            const result = await executeOnBackend(code, 'c', allFiles);
-            executionResult = result.success ? 'success' : 'error';
-            outputSummary = result.output || 'No output';
-            errorMessage = result.error || '';
-        } else {
-            executionResult = 'unsupported';
-            outputSummary = `${currentSession.programmingLanguage} execution not supported yet`;
-            errorMessage = 'Language not supported';
-            addTerminalOutput(outputSummary, 'warning');
-        }
-        
-        const executionEndTime = Date.now();
-        logActivity('code_execution', {
-            start_time: new Date(executionStartTime).toISOString(),
-            end_time: new Date(executionEndTime).toISOString(),
-            duration: executionEndTime - executionStartTime,
-            execution_trigger: 'run_button',
-            code_length: code.length,
-            execution_number: currentSession.compilerClickCount,
-            execution_result: executionResult,
-            output_summary: outputSummary.substring(0, 100) + (outputSummary.length > 100 ? '...' : ''),
-            error_message: errorMessage.substring(0, 100) + (errorMessage.length > 100 ? '...' : '')
-        });
-        
-    } catch (error) {
-        console.error('Execution error:', error);
-        logActivity('code_execution', {
-            start_time: new Date(executionStartTime).toISOString(),
-            end_time: new Date().toISOString(),
-            duration: Date.now() - executionStartTime,
-            execution_trigger: 'run_button',
-            code_length: code.length,
-            execution_number: currentSession.compilerClickCount,
-            execution_result: 'error',
-            output_summary: 'Execution failed',
-            error_message: error.message
-        });
-        addTerminalOutput('Execution failed:', 'error');
-        addTerminalOutput(error.message, 'error');
-    } finally {
-        isRunning = false;
-        runButton.disabled = false;
-        runButton.innerHTML = '▶ Run';
-    }
-}
-
-
-async function executeJavaScriptInBrowser(code) {
-    const originalLog = console.log;
-    const originalError = console.error;
-    const originalWarn = console.warn;
-    
-    let executionSuccess = true;
-    let executionOutput = '';
-    let executionError = '';
-    
-    console.log = function(...args) {
-        originalLog.apply(this, args);
-        const output = args.join(' ');
-        executionOutput += output + '\n';
-        addTerminalOutput(output);
-    };
-    
-    console.error = function(...args) {
-        originalError.apply(this, args);
-        const error = args.join(' ');
-        executionError += error + '\n';
-        addTerminalOutput(error, 'error');
-    };
-    
-    console.warn = function(...args) {
-        originalWarn.apply(this, args);
-        const warning = args.join(' ');
-        executionOutput += 'Warning: ' + warning + '\n';
-        addTerminalOutput(warning, 'warning');
-    };
-
-    try {
-        const canvas = document.createElement("canvas");
-        addTerminalOutput(`Running JavaScript...`, 'prompt');
-        const startTime = Date.now();
-
-        const run = new Function(["canvas"], code);
-        run(canvas);
-
-        const executionTime = Date.now() - startTime;
-        
-        addTerminalOutput(`Process finished (${executionTime}ms)`, 'execution-time');
-        addTerminalOutput(`Ready for more code!`, 'prompt');
-        
-        return {
-            success: true,
-            output: executionOutput,
-            error: executionError
-        };
-        
-    } catch (error) {
-        executionSuccess = false;
-        executionError += error.message;
-        
-        addTerminalOutput('JavaScript error:', 'error');
-        addTerminalOutput(error.message, 'error');
-        
-        return {
-            success: false,
-            output: executionOutput,
-            error: executionError
-        };
-        
-    } finally {
-        console.log = originalLog;
-        console.error = originalError;
-        console.warn = originalWarn;
-    }
-}
-async function executeOnBackend(code, language, allFiles) {
-    try {
-        addTerminalOutput(`Running ${language} on server...`, 'prompt');
-        const startTime = Date.now();
-
-        const payload = {
-            code: code,
-            language: language,
-            user_id: currentSession.userId,
-            session_id: currentSession.sessionId
-        };
-        if (allFiles && allFiles.length > 1) {
-            payload.files = allFiles;
-        }
-
-        const response = await fetch('/execute', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-            throw new Error(`Server error: ${response.statusText}`);
-        }
-
-        const result = await response.json();
-        const finishTime = Date.now();
-        const executionTime = finishTime - startTime;
-        
-        if (result.success) {
-            if (result.output) {
-                addTerminalOutput('Output:', 'success');
-                result.output.split('\n').forEach(line => {
-                    if (line.trim()) {
-                        addTerminalOutput(line, 'normal');
-                    }
-                });
-            }
-            if (result.error) {
-                addTerminalOutput('Warnings:', 'warning');
-                addTerminalOutput(result.error, 'warning');
-            }
-            addTerminalOutput(`${language} execution completed (${executionTime}ms)`, 'execution-time');
-        } else {
-            addTerminalOutput(`${language} error:`, 'error');
-            addTerminalOutput(result.error, 'error');
-            if (result.output) {
-                addTerminalOutput('Output before error:', 'info');
-                addTerminalOutput(result.output, 'normal');
-            }
-        }
-        
-        addTerminalOutput(`Ready for more code!`, 'prompt');
-        
-        return {
-            success: result.success,
-            output: result.output || '',
-            error: result.error || ''
-        };
-        
-    } catch (error) {
-        addTerminalOutput('Network/Server error:', 'error');
-        addTerminalOutput(error.message, 'error');
-        
-        return {
-            success: false,
-            output: '',
-            error: error.message
-        };
-    }
+    if (!window.WS || !WS.files.length) return null;
+    var files = WS.list();
+    return files.length > 1 ? files : null;
 }
 
 async function submitToDatabase() {
@@ -6964,7 +6809,7 @@ async function proceedWithActualSubmission() {
         addTerminalOutput(`Submission failed: ${error.message}`, 'error');
         addTerminalOutput(`Data preserved locally in session logs`, 'warning');
         submitButton.disabled = false;
-        submitButton.innerHTML = 'SUBMIT';
+        submitButton.innerHTML = SUBMIT_BUTTON_HTML;
         isSubmissionInProgress = false;
         _submitInflight = false;
     }
@@ -6986,34 +6831,31 @@ async function proceedWithActualSubmission() {
    }
 
    function addTerminalOutput(text, type = 'normal') {
+       // Text only (program output can contain "<"): never interpret it as HTML.
+       const classes = { success: 'output-success', error: 'output-error', info: 'output-info',
+                         warning: 'output-warning', 'execution-time': 'execution-time' };
+       term.open = null;
        const line = document.createElement('div');
        line.className = 'output-line';
-       
-       switch (type) {
-           case 'success':
-               line.innerHTML = `<span class="output-success">${text}</span>`;
-               break;
-           case 'error':
-               line.innerHTML = `<span class="output-error">${text}</span>`;
-               break;
-           case 'info':
-               line.innerHTML = `<span class="output-info">${text}</span>`;
-               break;
-           case 'warning':
-               line.innerHTML = `<span class="output-warning">${text}</span>`;
-               break;
-           case 'prompt':
-               line.innerHTML = `<span class="output-prompt">>>> </span>${text}`;
-               break;
-           case 'execution-time':
-               line.innerHTML = `<span class="execution-time">${text}</span>`;
-               break;
-           default:
-               line.innerHTML = `<pre>${text}</pre>`;
+       if (type === 'prompt') {
+           const p = document.createElement('span');
+           p.className = 'output-prompt';
+           p.textContent = '>>> ';
+           line.appendChild(p);
+           line.appendChild(document.createTextNode(String(text)));
+       } else if (classes[type]) {
+           const span = document.createElement('span');
+           span.className = classes[type];
+           span.textContent = String(text);
+           line.appendChild(span);
+       } else {
+           const pre = document.createElement('pre');
+           pre.textContent = String(text);
+           line.appendChild(pre);
        }
-       
        const terminalOutput = document.getElementById('terminalOutput');
        terminalOutput.appendChild(line);
+       term.placeInput();  // keep a running program's input line last
        terminalOutput.scrollTop = terminalOutput.scrollHeight;
    }
 
@@ -7024,29 +6866,15 @@ async function proceedWithActualSubmission() {
         terminal_lines_cleared: document.getElementById('terminalOutput').children.length
     });
        const terminalOutput = document.getElementById('terminalOutput');
-       terminalOutput.innerHTML = `
-           <div class="output-line">
-               <span class="output-info">Secure Database-Integrated Code Assistant Terminal</span>
-           </div>
-           <div class="output-line">
-               <span class="output-info">Session: ${currentSession.sessionId || 'None'}</span>
-           </div>
-           <div class="output-line">
-               <span class="output-info">Condition ${currentSession.condition || '?'} - Secure logging active</span>
-           </div>
-           <div class="output-line">
-               <span class="output-warning">REMINDER: Submitting code will automatically log you out</span>
-           </div>
-           <div class="output-line">
-               <span class="output-prompt">>>> </span><span class="output-info">Continue coding!</span>
-           </div>
-       `;
+       terminalOutput.innerHTML = '';
+       term.open = null;
+       term.placeInput();  // a running program keeps its input line
    }
 
    // Event Listeners
    increaseFontBtn.addEventListener('click', increaseFontSize);
    decreaseFontBtn.addEventListener('click', decreaseFontSize);
-   runButton.addEventListener('click', executeCode);
+   runButton.addEventListener('click', function () { window.executeCode(); });
    clearButton.addEventListener('click', clearTerminal);
    submitButton.addEventListener('click', submitToDatabase);
    logoutBtn.addEventListener('click', endSession);
@@ -7098,21 +6926,12 @@ async function proceedWithActualSubmission() {
        }, { passive: false });
    }
 
-   var FILE_SIDEBAR_W_EXPANDED = 180;
-   var FILE_SIDEBAR_W_COLLAPSED = 40;
-
-   function getFileSidebarWidthPx() {
-       var app = document.getElementById('application');
-       return app && app.classList.contains('file-tree--collapsed') ? FILE_SIDEBAR_W_COLLAPSED : FILE_SIDEBAR_W_EXPANDED;
-   }
-
    function applyProblemPanelWidthPx(newW) {
        var app = document.getElementById('application');
        var panel = document.getElementById('problemPanel');
        if (!app || !panel) return;
        window._lastProblemPanelWidthPx = newW;
-       var fw = getFileSidebarWidthPx();
-       app.style.gridTemplateColumns = fw + 'px minmax(0, 1fr) 6px ' + newW + 'px';
+       app.style.setProperty('--problem-w', newW + 'px');
        panel.style.width = '';
        if (window.editor) window.editor.layout();
    }
@@ -7131,12 +6950,7 @@ async function proceedWithActualSubmission() {
        try {
            localStorage.setItem('fileTreeSidebarCollapsed', collapsed ? '1' : '0');
        } catch (e) {}
-       var pw = window._lastProblemPanelWidthPx;
-       if (pw == null || isNaN(pw)) {
-           var prob = document.getElementById('problemPanel');
-           pw = prob ? Math.round(prob.getBoundingClientRect().width) : Math.min(Math.floor(window.innerWidth * 0.28), 420);
-       }
-       applyProblemPanelWidthPx(pw);
+       if (window.editor) window.editor.layout();
    }
 
    function restoreFileTreeSidebarFromStorage() {
@@ -7155,12 +6969,7 @@ async function proceedWithActualSubmission() {
        }
        var ftp = document.getElementById('fileTreePanel');
        if (ftp) ftp.setAttribute('aria-hidden', 'true');
-       var pw = window._lastProblemPanelWidthPx;
-       if (pw == null || isNaN(pw)) {
-           var prob = document.getElementById('problemPanel');
-           pw = prob ? Math.round(prob.getBoundingClientRect().width) : Math.min(Math.floor(window.innerWidth * 0.28), 420);
-       }
-       applyProblemPanelWidthPx(pw);
+       if (window.editor) window.editor.layout();
    }
 
    var fileTreeToggleBtn = document.getElementById('fileTreeToggleBtn');
@@ -7176,9 +6985,9 @@ async function proceedWithActualSubmission() {
        e.preventDefault();
        var panel = document.getElementById('problemPanel');
        if (!panel) return;
-       var minW = 200;
-       var maxW = Math.min(window.innerWidth * 0.4, 520);
-       var newW = Math.max(minW, Math.min(maxW, window.innerWidth - e.clientX));
+       var minW = 300;
+       var maxW = window.innerWidth * 0.6;
+       var newW = Math.max(minW, Math.min(maxW, e.clientX - 8));
        applyProblemPanelWidthPx(newW);
    }
 
@@ -7187,9 +6996,9 @@ async function proceedWithActualSubmission() {
        e.preventDefault();
        var panel = document.getElementById('problemPanel');
        if (!panel) return;
-       var minW = 200;
-       var maxW = Math.min(window.innerWidth * 0.4, 520);
-       var newW = Math.max(minW, Math.min(maxW, window.innerWidth - e.touches[0].clientX));
+       var minW = 300;
+       var maxW = window.innerWidth * 0.6;
+       var newW = Math.max(minW, Math.min(maxW, e.touches[0].clientX - 8));
        applyProblemPanelWidthPx(newW);
    }
 
@@ -7207,7 +7016,7 @@ async function proceedWithActualSubmission() {
        const terminal = document.getElementById('terminal');
        const minTerminalHeight = 200;
        const maxTerminalHeight = window.innerHeight * 0.5;
-       const desiredHeight = window.innerHeight - e.clientY;
+       const desiredHeight = window.innerHeight - e.clientY - 8;
        const newHeight = Math.max(minTerminalHeight, Math.min(maxTerminalHeight, desiredHeight));
        terminal.style.height = `${newHeight}px`;
    }
@@ -7239,7 +7048,7 @@ async function proceedWithActualSubmission() {
        const terminal = document.getElementById('terminal');
        const minTerminalHeight = 200;
        const maxTerminalHeight = window.innerHeight * 0.5;
-       const desiredHeight = window.innerHeight - touch.clientY;
+       const desiredHeight = window.innerHeight - touch.clientY - 8;
        const newHeight = Math.max(minTerminalHeight, Math.min(maxTerminalHeight, desiredHeight));
        terminal.style.height = `${newHeight}px`;
    }
@@ -7426,6 +7235,9 @@ window.handleRestoreProgress = handleRestoreProgress;
 window.handleDismissRestore = handleDismissRestore;
 
 
+</script>
+<script>
+{% include 'ai_modes.js' %}
 </script>
 
 </body>

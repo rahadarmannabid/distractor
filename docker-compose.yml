@@ -25,6 +25,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      runner:
+        condition: service_started
 
     env_file:
       - .env
@@ -35,6 +37,8 @@ services:
       - LOG_LEVEL=info
       # Default to bundled Redis; set REDIS_URL in .env to use managed Redis instead.
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      # Student code runs in the separate `runner` container below.
+      - RUNNER_URL=http://runner:8100
 
     volumes:
       # ONLY mount directories for OUTPUT/RUNTIME DATA
@@ -50,6 +54,7 @@ services:
     
     networks:
       - guessing_ide_network
+      - runner_network
     
     restart: unless-stopped
     
@@ -66,6 +71,34 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Runs student code. Deliberately gets NO env_file: it must never see API keys or Firebase
+  # credentials. Internal network only (no internet). Each program runs as the unprivileged
+  # `sandbox` user (SANDBOX_UID) with CPU/memory/output/process limits from sandbox.py.
+  runner:
+    image: rahadarmannabid/codeoracle:latest
+    container_name: codeoracle_runner
+    command: ["uvicorn", "runner:app", "--host", "0.0.0.0", "--port", "8100", "--log-level", "warning"]
+    user: root  # only to switch each student program to SANDBOX_UID
+    environment:
+      - RUNNER_TOKEN=${RUNNER_TOKEN:?Set RUNNER_TOKEN in .env (openssl rand -hex 32)}
+      - SANDBOX_UID=10001
+      - CODE_MAX_CONCURRENT=${CODE_MAX_CONCURRENT:-40}
+      - CODE_MEMORY_MB=${CODE_MEMORY_MB:-256}
+    networks:
+      - runner_network
+    read_only: true
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    pids_limit: 1024
+    mem_limit: 6g
+    cpus: 2
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
 volumes:
   redis_data:
 
@@ -73,3 +106,7 @@ networks:
   guessing_ide_network:
     driver: bridge
     name: guessing_ide_network
+  runner_network:
+    driver: bridge
+    internal: true  # no route to the internet
+    name: runner_network

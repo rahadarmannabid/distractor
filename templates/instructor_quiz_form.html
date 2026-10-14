@@ -197,6 +197,16 @@
     .cond-card h3 { font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: var(--text); }
     .cond-card p { font-size: 0.85rem; color: var(--muted); line-height: 1.5; }
 
+    /* ── Agent skills (condition 3) ── */
+    .skills-section { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--border); }
+    .skills-section h3 { font-size: 1rem; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .skill-row { background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-top: 12px; display: grid; gap: 8px; }
+    .skill-row__head { display: flex; gap: 8px; align-items: center; }
+    .skill-row__head input { flex: 1; }
+    .skill-row textarea { min-height: 80px; }
+    .skill-row__remove { background: transparent; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+    .skill-row__remove:hover { color: #ef4444; border-color: #ef4444; }
+
     /* ── Problem Tabs ── */
     .problem-tabs-container { margin-bottom: 24px; }
     .problem-tabs {
@@ -415,15 +425,21 @@
     <div class="fg">
       <label>Allowed Languages</label>
       <div class="chip-group" id="langChips">
-        {% set langs = quiz.allowed_languages if quiz and quiz.allowed_languages else ['python', 'javascript', 'c'] %}
+        {% set langs = quiz.allowed_languages if quiz and quiz.allowed_languages else ['python', 'javascript', 'c', 'cpp', 'java'] %}
         <label class="chip {% if 'python' in langs %}selected{% endif %}" onclick="toggleChip(this)">
-          <input type="checkbox" value="python" {% if 'python' in langs %}checked{% endif %}> 🐍 Python
+          <input type="checkbox" value="python" {% if 'python' in langs %}checked{% endif %}> Python
         </label>
         <label class="chip {% if 'javascript' in langs %}selected{% endif %}" onclick="toggleChip(this)">
-          <input type="checkbox" value="javascript" {% if 'javascript' in langs %}checked{% endif %}> 🟨 JavaScript
+          <input type="checkbox" value="javascript" {% if 'javascript' in langs %}checked{% endif %}> JavaScript
         </label>
         <label class="chip {% if 'c' in langs %}selected{% endif %}" onclick="toggleChip(this)">
-          <input type="checkbox" value="c" {% if 'c' in langs %}checked{% endif %}> ⚙️ C
+          <input type="checkbox" value="c" {% if 'c' in langs %}checked{% endif %}> C
+        </label>
+        <label class="chip {% if 'cpp' in langs %}selected{% endif %}" onclick="toggleChip(this)">
+          <input type="checkbox" value="cpp" {% if 'cpp' in langs %}checked{% endif %}> C++
+        </label>
+        <label class="chip {% if 'java' in langs %}selected{% endif %}" onclick="toggleChip(this)">
+          <input type="checkbox" value="java" {% if 'java' in langs %}checked{% endif %}> Java
         </label>
       </div>
     </div>
@@ -479,25 +495,32 @@
 <div class="step-panel" data-step="1">
   <div class="card">
     <h2>Experimental Conditions</h2>
-    <p class="subtitle">Select the AI assistance levels you want to test. If multiple are chosen, students will be randomly assigned to one.</p>
+    <p class="subtitle">Select the AI assistance conditions you want to test. If multiple are chosen, students will be randomly assigned to one.</p>
 
     {% set current_conds = quiz.conditions if quiz and quiz.conditions else [1] %}
     <div class="cond-grid">
       <div class="cond-card {% if 1 in current_conds %}selected{% endif %}" onclick="toggleCondition(1, this)">
         <div class="cond-num">1</div>
         <h3>No AI</h3>
-        <p>Students receive <strong>no AI assistance</strong>. Pure coding environment without autocomplete or explanations.</p>
+        <p>Students receive <strong>no AI assistance</strong>. Plain coding environment with no suggestions or chat.</p>
       </div>
       <div class="cond-card {% if 2 in current_conds %}selected{% endif %}" onclick="toggleCondition(2, this)">
         <div class="cond-num">2</div>
-        <h3>Explanation + Suggestion</h3>
-        <p>Students see an <strong>AI explanation</strong> of their code context along with a <strong>next-line code suggestion</strong>.</p>
+        <h3>Code Suggestion</h3>
+        <p>Students get <strong>inline ghost-text suggestions</strong> (single or multi-line) as they type, like GitHub Copilot. <kbd>Tab</kbd> accepts.</p>
       </div>
       <div class="cond-card {% if 3 in current_conds %}selected{% endif %}" onclick="toggleCondition(3, this)">
         <div class="cond-num">3</div>
-        <h3>Suggestion Only</h3>
-        <p>Students see a <strong>next-line code suggestion</strong> only, similar to standard GitHub Copilot.</p>
+        <h3>AI Agent</h3>
+        <p>Students chat with an <strong>AI coding agent</strong> that can read, add, modify and delete code, like Cursor. Modes: Ask, Agent, Plan, Debug.</p>
       </div>
+    </div>
+
+    <div class="skills-section" id="skillsSection" style="display:none;">
+      <h3>Agent skills</h3>
+      <p class="subtitle">Optional instructions the agent follows for students in the AI Agent condition (e.g. "Explain every change in beginner terms"). Students can turn these on or off and add their own.</p>
+      <div id="skillsList"></div>
+      <button type="button" class="btn btn-secondary" style="margin-top:12px;" onclick="addSkill()">+ Add skill</button>
     </div>
   </div>
 </div>
@@ -645,6 +668,7 @@
   'edit_mode': edit_mode,
   'quiz_id': quiz.id if quiz else '',
   'draft_upload_id': draft_upload_id or '',
+  'agent_skills': quiz.agent_skills if quiz and quiz.agent_skills else [],
   'selected_conditions': quiz.conditions if quiz and quiz.conditions else [1],
   'problems_payload': {
     'problems': quiz.problems,
@@ -660,6 +684,7 @@
   'edit_mode': edit_mode,
   'quiz_id': quiz.id if quiz else '',
   'draft_upload_id': draft_upload_id or '',
+  'agent_skills': quiz.agent_skills if quiz and quiz.agent_skills else [],
   'selected_conditions': quiz.conditions if quiz and quiz.conditions else [1],
   'problems_payload': None,
 } | tojson | safe }}</script>
@@ -674,6 +699,7 @@ const DRAFT_UPLOAD_ID = bootstrap.draft_upload_id;
 const TOTAL_STEPS = 4;
 let currentStep = 0;
 let selectedConditions = bootstrap.selected_conditions;
+let agentSkills = (bootstrap.agent_skills || []).map(s => ({ name: s.name || '', instructions: s.instructions || '' }));
 
 // Per-problem data store
 let problemsData = [];
@@ -916,7 +942,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const normalizedSC = {};
     for (const [lang, val] of Object.entries(sc)) {
       if (typeof val === 'string') {
-        const extMap = { python: 'py', javascript: 'js', c: 'c' };
+        const extMap = { python: 'py', javascript: 'js', c: 'c', cpp: 'cpp', java: 'java' };
         normalizedSC[lang] = [{ filename: 'main.' + (extMap[lang] || 'txt'), content: val }];
       } else if (Array.isArray(val)) {
         normalizedSC[lang] = val;
@@ -984,7 +1010,27 @@ function toggleCondition(n, el) {
     selectedConditions.sort();
     el.classList.add('selected');
   }
+  updateSkillsVisibility();
 }
+
+// Agent skills (condition 3)
+function updateSkillsVisibility() {
+  document.getElementById('skillsSection').style.display = selectedConditions.includes(3) ? '' : 'none';
+}
+function renderSkills() {
+  const list = document.getElementById('skillsList');
+  list.innerHTML = agentSkills.map((s, i) => `
+    <div class="skill-row">
+      <div class="skill-row__head">
+        <input type="text" maxlength="60" placeholder="Skill name, e.g. Beginner explanations" value="${escHtml(s.name)}" oninput="agentSkills[${i}].name = this.value">
+        <button type="button" class="skill-row__remove" onclick="removeSkill(${i})">Remove</button>
+      </div>
+      <textarea maxlength="4000" placeholder="Instructions the agent should follow..." oninput="agentSkills[${i}].instructions = this.value">${escHtml(s.instructions)}</textarea>
+    </div>`).join('');
+}
+function addSkill() { agentSkills.push({ name: '', instructions: '' }); renderSkills(); }
+function removeSkill(i) { agentSkills.splice(i, 1); renderSkills(); }
+document.addEventListener('DOMContentLoaded', () => { renderSkills(); updateSkillsVisibility(); });
 
 // Problem Tabs
 function renderProblemTabs() {
@@ -1109,7 +1155,7 @@ function updateCodeTabs() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'code-tab' + ((activeCodeLang === lang || (!activeCodeLang && i === 0)) ? ' active' : '');
-    btn.textContent = lang.charAt(0).toUpperCase() + lang.slice(1);
+    btn.textContent = ({ cpp: 'C++', javascript: 'JavaScript', c: 'C' })[lang] || (lang.charAt(0).toUpperCase() + lang.slice(1));
     btn.onclick = () => switchCodeTab(lang, btn);
     tabBar.appendChild(btn);
   });
@@ -1146,9 +1192,9 @@ function renderStarterFiles() {
   container.innerHTML = '';
   const files = starterCodeStore[activeCodeLang] || [];
   if (files.length === 0) {
-    const extMap = { python: 'py', javascript: 'js', c: 'c' };
+    const extMap = { python: 'py', javascript: 'js', c: 'c', cpp: 'cpp', java: 'java' };
     const ext = extMap[activeCodeLang] || 'txt';
-    files.push({ filename: 'main.' + ext, content: '' });
+    files.push({ filename: (activeCodeLang === 'java' ? 'Main.' : 'main.') + ext, content: '' });
     starterCodeStore[activeCodeLang] = files;
   }
   files.forEach((f, i) => {
@@ -1419,7 +1465,7 @@ function prevStep() { goToStep(currentStep - 1); }
 function buildReview() {
   saveCurrentProblem();
   const langs = getSelectedLanguages();
-  const condLabels = { 1: '1. No AI', 2: '2. Explanation + Suggestion', 3: '3. Suggestion Only' };
+  const condLabels = { 1: '1. No AI', 2: '2. Code Suggestion', 3: '3. AI Agent' };
 
   const condStr = selectedConditions.map(c => condLabels[c]).join('<br>');
   let problemsSummary = problemsData.map((p, i) => {
@@ -1466,6 +1512,7 @@ async function saveQuiz() {
     allowed_languages: getSelectedLanguages(),
     time_limit_minutes: parseInt(document.getElementById('time_limit').value) || 0,
     conditions: selectedConditions,
+    agent_skills: agentSkills.filter(s => s.name.trim() && s.instructions.trim()),
     published: document.getElementById('published').checked,
     availability_start: document.getElementById('avail_start').value || null,
     availability_end: document.getElementById('avail_end').value || null,

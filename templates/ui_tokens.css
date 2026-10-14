@@ -1,0 +1,121 @@
+/* Shared design system (VS Code / Cursor "Dark Modern" look) for the IDE, login and survey pages.
+   One type scale, one palette, one button system, one motion system. */
+:root {
+    /* Surfaces (LeetCode-style dark: a near-black page with raised grey cards) */
+    --ui-page: #1a1a1a;          /* behind the cards */
+    --ui-bg: #262626;            /* cards, panels */
+    --ui-surface: #262626;       /* editor */
+    --ui-header: #333333;        /* card header strips */
+    --ui-raised: #303030;        /* popovers, menus, dialogs */
+    --ui-input: #333333;
+    --ui-fill: rgba(255, 255, 255, 0.07);       /* chip / secondary button fill */
+    --ui-fill-hover: rgba(255, 255, 255, 0.12);
+    --ui-hover: rgba(255, 255, 255, 0.06);
+    --ui-selected: rgba(255, 255, 255, 0.1);
+    --ui-border: rgba(255, 255, 255, 0.08);
+    --ui-border-strong: rgba(255, 255, 255, 0.16);
+    --ui-overlay: rgba(0, 0, 0, 0.6);
+
+    /* Text */
+    --ui-text: rgba(239, 241, 246, 0.82);
+    --ui-text-strong: #f5f5f5;
+    --ui-text-muted: rgba(239, 241, 246, 0.55);
+    --ui-text-faint: rgba(239, 241, 246, 0.35);
+
+    /* Accent + status */
+    --ui-accent: #0a84ff;
+    --ui-accent-hover: #0070e0;
+    --ui-accent-soft: rgba(10, 132, 255, 0.16);
+    --ui-focus: #0a84ff;
+    --ui-brand: #ffa116;
+    --ui-green: #2cbb5d;
+    --ui-green-soft: rgba(44, 187, 93, 0.14);
+    --ui-success: #2cbb5d;
+    --ui-warning: #ffc01e;
+    --ui-error: #ff6b6b;
+    --ui-error-strong: #ef4743;
+    --ui-easy: #00b8a3;
+    --ui-medium: #ffc01e;
+    --ui-hard: #ff375f;
+
+    /* Type scale */
+    --ui-font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Ubuntu, "Helvetica Neue", sans-serif;
+    --ui-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --fs-xs: 11px;   /* section labels, badges */
+    --fs-sm: 12px;   /* secondary text, small buttons */
+    --fs-md: 13px;   /* default UI text */
+    --fs-lg: 14px;   /* reading text, form fields */
+    --fs-xl: 16px;   /* dialog titles */
+    --fs-2xl: 20px;  /* page titles */
+    --fw-regular: 400;
+    --fw-medium: 500;
+    --fw-semibold: 600;
+    --lh: 1.5;
+
+    /* Shape */
+    --radius-sm: 4px;
+    --radius: 6px;
+    --radius-lg: 8px;
+    --radius-xl: 12px;
+    --h-btn-sm: 24px;
+    --h-btn: 28px;
+    --h-btn-lg: 32px;
+    --h-nav: 48px;
+    --h-card-header: 40px;
+    --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.45);
+    --shadow-modal: 0 18px 48px rgba(0, 0, 0, 0.55);
+
+    /* Motion */
+    --ease-out: cubic-bezier(0.2, 0, 0, 1);
+    --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+    --dur-fast: 120ms;
+    --dur: 180ms;
+    --dur-slow: 240ms;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+.ui-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: var(--h-btn); padding: 0 12px; border-radius: var(--radius);
+    border: 1px solid transparent; font: var(--fw-medium) var(--fs-sm)/1 var(--ui-font);
+    letter-spacing: 0; text-transform: none; white-space: nowrap; cursor: pointer; user-select: none;
+    transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
+                color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out), opacity var(--dur-fast);
+}
+.ui-btn:active:not(:disabled) { transform: scale(0.97); }
+.ui-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.ui-btn--primary { background: var(--ui-accent); color: #fff; }
+.ui-btn--primary:hover:not(:disabled) { background: var(--ui-accent-hover); }
+.ui-btn--secondary { background: var(--ui-fill); color: var(--ui-text-strong); }
+.ui-btn--secondary:hover:not(:disabled) { background: var(--ui-fill-hover); }
+.ui-btn--ghost { background: transparent; color: var(--ui-text); }
+.ui-btn--ghost:hover:not(:disabled) { background: var(--ui-hover); }
+.ui-btn--lg { height: var(--h-btn-lg); padding: 0 16px; font-size: var(--fs-md); }
+.ui-btn--sm { height: var(--h-btn-sm); padding: 0 8px; }
+
+/* Keyboard focus everywhere: a thin accent ring, never on mouse click */
+:focus { outline: none; }
+:focus-visible { outline: 1px solid var(--ui-focus); outline-offset: 1px; }
+
+/* ── Motion ──────────────────────────────────────────────────────────────── */
+@keyframes ui-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ui-pop-in { from { opacity: 0; transform: translateY(4px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes ui-pop-in-down { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes ui-rise-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes ui-modal-in { from { opacity: 0; transform: translateY(8px) scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes ui-toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes ui-spin { to { transform: rotate(360deg); } }
+@keyframes ui-progress { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+
+.ui-spinner {
+    width: 22px; height: 22px; border-radius: 50%;
+    border: 2px solid var(--ui-border-strong); border-top-color: var(--ui-accent);
+    animation: ui-spin 0.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 1ms !important; animation-iteration-count: 1 !important;
+        transition-duration: 1ms !important; scroll-behavior: auto !important;
+    }
+}

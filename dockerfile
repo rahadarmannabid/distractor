@@ -19,7 +19,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd -m -u 1000 appuser
+RUN useradd -m -u 1000 appuser && \
+    useradd -r -u 10001 -M -s /usr/sbin/nologin sandbox   # runs student programs (runner.py)
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
@@ -30,7 +31,7 @@ COPY --chown=appuser:appuser . .
 
 # Verify layout (no .env required — configure via container env at run time)
 RUN echo "=== VERIFYING CRITICAL FILES ===" && \
-    test -f /app/main.py && test -f /app/admin.py && \
+    test -f /app/main.py && test -f /app/admin.py && test -f /app/runner.py && test -f /app/sandbox.py && \
     test -f /app/run_production.sh && \
     test -d /app/templates && \
     test -f /app/templates/home.html && \
