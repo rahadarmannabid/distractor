@@ -17,8 +17,8 @@ Web-based coding environment for research studies: participants write code in a 
 | Area | Functionality |
 |------|----------------|
 | **IDE** | Multi-file tree, Monaco editor, font controls, **interactive terminal** (live output, typing input for `input()` / `scanf` / `cin` / `Scanner`, Stop) with Run / Clear / Submit. Python, C (gcc), C++ (g++, C++17) and Java (javac + java) compile and run in a sandboxed runner; JavaScript runs in a browser worker |
-| **AI assist** | Condition 2: inline **ghost-text** suggestions (single or multi-line) as you type, `Tab` accept / `Esc` dismiss. Condition 3: **Cursor-style agent** chat with Ask / Agent / Plan / Debug modes that reads, edits, creates, deletes and runs files, with per-file Keep/Undo review and skills (instructor- and student-defined). Logic lives in `ai_assist.py` and `templates/ai_modes.js` |
-| **Conditions** | **1 = No AI**, **2 = code suggestion** (ghost text), **3 = AI agent**. Instructors pick one or more per quiz (students are randomly assigned); legacy assignment keys map via `CONDITION_*_PREFIXES` |
+| **AI assist** | Conditions 2 and 4: inline **ghost-text** suggestions as you type (condition 2: one line at a time; condition 4: multi-line blocks like GitHub Copilot), each offered as **two options in random order, one correct and one with a single bug**: `Alt+]` / `Alt+[` switch, `Tab` accept / `Esc` dismiss. Condition 3: **Cursor-style agent** chat with Ask / Agent / Plan / Debug modes that reads, edits, creates, deletes and runs files; its changes are offered as **Version A / Version B** (correct and buggy, random order) and the student applies one, then per-file Keep/Undo review and skills (instructor- and student-defined). Logic lives in `ai_assist.py` and `templates/ai_modes.js` |
+| **Conditions** | **1 = No AI**, **2 = single-line code suggestion** (ghost text), **3 = AI agent**, **4 = multi-line code suggestion** (ghost text). Instructors pick one or more per quiz (students are randomly assigned); legacy assignment keys map via `CONDITION_*_PREFIXES` |
 | **Problem panel** | Assignment text, **AI history** tab with newest-first pagination (5 + “See more”) |
 | **Surveys** | Pre/post/periodic surveys (content configurable via env and Firebase-backed quiz config where used) |
 | **Persistence** | Code submissions and logs under configurable dirs; optional **Firebase** for live session/checkpoint data |
@@ -56,11 +56,16 @@ Optional but common:
 | `API_RELOAD` | `true` / `false` — auto-reload (default `true`) |
 | `LOG_LEVEL` | e.g. `info` |
 | `SESSION_SECRET_KEY` | Session signing — **set a strong value in production** |
+| `INSTRUCTOR_LOGIN_TTL_SEC` | How long an instructor stays signed in after entering the emailed code (default 86400 = one day). Students are not affected |
 | `CORS_ORIGINS` | Comma-separated origins or `*` (default) |
 | `SUBMISSIONS_DIR` | Where submissions/logs go (default `submissions`) |
 | `CONDITION_1_PREFIXES`, `CONDITION_2_PREFIXES`, `CONDITION_3_PREFIXES` | Optional, legacy: assignment keys → study condition. Unset = only instructor quiz links work |
 | `MAX_CODE_LENGTH`, `MIN_CODE_CHARS_FOR_SUGGESTION` | Editor / suggestion limits |
-| `COMPLETION_MODEL`, `AGENT_MODEL`, `AGENT_MAX_STEPS` | Ghost-text model (default `gpt-4.1-nano`), agent model (default `gpt-4.1-mini`), max agent tool steps per message (default 15) |
+| `MULTILINE_SUGGESTION_MAX_LINES` | Most lines one condition 4 suggestion may span (default 20) |
+| `COMPLETION_MODEL`, `AGENT_MODEL`, `AGENT_MAX_STEPS` | Ghost-text model, which writes both the correct and the buggy option in one call (default `gpt-6-sol` with reasoning off: ~2.3 s per pair and the most realistic bugs; `gpt-4.1` (~1.6 s) and `gpt-4.1-mini` are faster and cheaper but plant unrealistic bugs more often), agent model (default `gpt-6-luna`, with `AGENT_REASONING_EFFORT=low`: ~1.8 s vs ~3 s on gpt-5-nano), max agent tool steps per message (default 15) |
+| `OPENAI_MODEL`, `REASONING_EFFORT` | Default model for every AI call (`gpt-5-nano`) and its reasoning effort for the short interactive calls (`minimal`, which keeps latency near 1 s). gpt-4.x models also work; see `llm_params.py` |
+| `BUG_MODEL` | Model that writes the buggy version of an agent turn's changes (default `gpt-6-sol`). The bug type is the one of the quiz's selected **bug skills** that best fits the code: the built-in ones are `bug_skills/*.md`, and instructors select, edit, add, upload or remove them per quiz in the quiz form. No bug type selected = a single correct suggestion. Counts per bug type are on the quiz analytics page. See `bug_injection.py` |
+| `BUG_CLASSIFIER_MODEL`, `BUG_CLASSIFIER_CONCURRENCY` | Background model that labels each injected bug (default `gpt-5-nano`, 4 at once). Records go to Firebase `bug_injections/{session_id}/{bug_id}` and `$SUBMISSIONS_DIR/bug_injections.jsonl` |
 | `RUNNER_URL`, `RUNNER_TOKEN` | Address and shared secret of the separate code-runner service (`runner.py`). Unset = run code locally (development). See [DOCKER.md](./DOCKER.md#student-code-runner-required-in-production) |
 | `CODE_MAX_CONCURRENT`, `CODE_RUNS_PER_MINUTE`, `CODE_CPU_SECONDS`, `CODE_WALL_SECONDS`, `CODE_IDLE_SECONDS`, `CODE_MEMORY_MB`, `CODE_OUTPUT_BYTES` | Terminal guardrails (defaults 40, 20, 10 s, 120 s, 60 s, 256 MB, 100 KB) — see `sandbox.py` |
 
@@ -97,8 +102,9 @@ Container image **`rahadarmannabid/codeoracle`** (`build-and-push.sh` publishes 
 ├── admin.py             # Router: /admin
 ├── instructor.py        # Router: /instructor
 ├── firebase_utils.py    # Firebase helpers
-├── models.py, otp.py, quiz_analytics.py
+├── otp.py, quiz_analytics.py
 ├── requirements.txt
+├── bug_skills/          # Built-in bug skills (.md): one bug type each, seeded into every quiz
 ├── templates/           # Jinja HTML (index IDE, home, surveys, instructor UIs)
 ├── submissions/       # Default output for submissions (configurable)
 ├── scripts/           # Utilities (see Load testing below)

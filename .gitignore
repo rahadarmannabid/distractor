@@ -13,7 +13,7 @@ pip-delete-this-directory.txt
 # ============================================
 # VIRTUAL ENVIRONMENTS
 # ============================================
-.venv/
+.venv
 venv/
 env/
 ENV/
@@ -81,6 +81,7 @@ desktop.ini
 !README.md
 !readme.md
 !DOCKER.md
+!bug_skills/*.md
 frontend.txt
 docs/
 documentation/

@@ -1,4 +1,5 @@
-"""AI assistance for study conditions 2 (inline ghost-text completion) and 3 (coding agent).
+"""AI assistance for study conditions 2 and 4 (inline ghost-text completion, single- and
+multi-line) and 3 (coding agent).
 
 Kept free of main.py imports: callers pass in the OpenAI client and a code runner.
 """
@@ -12,30 +13,85 @@ import uuid
 from datetime import datetime
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from openai import AsyncOpenAI
+from openai import NOT_GIVEN, AsyncOpenAI
+
+import bug_injection
+from llm_params import chat_args, is_reasoning_model
 
 logger = logging.getLogger(__name__)
 
-COMPLETION_MODEL = os.getenv("COMPLETION_MODEL", "gpt-4.1-nano")
-AGENT_MODEL = os.getenv("AGENT_MODEL", "gpt-4.1-mini")
+# Ghost text has to be fast and its bugs realistic. gpt-6-sol (reasoning off) answers in ~2.3 s with a
+# valid pair 16/16 times and plants bugs a real assistant makes, each tied to an input that exposes it
+# (int overflow at the constraint limit, a filter that drops digits). gpt-4.1 (~1.6 s) and
+# gpt-4.1-mini (~1.5 s) are faster but often plant unrealistic or harmless bugs; gpt-6.1-sol is as
+# good but takes 4-12 s, since its reasoning cannot be turned off.
+COMPLETION_MODEL = os.getenv("COMPLETION_MODEL", "gpt-6-sol")
+# gpt-6-luna at low effort answers in ~1.8 s where gpt-5-nano at low effort takes ~3 s.
+AGENT_MODEL = os.getenv("AGENT_MODEL", "gpt-6-luna")
+# The agent plans multi-step edits, so it gets a little more reasoning than the inline calls. It runs on
+# the Responses API, since Chat Completions rejects function tools with reasoning for gpt-6 models.
+AGENT_REASONING_EFFORT = os.getenv("AGENT_REASONING_EFFORT", "low")
 
 AGENT_MODES = ("ask", "agent", "plan", "debug")
 AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "15"))
 MAX_FILES = 20
 MAX_FILE_CHARS = 20000
 _FILENAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$")
+# Same file types the student's explorer allows (templates/workspace.js LANG_EXT / EXTRA_EXT).
+_LANG_EXT = {"python": ["py"], "c": ["c", "h"], "cpp": ["cpp", "hpp", "h", "cc"], "java": ["java"], "javascript": ["js"]}
+_EXTRA_EXT = ["txt", "md", "csv", "json"]
 
 
-# ─── Inline completion (condition 2) ─────────────────────────────────────────
+def allowed_extensions(language: str) -> List[str]:
+    return _LANG_EXT.get(language, []) + _EXTRA_EXT
 
-_COMPLETION_SYSTEM = (
+
+# ─── Inline completion (conditions 2 and 4) ──────────────────────────────────
+
+PROBLEM_MAX_CHARS = 6000
+
+_COMPLETION_BASE = (
     "You are a code completion engine like GitHub Copilot. You receive a {language} file "
-    "with a <CURSOR> marker. Reply with ONLY the exact text to insert at <CURSOR>: no "
+    "with a <CURSOR> marker. {reply_rule} Write only the code to insert at <CURSOR>: no "
     "explanations, no markdown fences, never repeat code that is already before or after "
-    "the cursor. Finish the current line and, when the intent is clear, continue with the "
-    "next lines of the same logical block (at most {max_lines} lines). Match the file's "
-    "indentation. If nothing useful can be added, reply with nothing."
+    "the cursor (in particular, never repeat the line above the cursor). {length_rule} Match the file's indentation. "
+    "If a <problem> is given, the student is solving it: the correct code must solve that problem "
+    "exactly as stated, pass its test cases (same input and output format) and respect its constraints."
 )
+_PLAIN_REPLY = "Reply with ONLY the text to insert; if nothing useful can be added, reply with nothing."
+# Every suggestion is a pair (see bug_injection.py): one call writes both, so both arrive together.
+_PAIR_REPLY = (
+    "Write two versions of the suggestion and reply with a JSON object:\n"
+    '  "correct": the suggestion, fully correct (it handles edge cases such as empty input, zero '
+    'or None/null where they matter) and following every rule here;\n'
+    '  "bug_type": the id of the ONE bug type in <bug_types> that fits this spot best, chosen by the '
+    'rules on how to choose the bug below, or "none" if no bug type fits here (then use "" for '
+    '"buggy");\n'
+    '  "bug_plan": one sentence naming the exact change you will make, why it is that bug type, and '
+    "the input or situation that exposes it;\n"
+    '  "buggy": the correct suggestion changed to contain exactly one bug of that type (it must '
+    'differ from "correct"), starting '
+    "at the same place, with the same shape and length, and looking like a normal, correct "
+    "suggestion at a glance (no comments, hints or markers). The bug must make the code actually "
+    "wrong (wrong result, crash, or failure to compile), not just slower or longer.\n"
+    'If nothing useful can be added, use "" for both.'
+)
+_SINGLE_LINE_RULE = (
+    "Suggest a single line only: finish the current line, or, if the cursor is on an empty "
+    "line, write the one next line."
+)
+# Condition 4: Copilot's multi-line mode.
+_MULTI_LINE_RULE = (
+    "If code follows the cursor on the same line, only finish that line. Otherwise write the "
+    "next logical chunk, up to {max_lines} lines: e.g. a whole function body, loop or if-block "
+    "after its header, or the next few related statements. Stop at a natural boundary rather "
+    "than writing the rest of the program."
+)
+
+
+def _problem_block(problem: str) -> str:
+    problem = (problem or "").strip()
+    return f"<problem>\n{problem[:PROBLEM_MAX_CHARS]}\n</problem>\n\n" if problem else ""
 
 
 def _strip_fences(text: str) -> str:
@@ -43,13 +99,54 @@ def _strip_fences(text: str) -> str:
     return m.group(1) if m else text
 
 
+_TRAILING_COMMENT_RE = re.compile(r"\s+(#|//)\s.*$")
+
+
+def _drop_new_comments(buggy: str, correct: str) -> str:
+    """Remove trailing comments the buggy version adds (e.g. "# empty list -> division by zero"):
+    they would point the student at the bug."""
+    out = []
+    for line in buggy.split("\n"):
+        m = _TRAILING_COMMENT_RE.search(line)
+        if m and m.group(0).strip() not in correct:
+            line = line[: m.start()]
+        out.append(line)
+    return "\n".join(out)
+
+
 def clean_completion(completion: str, prefix: str, suffix: str, max_lines: int) -> str:
     text = _strip_fences(completion.replace("\r\n", "\n")).replace("<CURSOR>", "")
     if not text.strip():
         return ""
 
-    # Model sometimes repeats the partial current line; drop the duplicate.
+    # Smaller models sometimes restate the code before the cursor; drop the restated lines
+    # (compared without indentation or blank lines).
+    before = [ln.strip() for ln in prefix.split("\n")[:-1] if ln.strip()]
+    lines = text.split("\n")
+    filled = [i for i, ln in enumerate(lines) if ln.strip()]
+    for n in range(min(len(before), len(filled) - 1), 0, -1):
+        if [lines[i].strip() for i in filled[:n]] == before[-n:]:
+            text = "\n".join(lines[filled[n - 1] + 1:])
+            break
+
+    # Never repeat a statement right after itself (the line above the cursor, or the suggestion's
+    # own previous line): e.g. the same print line twice. Short lines like "}" may repeat.
     line_head = prefix.rsplit("\n", 1)[-1]
+    prev = before[-1] if before and not line_head.strip() else None
+    kept = []
+    for i, ln in enumerate(text.split("\n")):
+        st = ln.strip()
+        if len(st) >= 8 and st == prev:
+            continue
+        kept.append(ln)
+        if st:
+            # A first line that continues the current line is a fragment, not a statement.
+            prev = st if i > 0 or not line_head.strip() else None
+    text = "\n".join(kept)
+    if not text.strip():
+        return ""
+
+    # Model sometimes repeats the partial current line; drop the duplicate.
     if not line_head.strip():
         # Cursor sits in the line's indentation: drop indentation the editor already has,
         # otherwise the ghost text is over-indented and Tab indents instead of accepting.
@@ -77,25 +174,65 @@ def clean_completion(completion: str, prefix: str, suffix: str, max_lines: int) 
             text = text[:-k]
             break
 
-    lines = text.rstrip().split("\n")[:max_lines]
-    return "\n".join(lines).rstrip()
+    # A suggestion that starts on the next line keeps one newline (only after a non-blank line head).
+    body = text.lstrip("\n")
+    lead = "\n" if body != text and line_head.strip() else ""
+    lines = body.rstrip().split("\n")[:max_lines]
+    return (lead + "\n".join(lines)).rstrip()
 
 
 async def inline_completion(
-    client: AsyncOpenAI, *, language: str, filename: str, prefix: str, suffix: str, max_lines: int = 8
-) -> str:
+    client: AsyncOpenAI,
+    *,
+    language: str,
+    filename: str,
+    prefix: str,
+    suffix: str,
+    max_lines: int = 1,
+    bug_skills: Optional[List[Dict[str, Any]]] = None,
+    problem: str = "",
+) -> Dict[str, Any]:
+    """{"correct": text, "buggy": text or None, "bug_skill": skill or None}. With selected bug
+    skills, one call writes both versions; without any, only the correct one. `problem` is the
+    task the student is solving (statement, test cases, constraints) as plain text."""
     prefix = prefix[-4000:]
     suffix = suffix[:1500]
-    resp = await client.chat.completions.create(
-        model=COMPLETION_MODEL,
-        temperature=0,
-        max_tokens=200,
-        messages=[
-            {"role": "system", "content": _COMPLETION_SYSTEM.format(language=language, max_lines=max_lines)},
-            {"role": "user", "content": f"File: {filename}\n{prefix}<CURSOR>{suffix}"},
-        ],
+    length_rule = _SINGLE_LINE_RULE if max_lines <= 1 else _MULTI_LINE_RULE.format(max_lines=max_lines)
+    paired = bool(bug_skills)
+    system = _COMPLETION_BASE.format(
+        language=language, length_rule=length_rule, reply_rule=_PAIR_REPLY if paired else _PLAIN_REPLY,
     )
-    return clean_completion(resp.choices[0].message.content or "", prefix, suffix, max_lines)
+    if paired:
+        system += "\n\n" + bug_injection.BUG_CHOICE_RULES + "\n\n<bug_types>\n" + bug_injection.bug_guides(bug_skills or []) + "\n</bug_types>"
+    max_tokens = 200 if max_lines <= 1 else 60 * max_lines
+    resp = await client.chat.completions.create(
+        **chat_args(COMPLETION_MODEL, temperature=0, max_tokens=max_tokens * 2 + 60 if paired else max_tokens),
+        messages=[
+            {"role": "system", "content": system},
+            # The problem goes in the user message, so the long system prompt stays a cacheable prefix.
+            {"role": "user", "content": _problem_block(problem) + f"File: {filename}\n{prefix}<CURSOR>{suffix}"},
+        ],
+        response_format={"type": "json_object"} if paired else NOT_GIVEN,
+    )
+    raw = resp.choices[0].message.content or ""
+    if not paired:
+        return {"correct": clean_completion(raw, prefix, suffix, max_lines), "buggy": None, "bug_skill": None}
+    try:
+        out = json.loads(raw)
+    except json.JSONDecodeError:
+        out = {}
+    correct = clean_completion(str(out.get("correct") or ""), prefix, suffix, max_lines)
+    buggy = _drop_new_comments(clean_completion(str(out.get("buggy") or ""), prefix, suffix, max_lines), correct)
+    bug_type = str(out.get("bug_type") or "").strip()
+    skill = bug_injection.skill_by_id(bug_skills or [], bug_type)
+    if bug_type.lower() == "none":
+        # The model judged that no selected bug type fits this line: show the correct one only.
+        return {"correct": correct, "buggy": None, "bug_skill": None, "no_bug": "none_fits"}
+    if not correct or not buggy or buggy == correct or not skill:
+        reason = "same_as_correct" if buggy and buggy == correct else ("unknown_type" if not skill else "empty")
+        logger.info("Completion without a buggy option (%s, bug_type=%r)", reason, bug_type)
+        return {"correct": correct, "buggy": None, "bug_skill": None, "no_bug": reason}
+    return {"correct": correct, "buggy": buggy, "bug_skill": skill, "bug_plan": str(out.get("bug_plan") or "")[:500]}
 
 
 # ─── Agent (condition 3) ─────────────────────────────────────────────────────
@@ -165,6 +302,7 @@ _MODE_TOOLS = {"ask": _READ_TOOLS, "plan": _READ_TOOLS, "agent": _WRITE_TOOLS, "
 
 _BASE_PROMPT = """You are an AI coding agent built into a browser IDE, working with a student the way Cursor's agent does.
 Workspace language: {language}. Active file: {active_file}.
+In Agent and Debug modes you can create new files with write_file (flat names, no folders; allowed types: {extensions}).
 Keep replies concise and use Markdown. Refer to files by name. Never claim you ran or changed something you did not."""
 
 _MODE_PROMPTS = {
@@ -174,8 +312,11 @@ if the student wants changes, show short snippets and suggest switching to Agent
 (what to change, in which file, and why). Do not write the full solution and do not modify files.
 End by telling the student they can click "Build this plan" to have the agent carry it out.""",
     "agent": """Mode: AGENT. Make the changes the student asks for directly in their files using the tools.
-Prefer edit_file for targeted changes and write_file for new files or full rewrites. After editing,
-run the code when it helps confirm the change works. Finish with a brief summary of what you changed.""",
+Keep working until the request is fully done: read the code you need, make the edits, then run the
+code (with the problem's test cases as stdin when there is a problem) and fix what fails. Do not stop
+to ask permission for steps you can take yourself; ask only when the request is truly ambiguous.
+Prefer edit_file for targeted changes and write_file for new files or full rewrites. Finish with a
+brief summary of what you changed and how you checked it.""",
     "debug": """Mode: DEBUG. Find and fix the bug systematically. Always use run_code yourself; never ask
 the student whether to run it.
 1. Reproduce: call run_code first and read the actual error/output.
@@ -203,8 +344,19 @@ def _short_diff(before: str, after: str, filename: str, limit: int = 6000) -> st
     return diff if len(diff) <= limit else diff[:limit] + "\n… (diff truncated)"
 
 
-def build_system_prompt(mode: str, language: str, active_file: str, skills: List[Dict[str, str]]) -> str:
-    parts = [_BASE_PROMPT.format(language=language, active_file=active_file or "(none)"), _MODE_PROMPTS[mode]]
+def build_system_prompt(
+    mode: str, language: str, active_file: str, skills: List[Dict[str, str]], problem: str = ""
+) -> str:
+    parts = [_BASE_PROMPT.format(
+        language=language, active_file=active_file or "(none)",
+        extensions=", ".join("." + e for e in allowed_extensions(language)),
+    ), _MODE_PROMPTS[mode]]
+    if problem.strip():
+        parts.append(
+            "## The student's problem\nThe student is solving this problem. Code you write must solve it "
+            "exactly as stated, pass its test cases (same input and output format) and respect its "
+            "constraints.\n\n" + _problem_block(problem).strip()
+        )
     if skills:
         parts.append(
             "## Skills\nFollow these skills whenever they are relevant:\n\n"
@@ -244,6 +396,7 @@ class AgentTurn:
         skills: List[Dict[str, str]],
         terminal_output: Optional[str],
         run_code: RunCode,
+        problem: str = "",
     ):
         self.client = client
         self.mode = mode if mode in AGENT_MODES else "ask"
@@ -256,6 +409,10 @@ class AgentTurn:
         self.skills = skills
         self.terminal_output = terminal_output
         self.run_code = run_code
+        self.problem = problem
+        # The closing summary of a turn that changed files. It is not streamed: it belongs to the
+        # versions the student chooses between (the buggy one may get its own, wrong, description).
+        self.final_text = ""
         self.record: Dict[str, Any] = {
             "turn_id": uuid.uuid4().hex[:12],
             "timestamp": datetime.now().isoformat(),
@@ -274,6 +431,9 @@ class AgentTurn:
     def _check_name(self, name: str) -> Optional[str]:
         if not _FILENAME_RE.match(name or ""):
             return "Invalid filename: use a simple name like utils.py (no folders)."
+        allowed = allowed_extensions(self.language)
+        if name not in self.ws and name.rsplit(".", 1)[-1].lower() not in allowed:
+            return "Invalid file type. Allowed: " + ", ".join("." + e for e in allowed)
         return None
 
     async def _tool(self, name: str, args: Dict[str, Any]) -> Tuple[str, Optional[Dict[str, Any]]]:
@@ -344,72 +504,89 @@ class AgentTurn:
                 {"type": "file", "action": action, "filename": fn, "content": content,
                  "added": added, "removed": removed})
 
+    def changes(self) -> List[Dict[str, Any]]:
+        """The turn's net file changes (after run()): [{filename, action, content, diff}], content None for deletes."""
+        out = []
+        for name in self.record.get("files_changed", []):
+            before, after = self.initial.get(name), self.ws.get(name)
+            action = "delete" if after is None else "create" if before is None else "write"
+            out.append({"filename": name, "action": action, "content": after,
+                        "diff": _short_diff(before or "", after or "", name)})
+        return out
+
     # Main loop ------------------------------------------------------------
 
     async def run(self) -> AsyncIterator[Dict[str, Any]]:
+        # Responses API, not Chat Completions: there gpt-6 models only take function tools with
+        # reasoning turned off. store=False keeps nothing at OpenAI; the encrypted reasoning items are
+        # sent back each step instead, so the model keeps its chain of thought across tool calls (Codex).
         # strict: the model must send every argument (a missing new_string once erased files)
         tools = [
-            {"type": "function", "function": {
-                "name": n, "strict": True, **_TOOL_DEFS[n],
-                "parameters": {**_TOOL_DEFS[n]["parameters"], "additionalProperties": False},
-            }}
+            {"type": "function", "name": n, "strict": True, **_TOOL_DEFS[n],
+             "parameters": {**_TOOL_DEFS[n]["parameters"], "additionalProperties": False}}
             for n in _MODE_TOOLS[self.mode]
         ]
-        messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": build_system_prompt(self.mode, self.language, self.active_file, self.skills)}
-        ]
+        instructions = build_system_prompt(self.mode, self.language, self.active_file, self.skills, self.problem)
+        items: List[Dict[str, Any]] = []
         for h in self.history[-20:]:
             if h.get("role") in ("user", "assistant") and h.get("content"):
-                messages.append({"role": h["role"], "content": str(h["content"])[:8000]})
-        messages.append({"role": "user", "content": _workspace_context(self.ws, self.terminal_output)
-                         + "\n\n" + self.message})
+                items.append({"role": h["role"], "content": str(h["content"])[:8000]})
+        items.append({"role": "user", "content": _workspace_context(self.ws, self.terminal_output)
+                      + "\n\n" + self.message})
+        if is_reasoning_model(AGENT_MODEL):
+            model_args: Dict[str, Any] = {"reasoning": {"effort": AGENT_REASONING_EFFORT},
+                                          "include": ["reasoning.encrypted_content"]}
+        else:
+            model_args = {"temperature": 0.2}
 
-        usage = {"prompt_tokens": 0, "completion_tokens": 0}
+        usage = {"prompt_tokens": 0, "completion_tokens": 0, "reasoning_tokens": 0}
         for _step in range(AGENT_MAX_STEPS):
-            stream = await self.client.chat.completions.create(
-                model=AGENT_MODEL, messages=messages, tools=tools, temperature=0.2,
-                stream=True, stream_options={"include_usage": True},
+            stream = await self.client.responses.create(
+                model=AGENT_MODEL, instructions=instructions, input=items,  # pyright: ignore[reportArgumentType]
+                tools=tools, store=False, stream=True, **model_args,  # pyright: ignore[reportArgumentType]
             )
-            text, calls = "", {}
-            async for chunk in stream:
-                if chunk.usage:
-                    usage["prompt_tokens"] += chunk.usage.prompt_tokens
-                    usage["completion_tokens"] += chunk.usage.completion_tokens
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta
-                if delta.content:
-                    text += delta.content
-                    yield {"type": "text", "delta": delta.content}
-                for tc in delta.tool_calls or []:
-                    c = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
-                    c["id"] = tc.id or c["id"]
-                    if tc.function:
-                        c["name"] += tc.function.name or ""
-                        c["arguments"] += tc.function.arguments or ""
+            text, output = "", []
+            # Once files have changed, this step's text may be the closing summary: hold it until we
+            # know (a step that also calls tools is only a preamble, sent when the step ends).
+            hold = bool(self.record["edits"])
+            async for ev in stream:
+                if ev.type == "response.output_text.delta":
+                    text += ev.delta
+                    if not hold:
+                        yield {"type": "text", "delta": ev.delta}
+                elif ev.type in ("response.completed", "response.incomplete"):
+                    output = ev.response.output
+                    if ev.response.usage:
+                        usage["prompt_tokens"] += ev.response.usage.input_tokens
+                        usage["completion_tokens"] += ev.response.usage.output_tokens
+                        details = ev.response.usage.output_tokens_details
+                        usage["reasoning_tokens"] += getattr(details, "reasoning_tokens", 0) or 0
+                elif ev.type in ("response.failed", "error"):
+                    err = getattr(getattr(ev, "response", None), "error", None) or ev
+                    raise RuntimeError(getattr(err, "message", None) or str(err))
             if text:
                 self.record["response"] += ("\n\n" if self.record["response"] else "") + text
 
+            calls = [it for it in output if it.type == "function_call"]
             if not calls:
+                if hold:
+                    self.final_text = text
                 break
-            ordered = [calls[i] for i in sorted(calls)]
-            messages.append({
-                "role": "assistant", "content": text or None,
-                "tool_calls": [{"id": c["id"], "type": "function",
-                                "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}} for c in ordered],
-            })
-            for c in ordered:
+            if hold and text:
+                yield {"type": "text", "delta": text}
+            items += [it.model_dump(exclude_none=True) for it in output]
+            for c in calls:
                 try:
-                    args = json.loads(c["arguments"] or "{}")
+                    args = json.loads(c.arguments or "{}")
                 except json.JSONDecodeError:
                     args = {}
                 label = args.get("filename") or ""
-                yield {"type": "tool", "name": c["name"], "filename": label}
-                result, event = await self._tool(c["name"], args)
-                self.record["tool_calls"].append({"name": c["name"], "filename": label, "result": result[:500]})
+                yield {"type": "tool", "name": c.name, "filename": label}
+                result, event = await self._tool(c.name, args)
+                self.record["tool_calls"].append({"name": c.name, "filename": label, "result": result[:500]})
                 if event:
                     yield event
-                messages.append({"role": "tool", "tool_call_id": c["id"], "content": result})
+                items.append({"type": "function_call_output", "call_id": c.call_id, "output": result})
         else:
             note = "\n\n_(Stopped after the maximum number of steps.)_"
             self.record["response"] += note

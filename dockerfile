@@ -19,6 +19,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# Node.js for running students' JavaScript in the sandbox (sandbox.py; Debian's nodejs is too old
+# for the permission model the sandbox relies on)
+COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+
 RUN useradd -m -u 1000 appuser && \
     useradd -r -u 10001 -M -s /usr/sbin/nologin sandbox   # runs student programs (runner.py)
 

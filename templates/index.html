@@ -1142,6 +1142,10 @@
             background: linear-gradient(135deg, #581c87, #7c3aed);
         }
 
+        .condition-4 .condition-indicator {
+            background: linear-gradient(135deg, #14532d, #16a34a);
+        }
+
         /* Session indicator */
         .session-indicator {
             background: linear-gradient(135deg, #059669, #10b981);
@@ -4099,15 +4103,9 @@ async function initializeFromURL() {
         conditionIndicatorElement.parentNode.insertBefore(pasteIndicator, conditionIndicatorElement);
 
         // Set condition class on body
-        if (authData.condition === 1) {
-            document.body.classList.add('condition-1');
-            document.body.classList.remove('condition-2', 'condition-3');
-        } else if (authData.condition === 2) {
-            document.body.classList.add('condition-2');
-            document.body.classList.remove('condition-1', 'condition-3');
-        } else if (authData.condition === 3) {
-            document.body.classList.add('condition-3');
-            document.body.classList.remove('condition-1', 'condition-2');
+        document.body.classList.remove('condition-1', 'condition-2', 'condition-3', 'condition-4');
+        if ([1, 2, 3, 4].includes(authData.condition)) {
+            document.body.classList.add('condition-' + authData.condition);
         }
 
         // Initialize editor with timeout protection

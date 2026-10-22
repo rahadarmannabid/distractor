@@ -279,9 +279,35 @@
       setTimeout(() => t.classList.remove('show'), 3000);
     }
 
+    // navigator.clipboard only exists on HTTPS / localhost, so fall back to execCommand,
+    // and finally show the link for manual copying.
+    function copyText(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text).then(() => true, () => legacyCopy(text));
+      }
+      return Promise.resolve(legacyCopy(text));
+    }
+
+    function legacyCopy(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      return ok;
+    }
+
     function copyCode(code) {
-      const url = window.location.origin + '/quiz/' + code;
-      navigator.clipboard.writeText(url).then(() => showToast('Share link copied to clipboard!'));
+      const url = window.location.origin + '/quiz/' + encodeURIComponent(code);
+      copyText(url).then(ok => {
+        if (ok) showToast('Share link copied to clipboard!');
+        else window.prompt('Copy this share link:', url);
+      });
     }
 
     async function togglePublish(quizId) {

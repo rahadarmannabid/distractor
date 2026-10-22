@@ -176,7 +176,8 @@
     .chip.selected { border-color: var(--primary); color: var(--primary); background: var(--primary-bg); box-shadow: 0 0 0 1px var(--primary); }
 
     /* ── Condition cards ── */
-    .cond-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .cond-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+    @media (max-width: 1100px) { .cond-grid { grid-template-columns: repeat(2, 1fr); } }
     @media (max-width: 768px) { .cond-grid { grid-template-columns: 1fr; } }
     .cond-card {
       background: var(--input-bg); border: 2px solid var(--border);
@@ -206,6 +207,24 @@
     .skill-row textarea { min-height: 80px; }
     .skill-row__remove { background: transparent; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
     .skill-row__remove:hover { color: #ef4444; border-color: #ef4444; }
+
+    /* ── Bug skills (conditions 2, 3, 4) ── */
+    .bug-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+    .bug-toolbar .bug-count { margin-left: auto; font-size: 0.85rem; color: var(--muted); }
+    .bug-card { background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; margin-top: 10px; }
+    .bug-card.off { opacity: 0.55; }
+    .bug-card__head { display: flex; gap: 12px; align-items: flex-start; padding: 12px; }
+    .bug-card__head input[type=checkbox] { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--primary); flex-shrink: 0; cursor: pointer; }
+    .bug-card__info { flex: 1; min-width: 0; }
+    .bug-card__name { font-weight: 600; color: var(--text); }
+    .bug-card__cat { display: inline-block; margin-left: 8px; font-size: 0.72rem; font-family: ui-monospace, monospace; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; }
+    .bug-card__desc { font-size: 0.85rem; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+    .bug-card__actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .bug-card__body { display: none; gap: 8px; padding: 0 12px 12px 42px; }
+    .bug-card.open .bug-card__body { display: grid; }
+    .bug-card__body label { font-size: 0.78rem; color: var(--muted); }
+    .bug-card__body textarea { min-height: 140px; font-family: ui-monospace, monospace; font-size: 0.85rem; }
+    @media (max-width: 640px) { .bug-card__head { flex-wrap: wrap; } .bug-card__body { padding-left: 12px; } }
 
     /* ── Problem Tabs ── */
     .problem-tabs-container { margin-bottom: 24px; }
@@ -506,13 +525,18 @@
       </div>
       <div class="cond-card {% if 2 in current_conds %}selected{% endif %}" onclick="toggleCondition(2, this)">
         <div class="cond-num">2</div>
-        <h3>Code Suggestion</h3>
-        <p>Students get <strong>inline ghost-text suggestions</strong> (single or multi-line) as they type, like GitHub Copilot. <kbd>Tab</kbd> accepts.</p>
+        <h3>Single-line Suggestion</h3>
+        <p>Students get <strong>one line</strong> of inline ghost-text at a time as they type, like GitHub Copilot. <kbd>Tab</kbd> accepts.</p>
       </div>
       <div class="cond-card {% if 3 in current_conds %}selected{% endif %}" onclick="toggleCondition(3, this)">
         <div class="cond-num">3</div>
         <h3>AI Agent</h3>
         <p>Students chat with an <strong>AI coding agent</strong> that can read, add, modify and delete code, like Cursor. Modes: Ask, Agent, Plan, Debug.</p>
+      </div>
+      <div class="cond-card {% if 4 in current_conds %}selected{% endif %}" onclick="toggleCondition(4, this)">
+        <div class="cond-num">4</div>
+        <h3>Multi-line Suggestion</h3>
+        <p>Students get <strong>multi-line</strong> inline ghost-text (whole blocks or function bodies) as they type, like GitHub Copilot. <kbd>Tab</kbd> accepts.</p>
       </div>
     </div>
 
@@ -521,6 +545,21 @@
       <p class="subtitle">Optional instructions the agent follows for students in the AI Agent condition (e.g. "Explain every change in beginner terms"). Students can turn these on or off and add their own.</p>
       <div id="skillsList"></div>
       <button type="button" class="btn btn-secondary" style="margin-top:12px;" onclick="addSkill()">+ Add skill</button>
+    </div>
+
+    <div class="skills-section" id="bugSkillsSection" style="display:none;">
+      <h3>Bug skills</h3>
+      <p class="subtitle">Every AI code suggestion and agent change is shown to students as <strong>two options in random order</strong>: one correct, and one with exactly one bug. For each pair the AI picks the <strong>selected</strong> bug type below that best fits the code and follows its instructions. Each bug is a <code>.md</code> file: edit it here, download it, or upload your own. Students never see these. If none is selected, students get a single correct suggestion.</p>
+      <div class="bug-toolbar">
+        <button type="button" class="btn btn-secondary" onclick="addBugSkill()">+ Add bug</button>
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('bugSkillUpload').click()">Upload .md</button>
+        <input type="file" id="bugSkillUpload" accept=".md,text/markdown,text/plain" multiple hidden onchange="uploadBugSkills(this)">
+        <button type="button" class="btn btn-secondary" onclick="setAllBugSkills(true)">Select all</button>
+        <button type="button" class="btn btn-secondary" onclick="setAllBugSkills(false)">Deselect all</button>
+        <button type="button" class="btn btn-secondary" onclick="restoreBuiltinBugSkills()">Restore built-in</button>
+        <span class="bug-count" id="bugSkillCount"></span>
+      </div>
+      <div id="bugSkillsList"></div>
     </div>
   </div>
 </div>
@@ -669,6 +708,8 @@
   'quiz_id': quiz.id if quiz else '',
   'draft_upload_id': draft_upload_id or '',
   'agent_skills': quiz.agent_skills if quiz and quiz.agent_skills else [],
+  'bug_skills': bug_skills,
+  'default_bug_skills': default_bug_skills,
   'selected_conditions': quiz.conditions if quiz and quiz.conditions else [1],
   'problems_payload': {
     'problems': quiz.problems,
@@ -685,6 +726,8 @@
   'quiz_id': quiz.id if quiz else '',
   'draft_upload_id': draft_upload_id or '',
   'agent_skills': quiz.agent_skills if quiz and quiz.agent_skills else [],
+  'bug_skills': bug_skills,
+  'default_bug_skills': default_bug_skills,
   'selected_conditions': quiz.conditions if quiz and quiz.conditions else [1],
   'problems_payload': None,
 } | tojson | safe }}</script>
@@ -700,6 +743,8 @@ const TOTAL_STEPS = 4;
 let currentStep = 0;
 let selectedConditions = bootstrap.selected_conditions;
 let agentSkills = (bootstrap.agent_skills || []).map(s => ({ name: s.name || '', instructions: s.instructions || '' }));
+const DEFAULT_BUG_SKILLS = bootstrap.default_bug_skills || [];
+let bugSkills = (bootstrap.bug_skills || []).map(s => ({ ...s }));
 
 // Per-problem data store
 let problemsData = [];
@@ -1016,6 +1061,8 @@ function toggleCondition(n, el) {
 // Agent skills (condition 3)
 function updateSkillsVisibility() {
   document.getElementById('skillsSection').style.display = selectedConditions.includes(3) ? '' : 'none';
+  // Bugs are planted in AI output, so only conditions with AI (2, 3, 4) need them.
+  document.getElementById('bugSkillsSection').style.display = selectedConditions.some(c => c !== 1) ? '' : 'none';
 }
 function renderSkills() {
   const list = document.getElementById('skillsList');
@@ -1030,7 +1077,101 @@ function renderSkills() {
 }
 function addSkill() { agentSkills.push({ name: '', instructions: '' }); renderSkills(); }
 function removeSkill(i) { agentSkills.splice(i, 1); renderSkills(); }
-document.addEventListener('DOMContentLoaded', () => { renderSkills(); updateSkillsVisibility(); });
+document.addEventListener('DOMContentLoaded', () => { renderSkills(); renderBugSkills(); updateSkillsVisibility(); });
+
+// Bug skills: same .md format as bug_skills/*.md on the server (front matter + instructions).
+function slugify(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60); }
+function parseBugSkillMd(text, fallbackName) {
+  text = String(text || '').replace(/\r\n/g, '\n').trim();
+  const meta = {};
+  let body = text;
+  const m = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  if (m) {
+    m[1].split('\n').forEach(line => {
+      const i = line.indexOf(':');
+      if (i > 0) meta[line.slice(0, i).trim().toLowerCase()] = line.slice(i + 1).trim().replace(/^["']|["']$/g, '');
+    });
+    body = m[2];
+  }
+  const name = meta.name || fallbackName || '';
+  return { id: slugify(name), name, category: meta.category || slugify(name) || 'custom',
+           description: meta.description || '', instructions: body.trim(), enabled: true };
+}
+function bugSkillToMd(s) {
+  const line = v => String(v || '').replace(/\n/g, ' ');
+  return `---\nname: ${line(s.name)}\ncategory: ${line(s.category)}\ndescription: ${line(s.description)}\n---\n${s.instructions || ''}\n`;
+}
+function renderBugSkills() {
+  const list = document.getElementById('bugSkillsList');
+  list.innerHTML = bugSkills.map((s, i) => `
+    <div class="bug-card${s.enabled ? '' : ' off'}${s._open ? ' open' : ''}">
+      <div class="bug-card__head">
+        <input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleBugSkill(${i}, this.checked)" title="Select this bug type">
+        <div class="bug-card__info">
+          <span class="bug-card__name">${escHtml(s.name || 'Untitled bug')}</span>${s.category ? `<span class="bug-card__cat">${escHtml(s.category)}</span>` : ''}
+          <div class="bug-card__desc">${escHtml(s.description || '')}</div>
+        </div>
+        <div class="bug-card__actions">
+          <button type="button" class="skill-row__remove" onclick="toggleBugSkillEditor(${i})">${s._open ? 'Close' : 'Edit'}</button>
+          <button type="button" class="skill-row__remove" onclick="downloadBugSkill(${i})" title="Download as .md">.md</button>
+          <button type="button" class="skill-row__remove" onclick="removeBugSkill(${i})">Remove</button>
+        </div>
+      </div>
+      <div class="bug-card__body">
+        <label>Name</label>
+        <input type="text" maxlength="80" value="${escHtml(s.name || '')}" oninput="bugSkills[${i}].name = this.value">
+        <label>Category (label used in the bug records)</label>
+        <input type="text" maxlength="60" value="${escHtml(s.category || '')}" oninput="bugSkills[${i}].category = this.value">
+        <label>Description</label>
+        <input type="text" maxlength="300" value="${escHtml(s.description || '')}" oninput="bugSkills[${i}].description = this.value">
+        <label>Instructions for the AI (how to plant this bug)</label>
+        <textarea maxlength="4000" oninput="bugSkills[${i}].instructions = this.value">${escHtml(s.instructions || '')}</textarea>
+      </div>
+    </div>`).join('') || '<p class="subtitle" style="margin-top:12px;">No bug skills. Add one, upload a .md file, or restore the built-in set.</p>';
+  const on = bugSkills.filter(s => s.enabled).length;
+  document.getElementById('bugSkillCount').textContent = `${on} of ${bugSkills.length} selected`;
+}
+function toggleBugSkill(i, on) { bugSkills[i].enabled = on; renderBugSkills(); }
+function toggleBugSkillEditor(i) { bugSkills[i]._open = !bugSkills[i]._open; renderBugSkills(); }
+function setAllBugSkills(on) { bugSkills.forEach(s => { s.enabled = on; }); renderBugSkills(); }
+function removeBugSkill(i) {
+  if (!confirm(`Remove the bug "${bugSkills[i].name || 'Untitled bug'}" from this quiz?`)) return;
+  bugSkills.splice(i, 1); renderBugSkills();
+}
+function addBugSkill() {
+  bugSkills.push({ id: '', name: '', category: '', description: '', instructions: '', enabled: true, _open: true });
+  renderBugSkills();
+}
+function restoreBuiltinBugSkills() {
+  const have = new Set(bugSkills.map(s => s.id));
+  const missing = DEFAULT_BUG_SKILLS.filter(s => !have.has(s.id));
+  if (!missing.length) { showToast('All built-in bug skills are already in the list.', 'success'); return; }
+  missing.forEach(s => bugSkills.push({ ...s }));
+  renderBugSkills();
+  showToast(`Restored ${missing.length} built-in bug skill${missing.length > 1 ? 's' : ''}.`, 'success');
+}
+async function uploadBugSkills(input) {
+  const files = Array.from(input.files || []);
+  let added = 0;
+  for (const f of files) {
+    if (f.size > 20000) { showToast(`${f.name} is too large (max 20 KB).`, 'error'); continue; }
+    const skill = parseBugSkillMd(await f.text(), f.name.replace(/\.(md|txt)$/i, ''));
+    if (!skill.name || !skill.instructions) { showToast(`${f.name} has no name or instructions.`, 'error'); continue; }
+    bugSkills.push(skill); added++;
+  }
+  input.value = '';
+  renderBugSkills();
+  if (added) showToast(`Added ${added} bug skill${added > 1 ? 's' : ''}.`, 'success');
+}
+function downloadBugSkill(i) {
+  const s = bugSkills[i];
+  const blob = new Blob([bugSkillToMd(s)], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (slugify(s.name) || 'bug_skill') + '.md';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
 
 // Problem Tabs
 function renderProblemTabs() {
@@ -1465,7 +1606,7 @@ function prevStep() { goToStep(currentStep - 1); }
 function buildReview() {
   saveCurrentProblem();
   const langs = getSelectedLanguages();
-  const condLabels = { 1: '1. No AI', 2: '2. Code Suggestion', 3: '3. AI Agent' };
+  const condLabels = { 1: '1. No AI', 2: '2. Single-line Suggestion', 3: '3. AI Agent', 4: '4. Multi-line Suggestion' };
 
   const condStr = selectedConditions.map(c => condLabels[c]).join('<br>');
   let problemsSummary = problemsData.map((p, i) => {
@@ -1485,6 +1626,7 @@ function buildReview() {
     <dt>Languages</dt><dd>${langs.join(', ').toUpperCase()}</dd>
     <dt>Time Limit</dt><dd>${document.getElementById('time_limit').value || '0'} min</dd>
     <dt>Conditions (${selectedConditions.length})</dt><dd>${condStr}</dd>
+    ${selectedConditions.some(c => c !== 1) ? `<dt>Bug skills (${bugSkills.filter(s => s.enabled).length} selected)</dt><dd>${bugSkills.filter(s => s.enabled).map(s => escHtml(s.name)).join(', ') || '<span style="color:var(--muted)">None: no bugs will be added</span>'}</dd>` : ''}
     <dt>Published</dt><dd>${document.getElementById('published').checked ? '<span style="color:var(--success)">Yes</span>' : 'No (Draft)'}</dd>
   `;
 }
@@ -1504,6 +1646,11 @@ async function saveQuiz() {
     }
   }
 
+  const badBug = bugSkills.findIndex(s => !(s.name || '').trim() || !(s.instructions || '').trim());
+  if (badBug >= 0) {
+    showToast(`Bug skill ${badBug + 1} needs a name and instructions (or remove it).`, 'error'); return;
+  }
+
   btn.disabled = true; btn.textContent = 'Saving...';
 
   const payload = {
@@ -1513,6 +1660,9 @@ async function saveQuiz() {
     time_limit_minutes: parseInt(document.getElementById('time_limit').value) || 0,
     conditions: selectedConditions,
     agent_skills: agentSkills.filter(s => s.name.trim() && s.instructions.trim()),
+    bug_skills: bugSkills
+      .filter(s => (s.name || '').trim() && (s.instructions || '').trim())
+      .map(({ _open, ...s }) => s),
     published: document.getElementById('published').checked,
     availability_start: document.getElementById('avail_start').value || null,
     availability_end: document.getElementById('avail_end').value || null,

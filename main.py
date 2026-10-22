@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
+from starlette.datastructures import Headers
+from starlette.middleware.gzip import GZipResponder
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 import os
@@ -10,10 +12,11 @@ from dotenv import load_dotenv
 # Load project .env first; override=True so repo config wins over stale shell/IDE env (e.g. old FIREBASE_*).
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=True)
 from openai import AsyncOpenAI, OpenAI
+import random
 import re
-import keyword
 import sys
 import time
+import copy
 import uuid
 import hashlib
 import json
@@ -23,6 +26,7 @@ from typing import List, Dict, Optional, Any, Callable, Iterator, Tuple, cast, U
 import firebase_admin
 from firebase_admin import credentials, db
 import asyncio
+import threading
 from contextvars import ContextVar
 import smtplib
 from email.message import EmailMessage
@@ -33,6 +37,8 @@ from instructor import router as instructor_router
 from firebase_utils import fb_dict
 from survey_payload_compact import compact_survey_ai_history
 import ai_assist
+import bug_injection
+from llm_params import DEFAULT_MODEL, chat_args
 import httpx
 import sandbox
 
@@ -278,7 +284,7 @@ def get_starter_code(prefix, language):
     starter_code_path = Path(STARTER_CODE_DIR)
     
     if not starter_code_path.exists():
-        logger.warning(f"Starter code directory does not exist: {starter_code_path}")
+        logger.debug(f"Starter code directory does not exist: {starter_code_path}")
         return None
     
     # Try exact match first
@@ -316,7 +322,7 @@ def get_side_panel_hidden_assignment_keys():
     hidden_keys = [key.strip() for key in hidden_keys if key.strip()]
     # Return as comma-separated string for template
     result = ",".join(hidden_keys)
-    logger.info(f"Sidebar hidden for assignment keys: {result}")
+    logger.debug(f"Sidebar hidden for assignment keys: {result}")
     return result
 
 def get_periodic_survey_config():
@@ -596,12 +602,11 @@ async def execute_code_safely(
 ) -> Dict[str, Any]:
     """Run code non-interactively (optional `stdin` text, then end-of-input) and collect its output."""
     language = (language or "").lower()
-    if language == "javascript":
-        return {"success": False, "output": "", "error": "JavaScript runs in the browser: use the Run button."}
     if files and len(files) > 1:
         entry = next((f["filename"] for f in files if f.get("content") == code), None)
     else:
-        name = {"python": "main.py", "c": "main.c", "cpp": "main.cpp", "java": "Main.java"}.get(language, "main.txt")
+        name = {"python": "main.py", "c": "main.c", "cpp": "main.cpp", "java": "Main.java",
+                "javascript": "main.js"}.get(language, "main.txt")
         files = [{"filename": name, "content": code}]
         entry = files[0]["filename"]
     if not RUNNER_URL:
@@ -913,6 +918,13 @@ active_sessions: ActiveSessionMap = ActiveSessionMap()
 _analyze_semaphore: asyncio.Semaphore = asyncio.Semaphore(
     int(os.getenv("OPENAI_CONCURRENCY", "5"))
 )
+# Ghost-text suggestions get their own, larger limit (per worker): every student asks for one on
+# each new line, and sharing the 5 slots above queued them for up to 20s with 50 students.
+_completion_semaphore: asyncio.Semaphore = asyncio.Semaphore(
+    int(os.getenv("COMPLETION_CONCURRENCY", "16"))
+)
+# A suggestion that arrives later than this is stale (the student has typed on), so drop it.
+COMPLETION_TIMEOUT_SEC = float(os.getenv("COMPLETION_TIMEOUT_SEC", "8"))
 
 # Prevent duplicate /submit for the same session (double-click, retries, multiple tabs).
 _submit_gate = asyncio.Lock()
@@ -1099,6 +1111,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Compress pages and JSON (the IDE page alone is ~370 KB with its inlined scripts). The agent's
+# Server-Sent Events stream is left alone: gzip would buffer it and the reply would stop streaming.
+class _GZipExceptStreams:
+    def __init__(self, app, minimum_size: int = 1000):
+        self.app = app
+        self.minimum_size = minimum_size
+
+    async def __call__(self, scope, receive, send):
+        if (scope["type"] != "http" or scope.get("path", "").startswith("/agent/chat")
+                or "gzip" not in Headers(scope=scope).get("Accept-Encoding", "")):
+            await self.app(scope, receive, send)
+            return
+        responder = GZipResponder(self.app, self.minimum_size)
+        try:
+            await responder(scope, receive, send)
+        finally:
+            # Starlette 0.27 leaves the gzip writer open for small (uncompressed) responses; garbage
+            # collection then closes it onto a freed buffer and logs "I/O operation on closed file".
+            if not responder.gzip_file.closed:
+                responder.gzip_file.close()
+
+
+app.add_middleware(_GZipExceptStreams)
 
 # Session middleware for instructor auth (cookie-based, non-breaking for existing student flow)
 from starlette.middleware.sessions import SessionMiddleware
@@ -1423,21 +1459,6 @@ def assignment_resume_write(
         logger.warning("assignment_resume_write failed: %s", e)
 
 
-def firebase_rtdb_update_with_retry(ref, value: Dict[str, Any], *, max_attempts: int = 3) -> bool:
-    """Realtime Database update() with exponential backoff (shallow merge)."""
-    last_err: Optional[Exception] = None
-    for attempt in range(max_attempts):
-        try:
-            ref.update(value)
-            return True
-        except Exception as e:
-            last_err = e
-            logger.warning("Firebase update attempt %s/%s failed: %s", attempt + 1, max_attempts, e)
-            if attempt < max_attempts - 1:
-                time.sleep(0.35 * (2**attempt))
-    logger.error("Firebase update failed after %s attempts: %s", max_attempts, last_err)
-    return False
-
 
 def checkpoint_session_to_firebase(
     session_log: SessionLog, checkpoint_type: str, *, force: bool = False
@@ -1504,42 +1525,6 @@ def checkpoint_pre_post_survey_file_payload_to_firebase(
         logger.error("checkpoint_pre_post_survey_file_payload_to_firebase failed: %s", e)
         return False
 
-def extract_survey_ai_history_summary(
-    session_log: SessionLog, survey_data: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """Extract a summary of AI history context for surveys"""
-    if not survey_data:
-        return {
-            'total_surveys_completed': 0,
-            'ai_analyses_per_survey': []
-        }
-    
-    periodic_surveys = survey_data.get('periodic_surveys', []) if isinstance(survey_data.get('periodic_surveys'), list) else []
-    final_survey = survey_data.get('final_survey')
-    
-    summary = {
-        'total_surveys_completed': len(periodic_surveys) + (1 if final_survey else 0),
-        'ai_analyses_per_survey': []
-    }
-    
-    # Track AI analyses at each periodic survey point
-    for survey in periodic_surveys:
-        summary['ai_analyses_per_survey'].append({
-            'survey_timestamp': survey.get('timestamp'),
-            'analyses_count_at_survey': survey.get('analysisCount', 0),
-            'ai_history_captured': True
-        })
-    
-    # Add final survey context if it exists
-    if final_survey:
-        summary['final_survey_ai_context'] = {
-            'timestamp': final_survey.get('timestamp'),
-            'total_analyses_at_completion': session_log.activity_summary.total_ai_analyses,
-            'ai_history_captured': True
-        }
-    
-    return summary
-
 
 # OpenAI Configuration
 API_KEY = os.getenv("OPENAI_API_KEY")
@@ -1558,7 +1543,7 @@ def get_response(prompt):
     try:
         chat_completion = client.chat.completions.create(
             messages=[{"role": "system", "content": prompt}],
-            model="gpt-4.1-nano",
+            **chat_args(DEFAULT_MODEL),
         )
         response = chat_completion.choices[0].message.content
         return response.strip() if response else ""
@@ -1954,208 +1939,6 @@ def _next_line_from_full_completion(
 
 
 # Keywords for "cursor at end of line but word is incomplete" (e.g. retu → return)
-_PYTHON_KW = frozenset(keyword.kwlist) | {"True", "False", "None"}
-_JS_KW = frozenset(
-    """
-    break case catch class const continue debugger default delete do else export extends
-    finally for function if import in instanceof let new return super switch this throw
-    try typeof var void while with yield await async null undefined true false
-    """.split()
-)
-
-
-def _last_identifier_at_line_end(stripped: str) -> str:
-    """Last identifier token on the line (handles `x = retu` → retu)."""
-    m = re.search(r"([A-Za-z_][\w]*)$", stripped.rstrip())
-    return m.group(1) if m else ""
-
-
-def _is_strict_prefix_of_any_keyword(word: str, keywords: frozenset) -> bool:
-    """True if `word` is not a full keyword but is a strict prefix of some keyword (retu → return)."""
-    if len(word) < 2:
-        return False
-    if word in keywords:
-        return False
-    return any(len(kw) > len(word) and kw.startswith(word) for kw in keywords)
-
-
-def _line_looks_incomplete_python(stripped: str) -> bool:
-    """Heuristic: line at cursor end still needs characters on the same line."""
-    if not stripped or stripped.endswith("#"):
-        return False
-    stack: list = []
-    for ch in stripped:
-        if ch in "([{":
-            stack.append(ch)
-        elif ch in ")]}":
-            if stack:
-                stack.pop()
-    if stack:
-        return True
-    if stripped.endswith((",", "\\")):
-        return True
-    if re.search(r"[=+\-*/%]$", stripped) and not stripped.endswith("=="):
-        return True
-    if re.search(r"\b(and|or|not|is|in)$", stripped):
-        return True
-    if stripped.count('"') % 2 == 1 or stripped.count("'") % 2 == 1:
-        return True
-    if re.search(r"\b(def|class)\s+\w+$", stripped):
-        return True
-    if stripped.endswith("("):
-        return True
-    return False
-
-
-def _line_looks_incomplete_generic(stripped: str) -> bool:
-    if not stripped:
-        return False
-    stack: list = []
-    for ch in stripped:
-        if ch in "([{":
-            stack.append(ch)
-        elif ch in ")]}":
-            if stack:
-                stack.pop()
-    if stack:
-        return True
-    if stripped.endswith((",", "(", "\\")):
-        return True
-    if stripped.count('"') % 2 == 1 or stripped.count("'") % 2 == 1:
-        return True
-    return False
-
-
-def infer_suggestion_mode(code: str, line_number: int, column: int, language: Optional[str]) -> str:
-    """
-    complete_current: insert at cursor (finish current line).
-    next_line: insert as new line after current position (new statement).
-    """
-    lines = _normalized_code_lines(code)
-    if not lines:
-        return "next_line"
-    line_number = max(1, min(line_number, len(lines)))
-    line = lines[line_number - 1]
-    col = max(1, column) - 1
-
-    if len(line) > 0 and col < len(line):
-        return "complete_current"
-
-    stripped = line.rstrip()
-    if not stripped:
-        return "next_line"
-
-    lang = (language or "").lower()
-    # Cursor at end of line: still "mid-word" if typing a keyword prefix (e.g. retu → return)
-    last_id = _last_identifier_at_line_end(stripped)
-    if last_id:
-        if lang == "python":
-            if _is_strict_prefix_of_any_keyword(last_id, _PYTHON_KW):
-                return "complete_current"
-        elif lang in ("javascript", "typescript", "js", "ts"):
-            if _is_strict_prefix_of_any_keyword(last_id, _JS_KW):
-                return "complete_current"
-
-    if lang == "python":
-        if _line_looks_incomplete_python(stripped):
-            return "complete_current"
-    else:
-        if _line_looks_incomplete_generic(stripped):
-            return "complete_current"
-    return "next_line"
-
-
-def predict_complete_line_suffix(
-    problem_description: str,
-    existing_code: str,
-    line_number: int,
-    column: int,
-    language: Optional[str] = None,
-) -> str:
-    """Return text to insert at cursor to continue the current line (suffix)."""
-    if not existing_code or not existing_code.strip():
-        return ""
-
-    if not language:
-        language = detect_programming_language(existing_code)
-
-    lines = _normalized_code_lines(existing_code)
-    if line_number < 1 or line_number > len(lines):
-        line_number = len(lines)
-    line = lines[line_number - 1]
-    col = max(1, column) - 1
-    col = min(col, len(line))
-    before = line[:col]
-    after = line[col:]
-
-    prompt = f"""
-You are an expert {language} programmer.
-
-Problem / code context summary:
-{problem_description}
-
-Full current code:
-```{language}
-{existing_code}
-```
-
-The cursor is on line {line_number}. Text on that line BEFORE the cursor (do not repeat this): {before!r}
-Text AFTER the cursor on the same line: {after!r}
-
-Output ONLY the characters to INSERT at the cursor position to properly complete or continue THIS LINE.
-Rules:
-- Do NOT repeat the "before cursor" text.
-- Do NOT include a leading newline at the start.
-- At most 2 lines total if a line break is strictly required; otherwise one line.
-- No explanations, markdown fences, or commentary — only the insertable characters.
-- Do NOT output comments of any kind (no #, //, /* */, <!-- -->, docstrings, or inline comments).
-{_suggestion_runtime_prompt_rule(language)}
-"""
-    suffix = get_response(prompt.strip())
-    suffix = re.sub(r"```\w*\n?", "", suffix)
-    suffix = re.sub(r"```\n?", "", suffix)
-    suffix = suffix.strip()
-    suffix = _strip_comment_only_lines(suffix, language)
-
-    # Prefix-overlap safety: if the AI repeated some or all of the
-    # "before cursor" text, strip the overlapping prefix so we don't
-    # produce e.g. "retreturn" when "before" is "ret" and suffix is "return".
-    if before and suffix:
-        # Work on content only (no indentation) to avoid false matches
-        before_content = before.lstrip().lower()
-        # Strip leading whitespace from suffix — it's inserted at cursor,
-        # so AI-supplied indent is wrong / duplicate.
-        suffix = suffix.lstrip()
-        suffix_rest = ""
-        if "\n" in suffix:
-            first_nl = suffix.index("\n")
-            suffix_rest = suffix[first_nl:]
-            suffix_first = suffix[:first_nl]
-        else:
-            suffix_first = suffix
-
-        if before_content and suffix_first:
-            sf_lower = suffix_first.lower()
-            if sf_lower.startswith(before_content):
-                # Full echo: AI repeated the typed text at the start
-                suffix_first = suffix_first[len(before_content):]
-            else:
-                # Partial overlap: longest tail of typed text matching
-                # head of suffix (e.g. "ret" overlaps "return")
-                for overlap_len in range(min(len(before_content), len(sf_lower)), 0, -1):
-                    if before_content.endswith(sf_lower[:overlap_len]):
-                        suffix_first = suffix_first[overlap_len:]
-                        break
-
-        suffix = (suffix_first + suffix_rest).rstrip()
-
-    lines_out = suffix.split("\n")
-    if len(lines_out) > 2:
-        suffix = "\n".join(lines_out[:2])
-    if _contains_blocked_suggestion(suffix, language):
-        return ""
-    return suffix if suffix else ""
-
 
 def predict_next_line(problem_description, existing_code, language=None):
     """Predict the next line of code based on problem and existing code - language agnostic"""
@@ -2319,19 +2102,6 @@ async def get_correct_next_line_async(correct_description, code, language=None):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, predict_next_line, correct_description, code, language)
 
-
-async def get_complete_line_suffix_async(problem_description, code, line_number, column, language=None):
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(
-        None, predict_complete_line_suffix, problem_description, code, line_number, column, language
-    )
-
-
-async def get_correct_complete_line_suffix_async(correct_description, code, line_number, column, language=None):
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(
-        None, predict_complete_line_suffix, correct_description, code, line_number, column, language
-    )
 
 
 async def get_full_code_suggestion_async(problem_description, code, is_correct_description=False, language=None):
@@ -2775,11 +2545,16 @@ async def run_terminal(ws: WebSocket):
         pass
 
 
-# ─── Study conditions: 1 = No AI, 2 = inline code suggestion, 3 = coding agent ───
+# ─── Study conditions: 1 = No AI, 2 = single-line code suggestion, 3 = coding agent,
+#     4 = multi-line code suggestion ───
 
 CONDITION_NO_AI = 1
 CONDITION_SUGGESTION = 2
 CONDITION_AGENT = 3
+CONDITION_MULTILINE_SUGGESTION = 4
+
+# Most lines one multi-line (condition 4) ghost-text suggestion may span.
+MULTILINE_SUGGESTION_MAX_LINES = int(os.getenv("MULTILINE_SUGGESTION_MAX_LINES", "20"))
 
 # A session's condition never changes, so cache it per worker: /complete runs on every
 # typing pause and should not fetch the whole session from Redis each time.
@@ -2799,6 +2574,204 @@ async def _session_condition(session_id: Optional[str]) -> Optional[int]:
     return int(sl.condition)
 
 
+# Quiz config (quizzes/…, quiz_access/…) is read on every student page load, several times
+# (survey config, survey status, problem text, join), and Firebase reads are blocking HTTP calls.
+# Read it off the event loop and keep it briefly per worker; instructor edits show up within the TTL.
+_FB_CONFIG_TTL_SEC = float(os.getenv("QUIZ_CONFIG_CACHE_SEC", "20"))
+_fb_config_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+
+async def fb_get_cached(path: str) -> Optional[Dict[str, Any]]:
+    """A deep copy of a quiz config node, so callers may change it freely. Missing nodes are not cached."""
+    cached = _fb_config_cache.get(path)
+    if cached and time.time() - cached[0] < _FB_CONFIG_TTL_SEC:
+        return copy.deepcopy(cached[1])
+    value = await asyncio.to_thread(lambda: fb_dict(db.reference(path).get()))
+    if value:
+        if len(_fb_config_cache) > 500:
+            _fb_config_cache.clear()
+        _fb_config_cache[path] = (time.time(), value)
+        return copy.deepcopy(value)
+    return value
+
+
+# The quiz's bug skills, cached per session for a minute so instructor edits apply soon
+# without a Firebase read on every keystroke pause.
+_BUG_SKILLS_TTL_SEC = 60
+_session_bug_skills_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+
+
+async def _session_bug_skills(session_id: str) -> List[Dict[str, Any]]:
+    cached = _session_bug_skills_cache.get(session_id)
+    if cached and time.time() - cached[0] < _BUG_SKILLS_TTL_SEC:
+        return cached[1]
+    quiz: Optional[Dict[str, Any]] = None
+    sl = await ensure_session_log_loaded(session_id)
+    if sl and sl.quiz_id and firebase_db:
+        try:
+            quiz = await fb_get_cached(f"quizzes/{sl.quiz_id}")
+        except Exception as e:
+            logger.warning("Bug skills: quiz %s not loaded: %s", sl.quiz_id, e)
+    skills = bug_injection.quiz_bug_skills(quiz)
+    _session_bug_skills_cache[session_id] = (time.time(), skills)
+    return skills
+
+
+async def _session_selected_bug_skills(session_id: str) -> List[Dict[str, Any]]:
+    return bug_injection.selected_bug_skills(await _session_bug_skills(session_id))
+
+
+_BLOCK_END_RE = re.compile(r"(?i)<br\s*/?>|</(p|div|li|tr|h[1-6]|pre|table|ul|ol)>")
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _problem_field_text(raw: Any) -> str:
+    """An instructor problem field (plain text or rich-editor HTML) as plain text for a prompt."""
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    for _ in range(3):  # some fields are stored entity-encoded (&lt;p&gt;…)
+        if "<" in s or "&lt;" not in s:
+            break
+        s = html_std.unescape(s)
+    s = re.sub(r"(?i)<li[^>]*>", "\n- ", _BLOCK_END_RE.sub("\n", s))
+    s = html_std.unescape(_TAG_RE.sub("", s))
+    return re.sub(r"\n\s*\n\s*\n+", "\n\n", s).strip()
+
+
+async def _session_problem(session_id: str) -> str:
+    """The problem the student is working on (title, statement, test cases, constraints) as plain
+    text for the AI prompts, or "" if unknown."""
+    sl = await ensure_session_log_loaded(session_id)
+    if sl is None:
+        return ""
+    if sl.quiz_id and firebase_db:
+        try:
+            quiz = await fb_get_cached(f"quizzes/{sl.quiz_id}")
+        except Exception as e:
+            logger.warning("Problem context: quiz %s not loaded: %s", sl.quiz_id, e)
+            quiz = None
+        problems = normalize_quiz_data(quiz).get("problems", []) if quiz else []
+        idx = sl.current_problem_index or 0
+        prob = problems[idx] if 0 <= idx < len(problems) else {}
+        sections = [
+            (label, _problem_field_text(prob.get(key)))
+            for label, key in (("Title", "title"), ("Problem", "problem_statement"),
+                               ("Test cases", "test_cases"), ("Constraints", "constraints"))
+        ]
+        text = "\n\n".join(f"{label}:\n{body}" for label, body in sections if body)
+        if text:
+            return text
+    return _problem_field_text(sl.problem_description)
+
+
+# ─── Correct / buggy pairs (see bug_injection.py) ───────────────────────────
+# Every inline suggestion and agent change is offered as two options in random order: one
+# correct, one with a single bug. The pair is stored at bug_injections/{session_id}/{pair_id}
+# in Firebase (plus a local JSONL backup): which option id is which variant, the bug type the
+# model chose, and the classifier's label. The browser only ever sees option ids, never which
+# one is buggy; it reports "shown" / "accepted" events per option id (POST /pair-event).
+# pair_id is the suggestion id in the activity log, or the agent turn_id (matches agent_log).
+
+_background_tasks: set = set()
+_bug_file_lock = threading.Lock()
+_PAIR_ID_RE = re.compile(r"^[0-9a-f]{6,32}$")
+
+
+def _spawn(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+def _bug_ref(session_id: str, pair_id: str):
+    return firebase_db.child("bug_injections").child(_sanitize_firebase_key_segment(session_id)).child(pair_id)
+
+
+def _append_bug_jsonl(line: Dict[str, Any]) -> None:
+    try:
+        path = Path(os.getenv("SUBMISSIONS_DIR", "session_logs")) / "bug_injections.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with _bug_file_lock, path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(line) + "\n")
+    except Exception as e:
+        logger.error("Local bug record write failed: %s", e)
+
+
+def _write_bug_record(record: Dict[str, Any]) -> None:
+    _append_bug_jsonl(record)
+    if firebase_db:
+        try:
+            # update(), not set(): "shown"/"accepted" events may already be stored under this pair.
+            _bug_ref(record["session_id"], record["bug_id"]).update(record)
+        except Exception as e:
+            logger.error("Firebase bug record write failed: %s", e)
+
+
+def _write_pair_event(session_id: str, pair_id: str, entry: Dict[str, Any]) -> None:
+    _append_bug_jsonl({"type": "pair_event", "session_id": session_id, "bug_id": pair_id, **entry})
+    if firebase_db:
+        try:
+            _bug_ref(session_id, pair_id).child("events").push(entry)
+        except Exception as e:
+            logger.error("Firebase pair event write failed: %s", e)
+
+
+def _shuffled_options(correct: Dict[str, Any], buggy: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """[{oid, variant, **payload}] in random order (just the correct one when there is no buggy version)."""
+    options = [{"oid": uuid.uuid4().hex[:10], "variant": "correct", **correct}]
+    if buggy is not None:
+        options.append({"oid": uuid.uuid4().hex[:10], "variant": "buggy", **buggy})
+        random.shuffle(options)
+    return options
+
+
+def _requested_bug(skill: Dict[str, Any]) -> Dict[str, Any]:
+    """The bug skill the model chose to plant (compare with the classifier's category)."""
+    return {"requested_bug": {"id": skill["id"], "name": skill["name"], "category": skill["category"]}}
+
+
+async def _record_bug(session_id: str, kind: str, bug_id: str, details: Dict[str, Any], classify) -> None:
+    """Classify a planted bug (classify: coroutine) and store the pair record."""
+    record: Dict[str, Any] = {"bug_id": bug_id, "kind": kind, "session_id": session_id,
+                              "created_at": datetime.now().isoformat(), **details}
+    try:
+        sl = await ensure_session_log_loaded(session_id)
+        if sl:
+            record.update(user_id=sl.user_id, quiz_id=sl.quiz_id, condition=sl.condition,
+                          problem_index=sl.current_problem_index)
+    except Exception as e:
+        logger.warning("Bug record: session %s not loaded: %s", session_id, e)
+    try:
+        record["classification"] = await classify
+    except Exception as e:
+        logger.warning("Bug classification failed for %s: %s", bug_id, e)
+        record["classification"] = {"category": "classifier_error", "error": str(e)[:300]}
+    record["classified_at"] = datetime.now().isoformat()
+    await asyncio.to_thread(_write_bug_record, record)
+
+
+class PairEventRequest(BaseModel):
+    session_id: str
+    pair_id: str = Field(max_length=32)
+    oid: str = Field(max_length=32)
+    event: str  # "shown" | "accepted" | "rejected" (the student undid both versions)
+
+
+@app.post("/pair-event")
+async def pair_event(request: PairEventRequest):
+    """The student saw, accepted or rejected one option of a correct/buggy pair."""
+    if request.event not in ("shown", "accepted", "rejected"):
+        raise HTTPException(status_code=400, detail="Unknown event")
+    if not _PAIR_ID_RE.match(request.pair_id) or not _PAIR_ID_RE.match(request.oid):
+        raise HTTPException(status_code=400, detail="Bad id")
+    if await _session_condition(request.session_id) is None:
+        raise HTTPException(status_code=403, detail="Unknown session")
+    entry = {"event": request.event, "oid": request.oid, "at": datetime.now().isoformat()}
+    _spawn(asyncio.to_thread(_write_pair_event, request.session_id, request.pair_id, entry))
+    return {"status": "ok"}
+
+
 class CompletionRequest(BaseModel):
     session_id: str
     language: str = "python"
@@ -2808,25 +2781,58 @@ class CompletionRequest(BaseModel):
 
 
 @app.post("/complete")
-async def inline_complete(request: CompletionRequest):
-    """Copilot-style ghost-text completion (condition 2)."""
-    if await _session_condition(request.session_id) != CONDITION_SUGGESTION:
+async def inline_complete(request: CompletionRequest, http_request: Request):
+    """Copilot-style ghost-text completion, one line (condition 2) or a multi-line block (condition 4),
+    offered as two options in random order: one correct, one with a single bug."""
+    condition = await _session_condition(request.session_id)
+    if condition not in (CONDITION_SUGGESTION, CONDITION_MULTILINE_SUGGESTION):
         raise HTTPException(status_code=403, detail="Inline suggestions are not enabled for this session")
     if not request.prefix.strip():
-        return {"completion": ""}
+        return {"id": "", "options": []}
+    skills = await _session_selected_bug_skills(request.session_id)
+    max_lines = MULTILINE_SUGGESTION_MAX_LINES if condition == CONDITION_MULTILINE_SUGGESTION else 1
+    problem = await _session_problem(request.session_id)
     try:
-        async with _analyze_semaphore:
-            completion = await ai_assist.inline_completion(
+        async with _completion_semaphore:
+            # The editor cancels the request when the student types on; skip the OpenAI call then.
+            if await http_request.is_disconnected():
+                return {"id": "", "options": []}
+            pair = await asyncio.wait_for(ai_assist.inline_completion(
                 async_client,
                 language=request.language,
                 filename=request.filename,
                 prefix=request.prefix,
                 suffix=request.suffix,
-            )
-        return {"completion": completion, "id": uuid.uuid4().hex[:12]}
+                max_lines=max_lines,
+                bug_skills=skills,
+                problem=problem,
+            ), COMPLETION_TIMEOUT_SEC)
+    except asyncio.TimeoutError:
+        logger.warning("Inline completion timed out after %ss", COMPLETION_TIMEOUT_SEC)
+        return {"id": "", "options": []}
     except Exception as e:
         logger.warning("Inline completion failed: %s", e)
-        return {"completion": ""}
+        return {"id": "", "options": []}
+    if not pair["correct"]:
+        return {"id": "", "options": []}
+    pair_id = uuid.uuid4().hex[:12]
+    options = _shuffled_options({"text": pair["correct"]}, {"text": pair["buggy"]} if pair["buggy"] else None)
+    if pair["buggy"]:
+        prefix, suffix = request.prefix[-4000:], request.suffix[:1500]
+        _spawn(_record_bug(
+            request.session_id, "completion", pair_id,
+            {"language": request.language, "filename": request.filename, "prefix": prefix, "suffix": suffix,
+             "correct": pair["correct"], "buggy": pair["buggy"], "max_lines": max_lines,
+             "explanation": pair.get("bug_plan", ""),
+             "options": [{"oid": o["oid"], "variant": o["variant"]} for o in options],
+             **_requested_bug(pair["bug_skill"])},
+            bug_injection.classify_pair(
+                async_client, language=request.language, filename=request.filename,
+                context=f"{prefix}<CURSOR>{suffix}", correct=pair["correct"], buggy=pair["buggy"], skills=skills,
+            ),
+        ))
+    return {"id": pair_id, "options": [{"oid": o["oid"], "text": o["text"]} for o in options],
+            "no_bug": pair.get("no_bug", "")}
 
 
 class AgentSkill(BaseModel):
@@ -2847,11 +2853,59 @@ class AgentChatRequest(BaseModel):
     terminal_output: Optional[str] = None
 
 
+async def _agent_versions(turn: "ai_assist.AgentTurn", request: AgentChatRequest) -> Optional[Dict[str, Any]]:
+    """After an agent turn that changed files: the "versions" event offering the correct changes and a
+    copy with one bug, in random order, each with its description (the agent's summary; the buggy
+    one's may contain a wrong claim too), and the pair's bug record is stored. None when nothing changed."""
+    changes = turn.changes()
+    if not changes:
+        return None
+    correct_files = [{"filename": c["filename"], "action": c["action"], "content": c["content"]} for c in changes]
+    skills = await _session_selected_bug_skills(request.session_id)
+    files_after = {c["filename"]: c["content"] for c in changes if c["content"] is not None}
+    buggy = None
+    if skills and files_after:
+        try:
+            buggy = await bug_injection.make_buggy_agent_version(
+                async_client, language=request.language, message=request.message,
+                diffs={c["filename"]: c["diff"] for c in changes}, files_after=files_after, skills=skills,
+                problem=await _session_problem(request.session_id), description=turn.final_text,
+            )
+        except Exception as e:
+            logger.warning("Buggy agent version failed: %s", e)
+    buggy_files = None
+    if buggy:
+        buggy_files = [dict(f, content=buggy["files"][f["filename"]]) if f["filename"] == buggy["filename"] else f
+                       for f in correct_files]
+    options = _shuffled_options(
+        {"files": correct_files, "description": turn.final_text},
+        {"files": buggy_files, "description": buggy["description"]} if buggy_files else None,
+    )
+    pair_id = turn.record["turn_id"]
+    turn.record["pair_options"] = [{"oid": o["oid"], "variant": o["variant"]} for o in options]
+    if buggy:
+        fn = buggy["filename"]
+        _spawn(_record_bug(
+            request.session_id, "agent", pair_id,
+            {"language": request.language, "mode": turn.mode, "message": turn.message[:3000],
+             "filename": fn, "correct": buggy["old"], "buggy": buggy["new"],
+             "explanation": buggy["explanation"], "files_changed": [c["filename"] for c in changes],
+             "description_correct": turn.final_text, "description_buggy": buggy["description"],
+             "description_offered": buggy["description_offered"], "description_error": buggy["description_error"],
+             "options": turn.record["pair_options"], **_requested_bug(buggy["bug_skill"])},
+            bug_injection.classify_pair(
+                async_client, language=request.language, filename=fn,
+                context=files_after[fn], correct=buggy["old"], buggy=buggy["new"], skills=skills,
+            ),
+        ))
+    return {"type": "versions", "pair_id": pair_id,
+            "versions": [{"oid": o["oid"], "files": o["files"], "description": o["description"]} for o in options]}
 
 
 @app.post("/agent/chat")
 async def agent_chat(request: AgentChatRequest):
-    """Cursor-style agent turn (condition 3), streamed as server-sent events."""
+    """Cursor-style agent turn (condition 3), streamed as server-sent events. File changes are not
+    applied by the browser as they stream: the turn ends with a "versions" event (correct + buggy)."""
     if await _session_condition(request.session_id) != CONDITION_AGENT:
         raise HTTPException(status_code=403, detail="The agent is not enabled for this session")
     if not request.message.strip():
@@ -2872,12 +2926,21 @@ async def agent_chat(request: AgentChatRequest):
         run_code=lambda code, files, language, stdin: execute_code_safely(
             code, language, files=files, key=f"{request.session_id}:agent", stdin=stdin
         ),
+        problem=await _session_problem(request.session_id),
     )
 
     async def events():
         try:
             async for ev in turn.run():
                 yield f"data: {json.dumps(ev)}\n\n"
+            if turn.final_text and not turn.record.get("files_changed"):
+                # Held back in case it became a version's description, but the edits cancelled out.
+                yield f"data: {json.dumps({'type': 'text', 'delta': turn.final_text})}\n\n"
+            if turn.record.get("files_changed"):
+                yield f"data: {json.dumps({'type': 'versions_pending'})}\n\n"
+                versions = await _agent_versions(turn, request)
+                if versions:
+                    yield f"data: {json.dumps(versions)}\n\n"
         except Exception as e:
             logger.error("Agent turn failed: %s", e)
             turn.record["error"] = str(e)
@@ -3269,7 +3332,7 @@ async def get_stats():
         "api_status": "operational",
         "firebase_status": firebase_status,
         "active_sessions": len(active_sessions),
-        "openai_model": "gpt-4o-mini",
+        "openai_model": ai_assist.COMPLETION_MODEL,
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "supported_languages": [
             "javascript", "python", "java", "cpp", "csharp", 
@@ -3425,6 +3488,29 @@ def _draft_files_for(sl: "SessionLog") -> Optional[List[Dict[str, str]]]:
     if sl.editor_draft_problem_index not in (None, sl.current_problem_index):
         return None
     return sl.editor_draft_files
+
+
+_LANGUAGE_EXTS = {
+    "python": (".py",),
+    "javascript": (".js", ".mjs"),
+    "c": (".c", ".h"),
+    "cpp": (".cpp", ".cc", ".cxx", ".hpp", ".h"),
+    "java": (".java",),
+    "csharp": (".cs",),
+}
+_CODE_EXTS = {ext for exts in _LANGUAGE_EXTS.values() for ext in exts}
+
+
+def _drafts_match_language(sl: "SessionLog", language: str) -> bool:
+    """False when the saved workspace was written in another language than the one chosen at this
+    login (e.g. main.c from an earlier C login, now resumed in Python): restoring it would open C
+    code in a Python IDE."""
+    wanted = _LANGUAGE_EXTS.get(language)
+    if not wanted or not sl.editor_draft_files:
+        return True
+    exts = {os.path.splitext(f.get("filename") or "")[1].lower() for f in sl.editor_draft_files}
+    code_exts = exts & _CODE_EXTS
+    return not code_exts or code_exts <= set(wanted)
 
 
 @app.post("/checkpoint-editor")
@@ -3921,10 +4007,10 @@ async def get_survey_config(assignment_key: str, problem_index: int = 0):
         if assignment_key.startswith("quiz_") and firebase_db:
             access_code = assignment_key[5:]  # strip "quiz_"
             # Look up access code to get actual quiz UUID
-            access_ref = fb_dict(db.reference(f"quiz_access/{access_code}").get())
+            access_ref = await fb_get_cached(f"quiz_access/{access_code}")
             quiz_data = None
             if access_ref and access_ref.get("quiz_id"):
-                quiz_data = fb_dict(db.reference(f"quizzes/{access_ref['quiz_id']}").get())
+                quiz_data = await fb_get_cached(f"quizzes/{access_ref['quiz_id']}")
             if quiz_data:
                 quiz_data = normalize_quiz_data(quiz_data)
                 problems = quiz_data.get("problems", [])
@@ -4235,7 +4321,7 @@ async def get_survey_status(session_id: str, response: Response, problem_index: 
 
         # Instructor quiz: per-problem survey requirements from Firebase (not surveys/*.json)
         if session_log.quiz_id and firebase_db:
-            quiz_data = fb_dict(db.reference(f"quizzes/{session_log.quiz_id}").get())
+            quiz_data = await fb_get_cached(f"quizzes/{session_log.quiz_id}")
             if quiz_data:
                 quiz_data = normalize_quiz_data(quiz_data)
                 problems = quiz_data.get("problems", []) or []
@@ -4703,6 +4789,9 @@ async def authenticate_user(request: AuthRequest):
             _periodic_cfg_ex = get_periodic_survey_config()
             _periodic_en_ex  = _base_key_ex.lower() in _periodic_cfg_ex["enabled_prefixes"] if _base_key_ex else False
             _final_dis_ex    = is_final_survey_disabled(_base_key_ex)
+            _keep_drafts     = _drafts_match_language(existing_sl, programming_language)
+            if not _keep_drafts:
+                logger.info("Not restoring %s's saved files: they are not %s", existing_sl.session_id, programming_language)
 
             logger.info(
                 "Resuming existing session %s for user %s / assignment %s (problem_index=%s)",
@@ -4728,9 +4817,9 @@ async def authenticate_user(request: AuthRequest):
                 current_problem_index=existing_sl.current_problem_index,
                 total_problems=existing_sl.total_problems,
                 resumed=True,
-                editor_draft_code=existing_sl.editor_draft_checkpoint,
-                editor_draft_files=_draft_files_for(existing_sl),
-                editor_draft_active_file=existing_sl.editor_draft_active_file,
+                editor_draft_code=existing_sl.editor_draft_checkpoint if _keep_drafts else None,
+                editor_draft_files=_draft_files_for(existing_sl) if _keep_drafts else None,
+                editor_draft_active_file=existing_sl.editor_draft_active_file if _keep_drafts else None,
                 pre_survey_status=existing_sl.pre_survey_status,
                 post_survey_status=existing_sl.post_survey_status,
                 assignment_already_completed=False,
@@ -5243,9 +5332,9 @@ async def get_assignment_text(assignment_key: str, problem_index: int = 0):
         if assignment_key.startswith("quiz_") and firebase_db:
             access_code = assignment_key[5:]  # strip "quiz_"
             # Look up access code to get actual quiz UUID
-            access_ref = fb_dict(db.reference(f"quiz_access/{access_code}").get())
+            access_ref = await fb_get_cached(f"quiz_access/{access_code}")
             if access_ref and access_ref.get("quiz_id"):
-                qval = fb_dict(db.reference(f"quizzes/{access_ref['quiz_id']}").get())
+                qval = await fb_get_cached(f"quizzes/{access_ref['quiz_id']}")
                 if qval:
                     qval = normalize_quiz_data(qval)
                     import html as html_mod
@@ -5500,7 +5589,7 @@ async def debug_quiz_survey_flags(quiz_id: str, session_id: Optional[str] = None
     if not firebase_db:
         raise HTTPException(status_code=503, detail="Database unavailable")
 
-    quiz_data = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
+    quiz_data = await asyncio.to_thread(lambda: fb_dict(db.reference(f"quizzes/{quiz_id}").get()))
     if not quiz_data:
         raise HTTPException(status_code=404, detail="Quiz not found")
 
@@ -5621,10 +5710,10 @@ async def student_quiz_entry(request: Request, access_code: str):
     """Landing page for students accessing an instructor-created quiz via share link."""
     quiz_data = None
     if firebase_db:
-        mapping = fb_dict(db.reference(f"quiz_access/{access_code}").get())
+        mapping = await fb_get_cached(f"quiz_access/{access_code}")
         if mapping:
             quiz_id = mapping.get("quiz_id")
-            quiz_data = fb_dict(db.reference(f"quizzes/{quiz_id}").get()) if quiz_id else None
+            quiz_data = await fb_get_cached(f"quizzes/{quiz_id}") if quiz_id else None
 
     if not quiz_data:
         return _message_page("Quiz not found", "This link is invalid. Please check it with your instructor.", 404)
@@ -5691,6 +5780,9 @@ def build_quiz_join_response(
     _pre_done = _quiz_survey_done_for_problem(session_log, problem_idx, "pre")
     _post_done = _quiz_survey_done_for_problem(session_log, problem_idx, "post")
     periodic_enabled = prob.get("recurrent_survey_enabled", False) and bool(prob.get("recurrent_survey"))
+    keep_drafts = _drafts_match_language(session_log, programming_language)
+    if not keep_drafts:
+        logger.info("Not restoring %s's saved files: they are not %s", session_log.session_id, programming_language)
 
     return {
         "status": "success",
@@ -5717,9 +5809,9 @@ def build_quiz_join_response(
         "total_problems": len(problems),
         "current_problem_index": problem_idx,
         "resumed": resumed,
-        "editor_draft_code": session_log.editor_draft_checkpoint,
-        "editor_draft_files": _draft_files_for(session_log),
-        "editor_draft_active_file": session_log.editor_draft_active_file,
+        "editor_draft_code": session_log.editor_draft_checkpoint if keep_drafts else None,
+        "editor_draft_files": _draft_files_for(session_log) if keep_drafts else None,
+        "editor_draft_active_file": session_log.editor_draft_active_file if keep_drafts else None,
         "agent_skills_instructor": quiz_data.get("agent_skills", []) if session_log.condition == CONDITION_AGENT else [],
         "agent_skills_student": session_log.agent_skills if session_log.condition == CONDITION_AGENT else [],
     }
@@ -5789,7 +5881,7 @@ async def student_quiz_join(request: Request):
     if not firebase_db:
         raise HTTPException(status_code=503, detail="Database unavailable")
 
-    mapping = fb_dict(db.reference(f"quiz_access/{access_code}").get())
+    mapping = await fb_get_cached(f"quiz_access/{access_code}")
     if not mapping:
         raise HTTPException(status_code=404, detail="Invalid quiz code")
 
@@ -5797,7 +5889,7 @@ async def student_quiz_join(request: Request):
     if not quiz_id:
         raise HTTPException(status_code=404, detail="Invalid quiz code")
 
-    quiz_data = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
+    quiz_data = await fb_get_cached(f"quizzes/{quiz_id}")
     if not quiz_data:
         raise HTTPException(status_code=404, detail="Quiz not found")
     if not quiz_data.get("published", False):
@@ -5843,8 +5935,6 @@ async def student_quiz_join(request: Request):
                     "quiz_id": quiz_id,
                     "quiz_already_completed": True,
                 }
-
-    import random
 
     conditions = quiz_data.get("conditions", [1])
     condition = random.choice(conditions)
@@ -5961,7 +6051,7 @@ async def quiz_next_problem(request: Request):
         # Return current problem info without re-advancing
         if not session_log.quiz_id:
             raise HTTPException(status_code=400, detail="No quiz ID in session")
-        quiz_data = fb_dict(db.reference(f"quizzes/{session_log.quiz_id}").get())
+        quiz_data = await fb_get_cached(f"quizzes/{session_log.quiz_id}")
         if not quiz_data:
             raise HTTPException(status_code=404, detail="Quiz not found")
         quiz_data = normalize_quiz_data(quiz_data)
@@ -6054,7 +6144,7 @@ async def quiz_next_problem(request: Request):
     if not session_log.quiz_id:
         raise HTTPException(status_code=400, detail="No quiz ID in session")
 
-    quiz_data = fb_dict(db.reference(f"quizzes/{session_log.quiz_id}").get())
+    quiz_data = await fb_get_cached(f"quizzes/{session_log.quiz_id}")
     if not quiz_data:
         raise HTTPException(status_code=404, detail="Quiz not found")
     quiz_data = normalize_quiz_data(quiz_data)

@@ -3,6 +3,7 @@
 Mounted as a sub-router in main.py at prefix /instructor.
 """
 
+import asyncio
 import os
 import shutil
 import copy
@@ -22,9 +23,11 @@ import uuid
 from urllib.parse import quote
 from pathlib import Path
 
+import bug_injection
 from firebase_utils import fb_dict
 from quiz_analytics import (
     aggregate_quiz_analytics,
+    bug_pair_stats,
     build_user_ai_activity_log,
     collect_quiz_sessions_from_firebase,
     delete_user_data_for_quiz,
@@ -265,9 +268,19 @@ def _get_firebase():
     return firebase_db
 
 
+# An instructor stays signed in for this long after entering their emailed code.
+INSTRUCTOR_LOGIN_TTL_SEC = int(os.getenv("INSTRUCTOR_LOGIN_TTL_SEC", str(24 * 3600)))
+
+
 def _require_instructor(request: Request):
-    """Return instructor email from session or None."""
-    return request.session.get("instructor_email") if request.session.get("is_instructor") else None
+    """Return instructor email from session or None (also None once the login is older than a day)."""
+    if not request.session.get("is_instructor"):
+        return None
+    logged_in_at = request.session.get("instructor_login_at") or 0
+    if time.time() - logged_in_at > INSTRUCTOR_LOGIN_TTL_SEC:
+        request.session.clear()
+        return None
+    return request.session.get("instructor_email")
 
 
 def _clean_agent_skills(raw: Any) -> List[Dict[str, str]]:
@@ -352,6 +365,8 @@ def _normalize_quiz_data(quiz_data: dict) -> dict:
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
+    if _require_instructor(request):
+        return RedirectResponse(url="/instructor/dashboard", status_code=303)
     error = request.query_params.get("error")
     return templates.TemplateResponse("instructor_login.html", {
         "request": request,
@@ -430,6 +445,7 @@ async def verify_otp(request: Request):
         delete_otp(_get_firebase(), email)
         request.session["instructor_email"] = email
         request.session["is_instructor"] = True
+        request.session["instructor_login_at"] = time.time()
 
         # Ensure instructor record exists in Firebase
         fb = _get_firebase()
@@ -511,6 +527,8 @@ async def create_quiz_page(request: Request):
         "request": request,
         "instructor_email": email,
         "quiz": None,
+        "bug_skills": bug_injection.default_bug_skills(),
+        "default_bug_skills": bug_injection.default_bug_skills(),
         "edit_mode": False,
         "draft_upload_id": str(uuid.uuid4()),
     })
@@ -538,13 +556,13 @@ async def save_quiz(request: Request, payload: dict = Body(...)):
         if not (prob.get("problem_statement") or "").strip():
             return JSONResponse({"success": False, "error": f"Problem {i+1} requires a problem statement."}, status_code=400)
 
-    # Validate conditions (list, each must be 1, 2, or 3)
+    # Validate conditions (list, each must be 1, 2, 3 or 4)
     conditions = payload.get("conditions", [1])
     if not conditions or not isinstance(conditions, list):
         return JSONResponse({"success": False, "error": "At least one condition is required."}, status_code=400)
     for c in conditions:
-        if int(c) not in (1, 2, 3):
-            return JSONResponse({"success": False, "error": "Each condition must be 1, 2, or 3."}, status_code=400)
+        if int(c) not in (1, 2, 3, 4):
+            return JSONResponse({"success": False, "error": "Each condition must be 1, 2, 3 or 4."}, status_code=400)
     conditions = [int(c) for c in conditions]
 
     quiz_id = str(uuid.uuid4())
@@ -570,6 +588,8 @@ async def save_quiz(request: Request, payload: dict = Body(...)):
         "time_limit_minutes": int(payload.get("time_limit_minutes", 0)),
         "conditions": conditions,
         "agent_skills": _clean_agent_skills(payload.get("agent_skills")),
+        "bug_skills": bug_injection.clean_bug_skills(payload.get("bug_skills")),
+        "bug_skills_configured": True,
         "recurrent_survey": payload.get("recurrent_survey", []),
         "recurrent_survey_interval": int(payload.get("recurrent_survey_interval", 4)),
         "recurrent_survey_start": int(payload.get("recurrent_survey_start", 5)),
@@ -640,7 +660,7 @@ async def duplicate_quiz(request: Request, quiz_id: str):
             ic = int(c)
         except (TypeError, ValueError):
             continue
-        if ic in (1, 2, 3):
+        if ic in (1, 2, 3, 4):
             conditions.append(ic)
     if not conditions:
         conditions = [1]
@@ -666,6 +686,8 @@ async def duplicate_quiz(request: Request, quiz_id: str):
         "time_limit_minutes": int(src_quiz.get("time_limit_minutes", 0)),
         "conditions": conditions,
         "agent_skills": copy.deepcopy(src_quiz.get("agent_skills", [])),
+        "bug_skills": bug_injection.quiz_bug_skills(src_quiz),
+        "bug_skills_configured": True,
         "recurrent_survey": copy.deepcopy(src_quiz.get("recurrent_survey", [])),
         "recurrent_survey_interval": int(src_quiz.get("recurrent_survey_interval", 4)),
         "recurrent_survey_start": int(src_quiz.get("recurrent_survey_start", 5)),
@@ -716,6 +738,8 @@ async def edit_quiz_page(request: Request, quiz_id: str):
         "request": request,
         "instructor_email": email,
         "quiz": quiz,
+        "bug_skills": bug_injection.quiz_bug_skills(quiz),
+        "default_bug_skills": bug_injection.default_bug_skills(),
         "edit_mode": True,
         "draft_upload_id": None,
     })
@@ -744,8 +768,8 @@ async def update_quiz(request: Request, quiz_id: str, payload: dict = Body(...))
         if not isinstance(conditions, list) or not conditions:
             return JSONResponse({"success": False, "error": "At least one condition is required."}, status_code=400)
         for c in conditions:
-            if int(c) not in (1, 2, 3):
-                return JSONResponse({"success": False, "error": "Each condition must be 1, 2, or 3."}, status_code=400)
+            if int(c) not in (1, 2, 3, 4):
+                return JSONResponse({"success": False, "error": "Each condition must be 1, 2, 3 or 4."}, status_code=400)
         payload["conditions"] = [int(c) for c in conditions]
 
     # Validate problems if provided
@@ -770,6 +794,9 @@ async def update_quiz(request: Request, quiz_id: str, payload: dict = Body(...))
     updates = {k: payload[k] for k in updatable_fields if k in payload}
     if "agent_skills" in payload:
         updates["agent_skills"] = _clean_agent_skills(payload.get("agent_skills"))
+    if "bug_skills" in payload:
+        updates["bug_skills"] = bug_injection.clean_bug_skills(payload.get("bug_skills"))
+        updates["bug_skills_configured"] = True
     # Derive title from teaser or first problem
     teaser = (payload.get("teaser") or "").strip()
     problems = payload.get("problems") or existing.get("problems", [])
@@ -1149,6 +1176,29 @@ async def quiz_analytics_data(
         return JSONResponse(content=data, headers=h)
     except Exception as e:
         logger.exception("quiz_analytics_data failed for quiz_id=%s", quiz_id)
+        return JSONResponse({"error": f"Server error: {e!s}"}, status_code=500)
+
+
+@router.get("/quiz/{quiz_id}/bug-stats")
+async def quiz_bug_stats(request: Request, quiz_id: str):
+    """Correct/buggy pair counts per bug type for the analytics page."""
+    email = _require_instructor(request)
+    if not email:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    if not _get_firebase():
+        return JSONResponse({"error": "Database unavailable"}, status_code=503)
+    from firebase_admin import db
+
+    try:
+        quiz = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
+        if not quiz:
+            return JSONResponse({"error": "Quiz not found"}, status_code=404)
+        if quiz.get("created_by") != email:
+            return JSONResponse({"error": "Not authorised"}, status_code=403)
+        stats = await asyncio.to_thread(bug_pair_stats, db, quiz_id, bug_injection.quiz_bug_skills(quiz))
+        return JSONResponse(content=stats, headers=dict(_ANALYTICS_JSON_NO_CACHE))
+    except Exception as e:
+        logger.exception("quiz_bug_stats failed for quiz_id=%s", quiz_id)
         return JSONResponse({"error": f"Server error: {e!s}"}, status_code=500)
 
 

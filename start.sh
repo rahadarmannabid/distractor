@@ -68,6 +68,24 @@ export API_PORT="${API_PORT:-$(env_get API_PORT)}"
 export API_PORT="${API_PORT:-8000}"
 export REDIS_URL="${REDIS_URL:-$(env_get REDIS_URL)}"
 
+# If the port is taken (e.g. an earlier server is still running), use the next free one.
+port_free() { python - "$1" <<'PY' 2>/dev/null
+import socket, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.bind(("0.0.0.0", int(sys.argv[1])))
+s.close()
+PY
+}
+
+WANTED_PORT="$API_PORT"
+for _ in {1..50}; do
+  port_free "$API_PORT" && break
+  API_PORT=$((API_PORT + 1))
+done
+port_free "$API_PORT" || die "No free port found between ${WANTED_PORT} and ${API_PORT}"
+[[ "$API_PORT" != "$WANTED_PORT" ]] && warn "Port ${WANTED_PORT} is in use, using ${API_PORT} instead"
+export API_PORT
+
 mkdir -p submissions session_logs logs
 
 # ---------------------------------------------------------------------------

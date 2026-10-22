@@ -1,11 +1,14 @@
 // AI assistance per study condition, included by index.html:
-//   1 = No AI, 2 = inline ghost-text suggestions (Copilot-style), 3 = coding agent (Cursor-style).
+//   1 = No AI, 2 = single-line inline ghost-text suggestions (Copilot-style), 3 = coding agent
+//   (Cursor-style), 4 = multi-line ghost-text suggestions (the server decides the length).
 // Relies on globals from index.html: currentSession, logActivity; and window.WS (workspace.js).
 (function () {
     'use strict';
 
-    var CONDITION = { NO_AI: 1, SUGGESTION: 2, AGENT: 3 };
-    var GHOST_DEBOUNCE_MS = 150;
+    var CONDITION = { NO_AI: 1, SUGGESTION: 2, AGENT: 3, MULTILINE_SUGGESTION: 4 };
+    var GHOST_DEBOUNCE_MS = 100;
+    // Text after the cursor on its line that still allows a suggestion (as in Copilot).
+    var MID_LINE_OK = /^[\s)\]}"'`;,:]*$/;
 
     function esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -17,22 +20,114 @@
     function log(type, details) { try { logActivity(type, details || {}); } catch (e) { /* ignore */ } }
 
 
-    // ── Condition 2: inline ghost-text completions ────────────────────────────
+    // Every suggestion and agent change is offered as a pair (one correct, one with a single bug) in
+    // random order. The browser only knows option ids; the server records which is which, and gets
+    // "shown" / "accepted" events per option id here.
+    var reportedShown = new Set();
+    function pairEvent(pairId, oid, event) {
+        if (!pairId || !oid) return;
+        if (event === 'shown') {
+            if (reportedShown.has(pairId + ':' + oid)) return;
+            reportedShown.add(pairId + ':' + oid);
+        }
+        fetch('/pair-event', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: currentSession.sessionId, pair_id: pairId, oid: oid, event: event })
+        }).catch(function () { /* ignore */ });
+    }
+
+    // ── Conditions 2 and 4: inline ghost-text completions ─────────────────────
+    // Both options of the pair are returned as inline items: Monaco shows one as ghost text,
+    // Alt+] / Alt+[ switches, Tab accepts the one on screen. Monaco's own toolbar sits on top of
+    // the line above, so it is off; instead the ghost text is colored per option and a strip
+    // below the line (a view zone, which pushes code down rather than covering it) shows the
+    // other option.
     function initGhostText(monaco, editor) {
-        editor.updateOptions({ inlineSuggest: { enabled: true } });
-        var shown = new Set();
+        // Monaco 0.43 has no showToolbar: 'never'. 'onHover' would open a hover box on the ghost text;
+        // 'always' puts the toolbar in its own widget, which GHOST_STYLES hides.
+        editor.updateOptions({ inlineSuggest: { enabled: true, showToolbar: 'always' } });
+        var style = document.createElement('style');
+        style.textContent = GHOST_STYLES;
+        document.head.appendChild(style);
+        var strip = pairStrip(monaco, editor);
+        // Option/Alt + Left/Right switches between the options, only while a suggestion is on screen
+        // (otherwise the keys keep their usual word-jump meaning).
+        ['showNext', 'showPrevious'].forEach(function (action) {
+            var key = action === 'showNext' ? monaco.KeyCode.RightArrow : monaco.KeyCode.LeftArrow;
+            editor.addCommand(monaco.KeyMod.Alt | key, function () {
+                editor.trigger('pair-keys', 'editor.action.inlineSuggest.' + action, {});
+            }, 'inlineSuggestionVisible');
+        });
         var cache = new Map();
+        var recent = null; // the last suggestion shown: { prefix, suffix, hit }
         var acceptCmd = editor.addCommand(0, function (_ctx, meta) {
+            strip.hide();
+            recent = null;
             log('inline_suggestion_accepted', meta);
+            pairEvent(meta.pair_id, meta.option_id, 'accepted');
         }, '');
 
-        monaco.languages.registerInlineCompletionsProvider(lang(), {
+        // The rest of the last suggestion's options after the student typed their start (same
+        // pair and option ids), or null. Options the typed text does not match drop out. Closing
+        // brackets/quotes the editor auto-inserted after the cursor are replaced by the suggestion.
+        function typeThrough(prefix, suffix) {
+            if (!recent || prefix.length <= recent.prefix.length ||
+                prefix.slice(0, recent.prefix.length) !== recent.prefix) return null;
+            if (suffix.length < recent.suffix.length || suffix.slice(suffix.length - recent.suffix.length) !== recent.suffix) return null;
+            var autoClosed = suffix.slice(0, suffix.length - recent.suffix.length);
+            if (!/^[)\]}"'`]*$/.test(autoClosed)) return null;
+            var typed = prefix.slice(recent.prefix.length);
+            var options = recent.hit.options
+                .filter(function (o) { return o.text.length > typed.length && o.text.slice(0, typed.length) === typed; })
+                .map(function (o) { return { oid: o.oid, text: o.text.slice(typed.length) }; });
+            if (!options.length) return null;
+            return { id: recent.hit.id, options: options, latency_ms: 0, typed_through: typed.length,
+                     replace: autoClosed.length };
+        }
+
+        function toItems(hit, position) {
+            var range = new monaco.Range(position.lineNumber, position.column, position.lineNumber,
+                                         position.column + (hit.replace || 0));
+            return hit.options.map(function (o, i) {
+                var meta = {
+                    suggestion_id: hit.id,
+                    pair_id: hit.id,
+                    option_id: o.oid,
+                    option_index: i + 1,
+                    option_count: hit.options.length,
+                    file: activeFileName(),
+                    line: position.lineNumber,
+                    lines: o.text.split('\n').length,
+                    text: o.text.slice(0, 2000),
+                    latency_ms: hit.latency_ms,
+                    typed_through: hit.typed_through || 0
+                };
+                return {
+                    insertText: o.text,
+                    range: range,
+                    command: { id: acceptCmd, title: 'Accept suggestion', arguments: [meta] },
+                    _meta: meta
+                };
+            });
+        }
+
+        // Every language: the open file's language can differ from the session's (main.c in a
+        // Python session), and a provider registered for one language is never asked about others.
+        monaco.languages.registerInlineCompletionsProvider('*', {
             provideInlineCompletions: async function (model, position, context, token) {
                 if (editor.getOption(monaco.editor.EditorOption.readOnly)) return { items: [] };
                 var last = model.getLineCount();
                 var prefix = model.getValueInRange(new monaco.Range(1, 1, position.lineNumber, position.column));
                 var suffix = model.getValueInRange(new monaco.Range(position.lineNumber, position.column, last, model.getLineMaxColumn(last)));
                 if (!prefix.trim()) return { items: [] };
+                // Like Copilot: no suggestion in the middle of a line, unless only closing
+                // brackets, quotes or punctuation follow the cursor.
+                if (!MID_LINE_OK.test(suffix.split('\n', 1)[0])) return { items: [] };
+
+                // Like Copilot: while the student types the start of a suggestion, keep showing the
+                // rest of it at once instead of asking the server again.
+                var through = typeThrough(prefix, suffix);
+                if (through) return { items: toItems(through, position) };
 
                 var key = prefix.slice(-3000) + '\u0000' + suffix.slice(0, 500);
                 var hit = cache.get(key);
@@ -51,7 +146,7 @@
                             signal: ctrl.signal,
                             body: JSON.stringify({
                                 session_id: currentSession.sessionId,
-                                language: lang(),
+                                language: model.getLanguageId() || lang(),
                                 filename: activeFileName(),
                                 prefix: prefix,
                                 suffix: suffix
@@ -59,42 +154,153 @@
                         });
                         if (!res.ok) return { items: [] };
                         var data = await res.json();
-                        hit = { id: data.id || '', text: data.completion || '', latency_ms: Date.now() - started };
+                        hit = { id: data.id || '', options: (data.options || []).filter(function (o) { return o.text; }),
+                                latency_ms: Date.now() - started };
                     } catch (e) {
                         return { items: [] };
                     }
                     cache.set(key, hit);
                     if (cache.size > 200) cache.delete(cache.keys().next().value);
                 }
-                if (!hit.text || token.isCancellationRequested) return { items: [] };
-
-                var meta = {
-                    suggestion_id: hit.id,
-                    file: activeFileName(),
-                    line: position.lineNumber,
-                    lines: hit.text.split('\n').length,
-                    text: hit.text.slice(0, 2000),
-                    latency_ms: hit.latency_ms
-                };
-                return {
-                    items: [{
-                        insertText: hit.text,
-                        range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column),
-                        command: { id: acceptCmd, title: 'Accept suggestion', arguments: [meta] },
-                        _meta: meta
-                    }]
-                };
+                if (!hit.options.length || token.isCancellationRequested) return { items: [] };
+                recent = { prefix: prefix, suffix: suffix, hit: hit };
+                return { items: toItems(hit, position) };
             },
-            handleItemDidShow: function (_completions, item) {
+            handleItemDidShow: function (completions, item) {
                 var meta = item && item._meta;
-                if (meta && !shown.has(meta.suggestion_id)) {
-                    shown.add(meta.suggestion_id);
+                strip.show(completions.items || [], item);
+                if (meta && !reportedShown.has(meta.pair_id + ':' + meta.option_id)) {
                     log('inline_suggestion_shown', meta);
+                    pairEvent(meta.pair_id, meta.option_id, 'shown');
                 }
             },
             freeInlineCompletions: function () {}
         });
     }
+
+    var PAIR_LETTERS = ['A', 'B', 'C', 'D'];
+    var STRIP_MAX_LINES = 8;
+    var ALT_KEY = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌥ Option' : 'Alt';
+
+    // The options box: pinned to the editor's right edge, level with the suggestion's line, listing
+    // every option so they can be compared side by side. (Below the line, the other option looked
+    // like the next lines of code.)
+    function pairStrip(monaco, editor) {
+        var root = editor.getDomNode();
+        var widget = null, timer = null, listeners = [];
+
+        function ghostVisible() {
+            return !!root.querySelector('.ghost-text-decoration, .ghost-text-decoration-preview, .ghost-text');
+        }
+        function hide() {
+            if (timer) { clearInterval(timer); timer = null; }
+            listeners.forEach(function (l) { l.dispose(); });
+            listeners = [];
+            root.classList.remove('pair-opt-1', 'pair-opt-2', 'pair-opt-3', 'pair-opt-4');
+            if (widget) {
+                editor.removeOverlayWidget(widget);
+                widget = null;
+            }
+        }
+        function switchTo(steps) {
+            editor.focus();
+            for (var i = 0; i < steps; i++) editor.trigger('pair-strip', 'editor.action.inlineSuggest.showNext', {});
+        }
+        function show(items, active) {
+            hide();
+            var meta = active && active._meta;
+            if (!meta || items.length < 2) return;
+            var idx = items.indexOf(active);
+            root.classList.add('pair-opt-' + (idx + 1));
+
+            var node = document.createElement('div');
+            node.className = 'pair-strip';
+            var chips = items.map(function (it, i) {
+                return '<button type="button" class="pair-chip pair-chip-' + (i + 1) + (i === idx ? ' active' : '') +
+                    '" data-steps="' + ((i - idx + items.length) % items.length) + '">' + PAIR_LETTERS[i] + '</button>';
+            }).join('');
+            // On a blank line the editor already holds the first line's indentation: put it back, then
+            // drop the indentation all lines share, so each option reads as a block.
+            var pos = editor.getPosition();
+            var head = pos ? editor.getModel().getLineContent(pos.lineNumber).slice(0, pos.column - 1) : '';
+            var indent = /^\s*$/.test(head) ? head : '';
+            var options = items.map(function (it, i) {
+                var lines = (indent + String(it.insertText || '').replace(/^\n/, '')).split('\n');
+                var common = Math.min.apply(null, lines.filter(function (l) { return l.trim(); })
+                    .map(function (l) { return l.match(/^\s*/)[0].length; }).concat([indent.length]));
+                lines = lines.map(function (l) { return l.slice(Math.min(common, l.match(/^\s*/)[0].length)); });
+                var more = lines.length > STRIP_MAX_LINES ? '\n…' : '';
+                return '<div class="pair-alt pair-alt-' + (i + 1) + (i === idx ? ' is-active' : '') +
+                    '" data-steps="' + ((i - idx + items.length) % items.length) + '">' +
+                    '<div class="pair-alt-label">Option ' + PAIR_LETTERS[i] +
+                    (i === idx ? '<span class="pair-alt-tag">in editor</span>' : '') + '</div>' +
+                    '<pre>' + esc(lines.slice(0, STRIP_MAX_LINES).join('\n') + more) + '</pre></div>';
+            }).join('');
+            node.innerHTML =
+                '<div class="pair-head">' + chips + '<span class="pair-hint"><kbd>' + ALT_KEY +
+                '</kbd><kbd>←</kbd><kbd>→</kbd> switch · <kbd>Tab</kbd> accept · <kbd>Esc</kbd> dismiss</span></div>' +
+                options;
+            // Clicks must not reach Monaco: a click in the editor moves the cursor and drops the suggestion.
+            ['mousedown', 'pointerdown'].forEach(function (evt) {
+                node.addEventListener(evt, function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    var target = e.target.closest && e.target.closest('[data-steps]');
+                    var steps = Number(target && target.getAttribute('data-steps'));
+                    if (steps) switchTo(steps);
+                });
+            });
+            node.style.setProperty('--pair-font', editor.getOption(monaco.editor.EditorOption.fontInfo).fontFamily);
+            node.style.setProperty('--pair-size', editor.getOption(monaco.editor.EditorOption.fontSize) + 'px');
+
+            function place() {
+                var layout = editor.getLayoutInfo();
+                node.style.maxWidth = Math.max(220, Math.min(460, Math.round(layout.contentWidth * 0.45))) + 'px';
+                // Top of the suggestion's line, kept inside the editor.
+                var top = editor.getTopForLineNumber(meta.line) - editor.getScrollTop();
+                var room = layout.height - node.offsetHeight - 8;
+                node.style.marginTop = Math.max(4, Math.min(top, room)) + 'px';
+            }
+            widget = {
+                getId: function () { return 'pair.options.box'; },
+                getDomNode: function () { return node; },
+                getPosition: function () {
+                    return { preference: monaco.editor.OverlayWidgetPositionPreference.TOP_RIGHT_CORNER };
+                }
+            };
+            editor.addOverlayWidget(widget);
+            place();
+            listeners.push(editor.onDidScrollChange(place), editor.onDidLayoutChange(place));
+            // Monaco has no "suggestion hidden" event: drop the box once the ghost text is gone.
+            timer = setInterval(function () { if (!ghostVisible()) hide(); }, 200);
+        }
+        editor.onDidChangeModel(hide);
+        return { show: show, hide: hide };
+    }
+
+    var GHOST_STYLES = [
+        '.monaco-editor .inlineSuggestionsHints{display:none!important;}',
+        '.pair-opt-1 .ghost-text-decoration,.pair-opt-1 .ghost-text-decoration-preview,.pair-opt-1 .suggest-preview-text .ghost-text,.pair-opt-1 .ghost-text{color:#6cb6ff!important;opacity:.9;}',
+        '.pair-opt-2 .ghost-text-decoration,.pair-opt-2 .ghost-text-decoration-preview,.pair-opt-2 .suggest-preview-text .ghost-text,.pair-opt-2 .ghost-text{color:#e0a3ff!important;opacity:.9;}',
+        '.pair-strip{box-sizing:border-box;margin-right:8px;padding:6px 8px 8px;border:1px solid #454a54;border-radius:8px;background:#252526;box-shadow:0 6px 18px rgba(0,0,0,.45);font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#9da5b4;pointer-events:auto;z-index:10;}',
+        '.pair-head{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;}',
+        '.pair-chip{border:1px solid transparent;border-radius:4px;padding:0 7px;height:18px;font:600 11px/16px inherit;cursor:pointer;opacity:.55;}',
+        '.pair-chip.active{opacity:1;box-shadow:0 0 0 1px rgba(255,255,255,.35);}',
+        '.pair-chip-1{background:rgba(108,182,255,.2);color:#6cb6ff;border-color:rgba(108,182,255,.5);}',
+        '.pair-chip-2{background:rgba(224,163,255,.2);color:#e0a3ff;border-color:rgba(224,163,255,.5);}',
+        '.pair-hint{margin-left:2px;font-size:11px;white-space:nowrap;}',
+        '.pair-hint kbd{font:inherit;font-size:10px;padding:0 4px;border:1px solid #555;border-radius:3px;background:#2a2a2a;color:#ccc;}',
+        '.pair-hint kbd+kbd{margin-left:2px;}',
+        '.pair-alt{margin-top:6px;padding:4px 8px;border-radius:6px;border:1px solid transparent;background:rgba(255,255,255,.03);cursor:pointer;}',
+        '.pair-alt.is-active{cursor:default;}',
+        '.pair-alt-1.is-active{border-color:rgba(108,182,255,.55);}',
+        '.pair-alt-2.is-active{border-color:rgba(224,163,255,.55);}',
+        '.pair-alt-label{font-weight:600;font-size:11px;line-height:18px;}',
+        '.pair-alt-tag{margin-left:6px;font-weight:400;color:#9da5b4;}',
+        '.pair-alt pre{margin:0;font-family:var(--pair-font);font-size:var(--pair-size);line-height:1.45;white-space:pre;overflow:hidden;text-overflow:ellipsis;}',
+        '.pair-alt-1{color:#6cb6ff;}',
+        '.pair-alt-2{color:#e0a3ff;}'
+    ].join('\n');
 
     function activeFileName() { return window.WS ? WS.activeName() : 'main'; }
 
@@ -164,11 +370,160 @@
         return out;
     }
 
+    // Line diff as [{t: ' ' | '+' | '-', s}] (LCS; whole-file replace when too large to compare).
+    function diffOps(before, after) {
+        var a = before === '' ? [] : before.split('\n'), b = after === '' ? [] : after.split('\n');
+        if (a.length * b.length > 400000) {
+            return a.map(function (s) { return { t: '-', s: s }; }).concat(b.map(function (s) { return { t: '+', s: s }; }));
+        }
+        var n = a.length, m = b.length, dp = [], i, j;
+        for (i = 0; i <= n; i++) dp.push(new Uint16Array(m + 1));
+        for (i = n - 1; i >= 0; i--) {
+            for (j = m - 1; j >= 0; j--) {
+                dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+            }
+        }
+        var out = [];
+        i = 0; j = 0;
+        while (i < n && j < m) {
+            if (a[i] === b[j]) { out.push({ t: ' ', s: a[i] }); i++; j++; }
+            else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push({ t: '-', s: a[i] }); i++; }
+            else { out.push({ t: '+', s: b[j] }); j++; }
+        }
+        for (; i < n; i++) out.push({ t: '-', s: a[i] });
+        for (; j < m; j++) out.push({ t: '+', s: b[j] });
+        return out;
+    }
+
+    // Changed lines plus `ctx` lines of context around them; skipped stretches become one '…' entry.
     function lineCounts(before, after) {
         var added = changedLines(before || '', after || '').length;
         var removed = changedLines(after || '', before || '').length;
         return { added: added, removed: removed };
     }
+
+    // The offered versions, reviewed in the editor (Cursor-style): an inline diff of one changed file
+    // over the editor, with the version's changed files and change navigation above it. The student
+    // picks the version, and applies or undoes it, in the Agent panel.
+    var PREVIEW_LANG = { py: 'python', c: 'c', h: 'cpp', cpp: 'cpp', hpp: 'cpp', cc: 'cpp', java: 'java', js: 'javascript' };
+    var Preview = {
+        el: null, diff: null, models: null, state: null, changes: [], at: -1, whole: null, wholeDeco: [],
+
+        build: function (monaco, editor) {
+            if (this.el) return true;
+            var wrap = document.querySelector('.editor-wrapper');
+            if (!wrap) return false;
+            var self = this, opt = monaco.editor.EditorOption;
+            this.el = document.createElement('div');
+            this.el.className = 'agent-preview';
+            this.el.hidden = true;
+            this.el.innerHTML = '<div class="agent-preview__bar"></div><div class="agent-preview__diff"></div>';
+            wrap.appendChild(this.el);
+            this.diff = monaco.editor.createDiffEditor(this.el.querySelector('.agent-preview__diff'), {
+                readOnly: true, originalEditable: false, renderSideBySide: false, automaticLayout: true,
+                theme: 'vs-dark', minimap: { enabled: false }, scrollBeyondLastLine: false, wordWrap: 'on',
+                ignoreTrimWhitespace: false, renderIndicators: true, renderOverviewRuler: true,
+                fontFamily: editor.getOption(opt.fontFamily), fontSize: editor.getOption(opt.fontSize)
+            });
+            this.diff.onDidUpdateDiff(function () {
+                if (self.whole) return;
+                self.changes = self.diff.getLineChanges() || [];
+                if (self.at < 0 && self.changes.length) self.go(0); else self.renderNav();
+            });
+            return true;
+        },
+
+        // state: {ev, index, file, labels, onSelect(i, file)}
+        show: function (state) {
+            if (!this.build(Agent.monaco, Agent.editor)) return;
+            this.state = state;
+            var v = state.ev.versions[state.index];
+            var f = v.files.find(function (x) { return x.filename === state.file; }) || v.files[0];
+            state.file = f.filename;
+            this.el.hidden = false;
+            this.renderBar();
+            this.setModels(f);
+        },
+        hide: function () {
+            if (!this.el || this.el.hidden) return;
+            this.el.hidden = true;
+            this.state = null;
+            this.diff.setModel(null);
+            if (this.models) { this.models.original.dispose(); this.models.modified.dispose(); this.models = null; }
+        },
+        isOpen: function () { return !!(this.el && !this.el.hidden && this.state); },
+        hasFile: function (name) {
+            return this.isOpen() && this.state.ev.versions[this.state.index].files.some(function (f) { return f.filename === name; });
+        },
+
+        setModels: function (f) {
+            var monaco = Agent.monaco, ws = WS.find(f.filename);
+            var lang = ws ? ws.model.getLanguageId() : PREVIEW_LANG[f.filename.split('.').pop().toLowerCase()] || 'plaintext';
+            var old = this.models, before = WS.get(f.filename);
+            // A new or deleted file is shown whole, all green or all red: diffing it against an empty
+            // file would show a stray removed (or added) empty line.
+            this.whole = f.action === 'delete' ? 'deleted' : before === null ? 'new' : null;
+            var a = this.whole === 'new' ? f.content || '' : before || '', b = this.whole === 'deleted' ? before || '' : f.content || '';
+            this.models = { original: monaco.editor.createModel(a, lang), modified: monaco.editor.createModel(b, lang) };
+            this.changes = [];
+            this.at = -1;
+            this.diff.setModel(this.models);
+            if (old) { old.original.dispose(); old.modified.dispose(); }
+            var ed = this.diff.getModifiedEditor(), cls = this.whole === 'deleted' ? 'agent-line-removed' : 'agent-line-added';
+            this.wholeDeco = ed.deltaDecorations(this.wholeDeco, !this.whole ? [] : [{
+                range: new monaco.Range(1, 1, this.models.modified.getLineCount(), 1),
+                options: { isWholeLine: true, className: cls, linesDecorationsClassName: cls === 'agent-line-added' ? 'agent-line-gutter' : 'agent-line-gutter--del' }
+            }]);
+            if (this.whole) ed.revealLine(1);
+            this.renderNav();
+        },
+
+        go: function (i) {
+            if (!this.changes.length) return;
+            this.at = (i + this.changes.length) % this.changes.length;
+            var c = this.changes[this.at], ed = this.diff.getModifiedEditor();
+            var line = Math.max(1, c.modifiedEndLineNumber ? c.modifiedStartLineNumber : c.modifiedStartLineNumber + 1);
+            ed.revealLineInCenter(line);
+            ed.setPosition({ lineNumber: line, column: 1 });
+            this.renderNav();
+        },
+
+        renderBar: function () {
+            var self = this, st = this.state, v = st.ev.versions[st.index];
+            var bar = this.el.querySelector('.agent-preview__bar');
+            bar.innerHTML =
+                '<div class="agent-preview__row">' +
+                '<span class="agent-preview__title">' + SVG.agent + ' Agent changes</span>' +
+                '<span class="agent-preview__version">Version ' + st.labels[st.index] + '</span>' +
+                '<span class="agent-preview__nav"><button type="button" data-go="-1" title="Previous change">&uarr;</button>' +
+                '<span class="agent-preview__count"></span>' +
+                '<button type="button" data-go="1" title="Next change">&darr;</button></span>' +
+                '<button type="button" class="agent-ibtn" data-close="1" title="Close (choose, apply or undo in the Agent panel)">&times;</button>' +
+                '</div>' +
+                '<div class="agent-preview__files">' + v.files.map(function (f) {
+                    var tag;
+                    if (f.action === 'delete') tag = '<span class="agent-del">deleted</span>';
+                    else {
+                        var c = lineCounts(WS.get(f.filename) || '', f.content || '');
+                        tag = (WS.get(f.filename) === null ? '<span class="agent-add">new</span> ' : '') +
+                            '<span class="agent-add">+' + c.added + '</span> <span class="agent-del">-' + c.removed + '</span>';
+                    }
+                    return '<button type="button" data-file="' + esc(f.filename) + '" class="agent-preview__file' +
+                        (f.filename === st.file ? ' is-active' : '') + '">' + SVG.file + '<span>' + esc(f.filename) + '</span>' + tag + '</button>';
+                }).join('') + '</div>';
+            bar.querySelectorAll('[data-file]').forEach(function (b) { b.onclick = function () { st.onSelect(st.index, b.dataset.file); }; });
+            bar.querySelectorAll('[data-go]').forEach(function (b) { b.onclick = function () { self.go(self.at + +b.dataset.go); }; });
+            bar.querySelector('[data-close]').onclick = function () { self.hide(); };
+            this.renderNav();
+        },
+        renderNav: function () {
+            if (!this.el) return;
+            var n = this.changes.length, count = this.el.querySelector('.agent-preview__count');
+            if (count) count.textContent = this.whole === 'new' ? 'New file' : this.whole === 'deleted' ? 'File deleted'
+                : n ? 'Change ' + (this.at + 1 > 0 ? this.at + 1 : 1) + ' of ' + n : 'No changes';
+            this.el.querySelectorAll('[data-go]').forEach(function (b) { b.disabled = n < 2; });
+        }
+    };
 
     var Agent = {
         monaco: null,
@@ -210,7 +565,13 @@
                     self.syncBadges();
                     self.renderReview();
                 }
-                if (ev.type === 'open') self.refreshDecorations();
+                if (ev.type === 'open') {
+                    self.refreshDecorations();
+                    if (Preview.isOpen()) {
+                        if (Preview.hasFile(ev.name) && self.versionsShow) self.versionsShow(Preview.state.index, ev.name);
+                        else Preview.hide();
+                    }
+                }
             });
         },
 
@@ -353,7 +714,7 @@
                 '      <textarea id="agentInput" rows="1" placeholder="Plan, Build, / for skills, @ for context" aria-label="Message the agent"></textarea>' +
                 '      <div class="agent-composer__row">' +
                 '        <button type="button" class="agent-mode-pill" id="agentModeBtn" aria-haspopup="listbox"></button>' +
-                '        <span class="agent-model" title="Model used by the agent">gpt-4.1-mini</span>' +
+                '        <span class="agent-model" title="Model used by the agent">gpt-6-luna</span>' +
                 '        <button type="button" class="agent-send" id="agentSendBtn" title="Send (Enter)" aria-label="Send">' + SVG.send + '</button>' +
                 '      </div>' +
                 '    </div>' +
@@ -639,6 +1000,7 @@
             if (!text || this.busy) return;
             if (this.editor.getOption(this.monaco.editor.EditorOption.readOnly)) return;
             var chat = this.chat(), mode = this.mode, self = this;
+            if (this.expireVersions) this.expireVersions();
             if (!override) { this.els.input.value = ''; this.autosize(); }
             this.closePopup();
             this.addUser(text);
@@ -667,6 +1029,7 @@
 
             var turn = this.newTurn();
             var textEl = null, blockText = '', answer = '', turnId = '', failed = false;
+            var proposed = [], gotVersions = false, preparing = null, appliedDescription = '';
             var thinking = this.addStep(turn, '<span class="agent-spinner"></span>', '<span class="agent-shimmer">Thinking</span>', 'agent-step--thinking');
             this.setBusy(true);
             this.abort = new AbortController();
@@ -690,12 +1053,32 @@
                     if (ev.name === 'list_files') self.addStep(turn, SVG.file, 'Listed files');
                     else if (ev.name === 'read_file') self.addStep(turn, SVG.read, 'Read <span class="agent-file">' + esc(ev.filename) + '</span>');
                 } else if (ev.type === 'file') {
-                    self.applyFileEvent(ev, turnId);
+                    // Not applied yet: the turn ends with two versions to choose from (see showVersions).
+                    proposed.push(ev);
                     var verb = ev.action === 'delete' ? 'Deleted' : ev.action === 'create' ? 'Created' : 'Edited';
-                    var row = self.addStep(turn, SVG.file, verb + ' <button type="button" class="agent-file agent-file--link">' + esc(ev.filename) + '</button>' +
+                    self.addStep(turn, SVG.file, verb + ' <span class="agent-file">' + esc(ev.filename) + '</span>' +
                         (ev.action === 'delete' ? '' : ' <span class="agent-add">+' + ev.added + '</span> <span class="agent-del">-' + ev.removed + '</span>'));
-                    var link = row.querySelector('.agent-file--link');
-                    if (link) link.onclick = function () { WS.open(ev.filename); };
+                } else if (ev.type === 'versions_pending') {
+                    textEl = null;
+                    preparing = self.addStep(turn, '<span class="agent-spinner"></span>', '<span class="agent-shimmer">Preparing two versions</span>', 'agent-step--thinking');
+                } else if (ev.type === 'versions') {
+                    if (preparing) { preparing.remove(); preparing = null; }
+                    gotVersions = true;
+                    if (ev.versions.length === 1) {
+                        // No buggy version: the agent's summary is shown as its reply, as usual.
+                        if (ev.versions[0].description) handle({ type: 'text', delta: ev.versions[0].description });
+                        self.applyFiles(ev.versions[0].files, turnId);
+                    } else {
+                        self.showVersions(turn, ev, turnId, function (v) {
+                            // The chat history (sent back to the agent) keeps the description the student chose.
+                            appliedDescription = v.description || '';
+                            var last = chat.history[chat.history.length - 1];
+                            if (last && last.role === 'assistant' && last.turn_id === turnId) {
+                                last.content = (answer ? answer + '\n\n' : '') + appliedDescription;
+                                self.persist();
+                            }
+                        });
+                    }
                 } else if (ev.type === 'run') {
                     var out = ((ev.output || '') + (ev.error ? '\n' + ev.error : '')).trim();
                     var r = self.addStep(turn, SVG.run,
@@ -733,11 +1116,15 @@
                 else { failed = true; self.addStep(turn, '!', 'Could not reach the agent. Please try again.', 'agent-step--err'); }
             }
             if (thinking) thinking.remove();
+            if (preparing) preparing.remove();
+            // Stopped or failed before the versions arrived: apply what the agent did, as before.
+            if (!gotVersions && proposed.length) this.applyFiles(proposed, turnId);
             this.setBusy(false);
             this.abort = null;
 
             chat.history.push({ role: 'user', content: text });
-            if (answer) chat.history.push({ role: 'assistant', content: answer });
+            var reply = (answer && appliedDescription ? answer + '\n\n' : answer) + appliedDescription;
+            if (reply || gotVersions) chat.history.push({ role: 'assistant', content: reply, turn_id: turnId });
             this.persist();
             log('agent_response_received', { mode: mode, turn_id: turnId, length: answer.length, failed: failed });
 
@@ -758,6 +1145,88 @@
         },
 
         // Edits: applied immediately, reviewed with Keep / Undo ------------------
+        applyFiles: function (files, turnId) {
+            var self = this;
+            files.forEach(function (f) { self.applyFileEvent(f, turnId); });
+        },
+
+        // Two versions of the turn's changes (one correct, one with a bug, in random order):
+        // the student reviews both as diffs and applies one.
+        showVersions: function (turn, ev, turnId, onApply) {
+            var self = this, current = 0, labels = ['A', 'B', 'C', 'D'];
+            var box = document.createElement('div');
+            box.className = 'agent-versions';
+            box.innerHTML =
+                '<div class="agent-versions__tabs">' + ev.versions.map(function (v, i) {
+                    return '<button type="button" class="agent-versions__tab" data-v="' + i + '">Version ' + labels[i] + '</button>';
+                }).join('') + '</div>' +
+                '<div class="agent-versions__body"></div>' +
+                '<div class="agent-versions__foot"><span class="agent-versions__note">Two versions: review each, then apply one or undo.</span>' +
+                '<button type="button" class="agent-btn agent-versions__undo">Undo</button>' +
+                '<button type="button" class="agent-btn agent-btn--primary agent-versions__apply"></button></div>';
+            var body = box.querySelector('.agent-versions__body'), apply = box.querySelector('.agent-versions__apply');
+            function show(i, file) {
+                var changedVersion = i !== current || !body.innerHTML;
+                current = i;
+                var v = ev.versions[i];
+                box.querySelectorAll('.agent-versions__tab').forEach(function (b) { b.classList.toggle('is-active', +b.dataset.v === i); });
+                body.innerHTML = (v.description ? '<div class="agent-text agent-versions__desc">' + renderMarkdown(v.description) + '</div>' : '') +
+                    v.files.map(function (f) {
+                        var tag = f.action === 'delete' ? '<span class="agent-del">deleted</span>' : (function () {
+                            var c = lineCounts(WS.get(f.filename) || '', f.content || '');
+                            return (WS.get(f.filename) === null ? '<span class="agent-add">new</span> ' : '') +
+                                '<span class="agent-add">+' + c.added + '</span> <span class="agent-del">-' + c.removed + '</span>';
+                        })();
+                        return '<button type="button" class="agent-versions__file" data-file="' + esc(f.filename) + '">' + SVG.file +
+                            '<span>' + esc(f.filename) + '</span>' + tag + '</button>';
+                    }).join('');
+                body.querySelectorAll('[data-file]').forEach(function (b) { b.onclick = function () { show(current, b.dataset.file); }; });
+                apply.textContent = 'Apply Version ' + labels[i];
+                if (changedVersion) {
+                    log('agent_version_viewed', { pair_id: ev.pair_id, option_id: v.oid, label: labels[i] });
+                    pairEvent(ev.pair_id, v.oid, 'shown');
+                }
+                Preview.show({ ev: ev, index: i, file: file, labels: labels, onSelect: show });
+                if (Preview.state) log('agent_version_file_viewed', { pair_id: ev.pair_id, option_id: v.oid, label: labels[i], filename: Preview.state.file });
+            }
+            function applyCurrent() {
+                var v = ev.versions[current];
+                Preview.hide();
+                self.applyFiles(v.files, turnId);
+                if (onApply) onApply(v);
+                log('agent_version_applied', { pair_id: ev.pair_id, option_id: v.oid, label: labels[current] });
+                pairEvent(ev.pair_id, v.oid, 'accepted');
+                self.expireVersions = null;
+                box.outerHTML = '<div class="agent-step"><span class="agent-step__icon">' + SVG.file + '</span>' +
+                    '<span class="agent-step__text">Applied Version ' + labels[current] + '</span></div>';
+            }
+            function undo() {
+                // Neither version is applied: the files stay as they were.
+                Preview.hide();
+                log('agent_versions_undone', { pair_id: ev.pair_id, label_viewed: labels[current] });
+                ev.versions.forEach(function (v) { pairEvent(ev.pair_id, v.oid, 'rejected'); });
+                self.expireVersions = null;
+                box.outerHTML = '<div class="agent-step"><span class="agent-step__icon">' + SVG.stop + '</span>' +
+                    '<span class="agent-step__text">Undid the changes (no version applied)</span></div>';
+            }
+            box.querySelectorAll('.agent-versions__tab').forEach(function (b) {
+                b.onclick = function () { show(+b.dataset.v, +b.dataset.v === current && Preview.state ? Preview.state.file : undefined); };
+            });
+            box.querySelector('.agent-versions__undo').onclick = undo;
+            apply.onclick = applyCurrent;
+            this.expireVersions = function () {
+                self.expireVersions = null;
+                Preview.hide();
+                log('agent_versions_skipped', { pair_id: ev.pair_id });
+                box.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+                box.querySelector('.agent-versions__foot').innerHTML = '<span class="agent-versions__note">Not applied (a new message was sent).</span>';
+            };
+            this.versionsShow = show;
+            turn.appendChild(box);
+            show(0);
+            this.scroll();
+        },
+
         applyFileEvent: function (ev, turnId) {
             var name = ev.filename;
             if (!(name in this.pending)) this.pending[name] = { baseline: WS.get(name), turn_id: turnId };
@@ -900,6 +1369,39 @@
         '.agent-step details summary{cursor:pointer;list-style:none;}',
         '.agent-step details summary::-webkit-details-marker{display:none;}',
         '.agent-step--err{color:#f48771;}',
+        '.agent-versions{border:1px solid #3c3c3c;border-radius:8px;background:#1e1e1e;margin:6px 0;overflow:hidden;}',
+        '.agent-versions__tabs{display:flex;gap:4px;padding:6px 8px 0;}',
+        '.agent-versions__tab{background:transparent;border:1px solid transparent;border-bottom:none;border-radius:6px 6px 0 0;color:#9d9d9d;font:600 var(--fs-sm)/1 var(--ui-font);padding:7px 12px;cursor:pointer;}',
+        '.agent-versions__tab:hover{color:#e0e0e0;}',
+        '.agent-versions__tab.is-active{background:#252526;border-color:#3c3c3c;color:#ffffff;}',
+        '.agent-versions__tab:disabled{cursor:default;}',
+        '.agent-versions__body{background:#252526;border-top:1px solid #3c3c3c;max-height:420px;overflow:auto;}',
+        '.agent-versions__desc{padding:8px 10px;border-bottom:1px solid #3c3c3c;}',
+        '.agent-versions__file{display:flex;align-items:center;gap:6px;width:100%;padding:6px 10px;border:0;background:transparent;color:#cccccc;font:var(--fs-sm)/1.3 var(--ui-font);cursor:pointer;text-align:left;}',
+        '.agent-versions__file:hover{background:#2a2d2e;}',
+        '.agent-versions__file svg,.agent-preview__file svg{width:14px;height:14px;flex-shrink:0;}',
+        '.agent-versions__foot{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;align-items:center;}',
+        '.agent-versions__foot .agent-versions__note{flex:1 0 100%;}',
+        '.agent-versions__foot button{white-space:nowrap;}',
+        '.agent-preview__version{font:var(--fw-medium) var(--fs-sm)/1 var(--ui-font);color:#fff;background:#04395e;border-radius:4px;padding:4px 8px;}',
+        '.agent-preview{position:absolute;inset:0;z-index:30;display:flex;flex-direction:column;background:#1e1e1e;}',
+        '.agent-preview[hidden]{display:none;}',
+        '.agent-preview__bar{flex-shrink:0;background:#252526;border-bottom:1px solid #3c3c3c;}',
+        '.agent-preview__row{display:flex;align-items:center;gap:8px;padding:5px 8px;flex-wrap:wrap;}',
+        '.agent-preview__title{display:inline-flex;align-items:center;gap:6px;font:var(--fw-medium) var(--fs-sm)/1 var(--ui-font);color:var(--ui-text-strong);margin-right:4px;}',
+        '.agent-preview__title svg{width:14px;height:14px;}',
+        '.agent-preview__nav{display:inline-flex;align-items:center;gap:4px;margin-left:auto;color:var(--ui-text-muted);font:var(--fs-sm)/1 var(--ui-font);}',
+        '.agent-preview__nav button{width:24px;height:24px;border:0;border-radius:4px;background:transparent;color:#cccccc;cursor:pointer;}',
+        '.agent-preview__nav button:hover:not(:disabled){background:#2a2d2e;}',
+        '.agent-preview__nav button:disabled{opacity:.35;cursor:default;}',
+        '.agent-preview__files{display:flex;gap:2px;padding:0 8px;overflow-x:auto;}',
+        '.agent-preview__file{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:0;border-bottom:2px solid transparent;background:transparent;color:#a0a0a0;font:var(--fs-sm)/1 var(--ui-font);cursor:pointer;white-space:nowrap;}',
+        '.agent-preview__file:hover{color:#e7e7e7;}',
+        '.agent-preview__file.is-active{color:#fff;border-bottom-color:#0078d4;}',
+        '.agent-preview__diff{flex:1;min-height:0;}',
+        '.agent-versions__file svg{width:13px;height:13px;flex-shrink:0;}',
+        '.agent-versions__foot{display:flex;justify-content:flex-end;padding:8px 10px;border-top:1px solid #2b2b2b;}',
+        '.agent-versions__note{font:var(--fs-sm)/1.4 var(--ui-font);color:#8b8b8b;}',
         '.agent-step--muted{color:#6f6f6f;}',
         '.agent-file{color:#cccccc;font-family:var(--font-code-mono);font-size:12px;}',
         '.agent-file--link{background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-decoration-color:#555;text-underline-offset:2px;}',
@@ -955,7 +1457,9 @@
         '.agent-skill-new input:focus,.agent-skill-new textarea:focus{border-color:#0078d4;}',
         '.agent-skill-new__row{display:flex;justify-content:flex-end;gap:6px;}',
         '.agent-line-added{background:rgba(137,209,133,.10);transition:background-color var(--dur-slow);}',
-        '.agent-line-gutter{background:#89d185;width:3px!important;margin-left:3px;}'
+        '.agent-line-gutter{background:#89d185;width:3px!important;margin-left:3px;}',
+        '.agent-line-removed{background:rgba(244,135,113,.14);}',
+        '.agent-line-gutter--del{background:#f48771;width:3px!important;margin-left:3px;}'
     ].join('\n');
 
     window.AIModes = {
@@ -966,7 +1470,7 @@
             var historyTab = document.getElementById('problemTabAiHistory');
             if (historyTab) historyTab.style.display = 'none'; // legacy interpretation history is retired
 
-            if (condition === CONDITION.SUGGESTION) {
+            if (condition === CONDITION.SUGGESTION || condition === CONDITION.MULTILINE_SUGGESTION) {
                 initGhostText(monaco, editor);
             } else if (condition === CONDITION.AGENT) {
                 var style = document.createElement('style');

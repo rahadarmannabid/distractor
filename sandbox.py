@@ -1,4 +1,4 @@
-"""Guarded execution of student code (Python, C) with live output and interactive stdin.
+"""Guarded execution of student code (Python, C, C++, Java, JavaScript) with live output and interactive stdin.
 
 Guardrails (all configurable via env, see LIMITS below):
 - Server-wide cap on concurrent runs, with a short queue; extra runs get a "server busy" message.
@@ -7,7 +7,8 @@ Guardrails (all configurable via env, see LIMITS below):
 - Output cap: the program is stopped once it prints too much.
 - Each run gets a private temp directory that is deleted afterwards; filenames are sanitized.
 - Python runs behind an audit hook that blocks subprocesses, network access, ctypes and file
-  access outside the run directory. When the process runs as root (the runner container), each
+  access outside the run directory. JavaScript runs under Node's permission model: it may only
+  read its own directory, and cannot write files or start processes, workers or native addons. When the process runs as root (the runner container), each
   program additionally runs as an unprivileged SANDBOX_UID with a process-count limit.
 
 This module is used directly by main.py in local development, and by runner.py (a separate
@@ -66,7 +67,11 @@ LANG_EXT = {
     "c": (".c", ".h"),
     "cpp": (".cpp", ".cc", ".cxx", ".hpp", ".h"),
     "java": (".java",),
+    "javascript": (".js",),
 }
+# Like the JVM, V8 reserves far more address space than it uses, so Node gets a heap cap instead of
+# RLIMIT_AS. Node 20-22 spell the permission flag --experimental-permission.
+NODE_BIN = os.getenv("NODE_BIN") or shutil.which("node") or "node"
 # The JVM reserves far more address space than it uses, so Java gets a heap cap instead of RLIMIT_AS.
 _JAVA_OPTS = ["-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1", "-XX:CICompilerCount=1", "-Xss8m",
               "-XX:MaxMetaspaceSize=128m", "-Dfile.encoding=UTF-8", "-Dstdout.encoding=UTF-8"]
@@ -195,6 +200,8 @@ def clean_files(language: str, files: List[Dict[str, str]], entry: Optional[str]
         entry = next((n for n in names if n.endswith(LANG_EXT[language][0])), names[0])
     if language == "python" and not entry.endswith(".py"):
         raise RunRejected("The file to run must be a .py file.")
+    if language == "javascript" and not entry.endswith(".js"):
+        raise RunRejected("The file to run must be a .js file.")
     if language == "java":
         java = [f for f in out if f["filename"].endswith(".java")]
         if not entry.endswith(".java") or not _JAVA_MAIN_RE.search(next(f["content"] for f in out if f["filename"] == entry)):
@@ -432,6 +439,12 @@ async def run_code(
             argv = [sys.executable, "-I", "-u", "-X", "utf8", boot, work, entry]
             await emit({"type": "status", "phase": "running"})
             result = await run.execute(argv, work, memory_mb=LIMITS["memory_mb"], cpu=LIMITS["cpu_seconds"],
+                                       wall=wall, interactive=stdin is not None)
+        elif language == "javascript":
+            argv = [NODE_BIN, "--no-warnings", "--experimental-permission", f"--allow-fs-read={os.path.realpath(work)}",
+                    f"--max-old-space-size={LIMITS['memory_mb']}", "--stack-size=4000", entry]
+            await emit({"type": "status", "phase": "running"})
+            result = await run.execute(argv, work, memory_mb=0, cpu=LIMITS["cpu_seconds"],
                                        wall=wall, interactive=stdin is not None)
         elif language == "java":
             await emit({"type": "status", "phase": "compiling"})

@@ -223,64 +223,6 @@
         });
     }
 
-    function runJavaScript(code) {
-        return new Promise(function (resolve) {
-            var result = { status: 'error', output: '', error: '', exit_code: null, reason: '', stdin_lines: 0 };
-            var src = [
-                'const fmt = (a) => a.map((x) => { if (typeof x === "string") return x; try { return JSON.stringify(x); } catch (e) { return String(x); } }).join(" ");',
-                'console.log = console.info = console.debug = (...a) => postMessage({ type: "output", stream: "stdout", data: fmt(a) + "\\n" });',
-                'console.warn = console.error = (...a) => postMessage({ type: "output", stream: "stderr", data: fmt(a) + "\\n" });',
-                'self.prompt = () => { throw new Error("Reading input is not supported for JavaScript in this IDE."); };',
-                'self.onmessage = async (e) => {',
-                '  try { await (new Function("return (async () => {\\n" + e.data + "\\n})()"))(); postMessage({ type: "exit", ok: true }); }',
-                '  catch (err) { postMessage({ type: "output", stream: "stderr", data: String(err) + "\\n" }); postMessage({ type: "exit", ok: false }); }',
-                '};'
-            ].join('\n');
-            var url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
-            var worker = new Worker(url);
-            var printed = 0, done = false;
-            function finish(reason, message, ok) {
-                if (done) return;
-                done = true;
-                clearTimeout(timer);
-                worker.terminate();
-                URL.revokeObjectURL(url);
-                result.reason = reason || '';
-                result.status = ok ? 'success' : 'error';
-                result.exit_code = ok ? 0 : 1;
-                term.open = null;
-                if (message) term.write(message + '\n', 'term-warning');
-                resolve(result);
-            }
-            running = { stop: function () { finish('stopped', 'Stopped.', false); } };
-            term.onProgramLine = function () {};
-            term.onProgramEof = function () {};
-            term.onProgramStop = function () { running.stop(); };
-            term.setMode('program');
-            var timer = setTimeout(function () {
-                finish('timeout', 'Stopped: the program ran longer than ' + (JS_TIMEOUT_MS / 1000) + ' seconds (infinite loop?).', false);
-            }, JS_TIMEOUT_MS);
-            worker.onmessage = function (e) {
-                var ev = e.data;
-                if (ev.type === 'output') {
-                    printed += ev.data.length;
-                    if (printed > JS_OUTPUT_LIMIT) { finish('output_limit', 'Stopped: the program printed too much output.', false); return; }
-                    term.write(ev.data, ev.stream === 'stderr' ? 'term-stderr' : '');
-                    if (ev.stream === 'stderr') { if (result.error.length < 2000) result.error += ev.data; }
-                    else if (result.output.length < 2000) result.output += ev.data;
-                } else if (ev.type === 'exit') {
-                    finish('', '', ev.ok);
-                }
-            };
-            worker.onerror = function (e) {
-                e.preventDefault();
-                term.write(String(e.message || 'Error') + '\n', 'term-stderr');
-                finish('', '', false);
-            };
-            worker.postMessage(code);
-        });
-    }
-
     // ── Shell ───────────────────────────────────────────────────────────
     function tokenize(line) {
         var out = [], re = /"([^"]*)"|'([^']*)'|(\S+)/g, m;
@@ -490,7 +432,7 @@
             currentSession.compilerClickCount = (currentSession.compilerClickCount || 0) + 1;
             var res;
             try {
-                res = language === 'javascript' ? await runJavaScript(WS.get(entry)) : await runOnServer(language, entry, compileOnly);
+                res = await runOnServer(language, entry, compileOnly);
             } catch (err) {
                 res = { status: 'error', output: '', error: String(err && err.message || err), exit_code: null, reason: '', stdin_lines: 0 };
                 term.write('Execution failed: ' + res.error + '\n', 'term-stderr');

@@ -125,6 +125,7 @@
     .condition-1 { background: rgba(0, 114, 178, 0.22); color: #7EC8F5; }
     .condition-2 { background: rgba(230, 159, 0, 0.22); color: #F5C96A; }
     .condition-3 { background: rgba(0, 158, 115, 0.22); color: #5EE0B8; }
+    .condition-4 { background: rgba(204, 121, 167, 0.22); color: #EBA8CF; }
 
     .chart-grid {
       display: grid;
@@ -644,6 +645,35 @@
         </div>
       </div>
 
+      <div class="table-card" id="bug-stats-card" style="margin-bottom:14px;">
+        <div class="table-card-head">
+          <div>
+            <h3>Bugs (correct vs buggy suggestions)</h3>
+            <p>Every AI suggestion and agent change is shown as two options in random order: one correct, one with a single bug of a selected type. <strong>Accepted buggy</strong> / <strong>Accepted correct</strong> count which option the student took; <strong>Classifier agrees</strong> counts pairs whose planted bug the classifier labelled with the same category.</p>
+          </div>
+          <div><span class="cell-muted" id="bug-stats-total"></span></div>
+        </div>
+        <div class="table-card-body">
+          <div class="data-table-wrap">
+            <table class="data-table" id="bug-stats-table">
+              <thead>
+                <tr>
+                  <th>Bug type</th>
+                  <th>Generated</th>
+                  <th>Shown</th>
+                  <th>Accepted buggy</th>
+                  <th>Accepted correct</th>
+                  <th>Buggy rate</th>
+                  <th>Classifier agrees</th>
+                  <th>By condition (generated · buggy / correct)</th>
+                </tr>
+              </thead>
+              <tbody id="bug-stats-tbody"><tr><td colspan="8" class="cell-muted">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
       <div class="table-card" id="student-sessions-card" style="display:none;">
         <div class="table-card-head">
           <div>
@@ -708,6 +738,41 @@
   (function() {
     const boot = JSON.parse(document.getElementById('analytics-bootstrap').textContent);
     const quizId = boot.quiz_id;
+
+    // Bugs card: counts per bug type from /bug-stats (independent of the aggregate above).
+    (function loadBugStats() {
+      const tbody = document.getElementById('bug-stats-tbody');
+      if (!tbody) return;
+      const h = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+      const pct = (a, b) => (b ? Math.round((100 * a) / b) + '%' : '–');
+      fetch('/instructor/quiz/' + encodeURIComponent(quizId) + '/bug-stats', { credentials: 'same-origin', cache: 'no-store' })
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.error) throw new Error(d.error);
+          const t = d.totals || {};
+          const taken = (t.accepted_buggy || 0) + (t.accepted_correct || 0);
+          document.getElementById('bug-stats-total').textContent =
+            `${t.generated || 0} pairs · ${taken} accepted · ${pct(t.accepted_buggy || 0, taken)} buggy`;
+          const rows = d.types || [];
+          if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="8" class="cell-muted">No bug types selected for this quiz.</td></tr>';
+            return;
+          }
+          tbody.innerHTML = rows.map((r) => {
+            const acc = r.accepted_buggy + r.accepted_correct;
+            const conds = Object.keys(r.by_condition || {}).sort().map((c) => {
+              const x = r.by_condition[c];
+              return `<span class="condition-badge condition-${h(c)}">C${h(c)}</span> ${x.generated} · ${x.accepted_buggy} / ${x.accepted_correct}`;
+            }).join('<br>') || '<span class="cell-muted">–</span>';
+            return `<tr><td><strong>${h(r.name)}</strong><br><span class="cell-muted">${h(r.category)}</span></td>` +
+              `<td>${r.generated}</td><td>${r.shown}</td><td>${r.accepted_buggy}</td><td>${r.accepted_correct}</td>` +
+              `<td>${pct(r.accepted_buggy, acc)}</td><td>${pct(r.classifier_agrees, r.generated)}</td><td>${conds}</td></tr>`;
+          }).join('');
+        })
+        .catch((e) => {
+          tbody.innerHTML = `<tr><td colspan="8" class="cell-muted">Could not load bug counts: ${h(e.message)}</td></tr>`;
+        });
+    })();
     const defaultLabels = boot.problem_labels || ['Problem 1'];
 
     const THEME = {

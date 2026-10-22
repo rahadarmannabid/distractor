@@ -1361,13 +1361,13 @@ def _resolved_participant_user_id(meta_user: Any, session_id: str) -> str:
 
 
 def _grouped_condition_order_for_charts(all_conds: List[str]) -> List[str]:
-    """Order conditions for grouped charts. Numeric RCT arms 1/2/3 always reserve three slots."""
+    """Order conditions for grouped charts. Numeric RCT arms 1-4 always reserve their slots."""
     if not all_conds:
         return []
     obs_set = set(all_conds)
     non_unknown = {c for c in obs_set if c != "unknown"}
-    if non_unknown and non_unknown.issubset({"1", "2", "3"}):
-        out = ["1", "2", "3"]
+    if non_unknown and non_unknown.issubset({"1", "2", "3", "4"}):
+        out = ["1", "2", "3", "4"] if "4" in non_unknown else ["1", "2", "3"]
         if "unknown" in obs_set:
             out.append("unknown")
         return out
@@ -1726,7 +1726,7 @@ def _checkpoint_session_to_user_data(checkpoint: Dict[str, Any]) -> Optional[Dic
 
 
 def collect_quiz_sessions_from_firebase(db, quiz_id: str) -> List[Dict[str, Any]]:
-    """Load user payloads from condition_1..3 / quiz_{prefix} / * and mirror sessions/final_submit.
+    """Load user payloads from condition_1..4 / quiz_{prefix} / * and mirror sessions/final_submit.
 
     Also picks up incomplete sessions from sessions/{id}/checkpoint when no
     final_submit exists, so abandoned/in-progress students appear in analytics.
@@ -1745,7 +1745,7 @@ def collect_quiz_sessions_from_firebase(db, quiz_id: str) -> List[Dict[str, Any]
             seen_ids.add(sid)
         out.append(payload)
 
-    for cond in (1, 2, 3):
+    for cond in (1, 2, 3, 4):
         ref = db.reference(f"condition_{cond}/{prefix}")
         snap = ref.get()
         if not snap:
@@ -1822,7 +1822,7 @@ def delete_user_data_for_quiz(db, quiz_id: str, user_id: str) -> Dict[str, Any]:
     """Delete Firebase session payloads for one user on this quiz so analytics re-aggregate excludes them.
 
     Removes:
-    - ``condition_{1,2,3}/quiz_{quiz_id[:8]}/{user_id}`` (always attempted; RTDB delete is idempotent)
+    - ``condition_{1,2,3,4}/quiz_{quiz_id[:8]}/{user_id}`` (always attempted; RTDB delete is idempotent)
     - ``sessions/{session_id}`` when session id matches ``{user_id}_quiz_{quiz_id[:8]}_*``, or when
       ``sessions/.../final_submit`` mirrors this user + quiz (covers legacy / odd session ids)
     """
@@ -1833,7 +1833,7 @@ def delete_user_data_for_quiz(db, quiz_id: str, user_id: str) -> Dict[str, Any]:
     prefix = f"quiz_{q[:8]}"
     deleted_paths: List[str] = []
 
-    for cond in (1, 2, 3):
+    for cond in (1, 2, 3, 4):
         path = f"condition_{cond}/{prefix}/{uid}"
         ref = db.reference(path)
         try:
@@ -2242,3 +2242,62 @@ def export_activity_log_csv(
                 )
 
     return buf.getvalue()
+
+
+# ─── Correct / buggy pairs (bug_injections/{session_id}/{pair_id}, written by main.py) ───
+
+def _pair_outcome(rec: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """(shown, accepted variant or None) for one pair record, from its events."""
+    variants = {o.get("oid"): o.get("variant") for o in _firebase_to_list(rec.get("options")) if isinstance(o, dict)}
+    events = rec.get("events")
+    events = list(events.values()) if isinstance(events, dict) else _firebase_to_list(events)
+    shown, accepted = False, None
+    for ev in sorted((e for e in events if isinstance(e, dict)), key=lambda e: str(e.get("at") or "")):
+        if ev.get("event") == "shown":
+            shown = True
+        elif ev.get("event") == "accepted" and ev.get("oid") in variants:
+            shown, accepted = True, variants[ev["oid"]]
+    return shown, accepted
+
+
+def bug_pair_stats(db, quiz_id: str, bug_skills: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Per bug type and condition: pairs generated, shown, and whether students accepted the buggy or
+    the correct option. Selected bug types with no pairs yet are listed with zeros."""
+    q = str(quiz_id or "").strip()
+    needle = f"_quiz_{q[:8]}_"
+    keys = db.reference("bug_injections").get(shallow=True) or {}
+    records: List[Dict[str, Any]] = []
+    for sid in keys if isinstance(keys, dict) else []:
+        if needle not in sid:
+            continue
+        for rec in (db.reference(f"bug_injections/{sid}").get() or {}).values():
+            if isinstance(rec, dict) and rec.get("requested_bug") and rec.get("quiz_id", q) == q:
+                records.append(rec)
+
+    def blank(type_id: str, name: str, category: str) -> Dict[str, Any]:
+        return {"id": type_id, "name": name, "category": category, "generated": 0, "shown": 0,
+                "accepted_buggy": 0, "accepted_correct": 0, "classifier_agrees": 0, "by_condition": {}}
+
+    by_type: Dict[str, Dict[str, Any]] = {
+        s["id"]: blank(s["id"], s["name"], s.get("category", "")) for s in bug_skills if s.get("enabled")
+    }
+    for rec in records:
+        req = rec["requested_bug"] if isinstance(rec["requested_bug"], dict) else {}
+        tid = str(req.get("id") or "unknown")
+        row = by_type.setdefault(tid, blank(tid, str(req.get("name") or tid), str(req.get("category") or "")))
+        cond = str(rec.get("condition") or "unknown")
+        cell = row["by_condition"].setdefault(cond, {"generated": 0, "accepted_buggy": 0, "accepted_correct": 0})
+        shown, accepted = _pair_outcome(rec)
+        row["generated"] += 1
+        cell["generated"] += 1
+        row["shown"] += int(shown)
+        if accepted in ("buggy", "correct"):
+            row[f"accepted_{accepted}"] += 1
+            cell[f"accepted_{accepted}"] += 1
+        cls = rec.get("classification") if isinstance(rec.get("classification"), dict) else {}
+        row["classifier_agrees"] += int(cls.get("category") == tid)
+
+    rows = sorted(by_type.values(), key=lambda r: (-r["generated"], r["name"].lower()))
+    totals = {k: sum(r[k] for r in rows) for k in ("generated", "shown", "accepted_buggy", "accepted_correct")}
+    conditions = sorted({c for r in rows for c in r["by_condition"]})
+    return sanitize_for_json({"types": rows, "totals": totals, "conditions": conditions})
