@@ -47,6 +47,11 @@
       border-color: rgba(56, 189, 248, 0.35);
     }
     .nav-actions a.nav-export:hover { color: #e0f2fe; border-color: #38bdf8; }
+    a.study-log-dl { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 6px; color: #38bdf8; text-decoration: none; font-size: 0.72rem; word-break: break-all; }
+    a.study-log-dl svg { flex-shrink: 0; }
+    a.study-log-dl:hover { color: #e0f2fe; border-color: #38bdf8; background: rgba(56, 189, 248, 0.08); }
+    a.study-log-dl--all { font-size: 0.8rem; padding: 6px 12px; font-weight: 600; white-space: nowrap; }
     .nav-actions button.nav-refresh {
       background: transparent;
       color: var(--muted);
@@ -536,7 +541,6 @@
       {% if firebase_available %}
       <button type="button" class="nav-refresh" id="analytics-refresh-btn" title="Reload submission aggregates from Firebase (bypasses server cache)">Refresh data</button>
       <a class="nav-export" href="/instructor/quiz/{{ quiz_id }}/analytics-export?fmt=csv">Download sessions (CSV)</a>
-      <a class="nav-export" href="/instructor/quiz/{{ quiz_id }}/analytics-export?fmt=json">Download full (JSON)</a>
       {% endif %}
       <a href="/instructor/dashboard">Dashboard</a>
     </div>
@@ -645,11 +649,57 @@
         </div>
       </div>
 
+      <div class="table-card" id="study-log-card" style="margin-bottom:14px;">
+        <div class="table-card-head">
+          <div>
+            <h3>Study logs (CSV per condition)</h3>
+            <p>One row per condition selected for this quiz; each file holds every participant of that condition, and <strong>Download all logs</strong> puts every row of every condition in one table (with a <em>log_type</em> column). Rows come from the browser log (sent when a participant moves to the next step) and, for anything it did not log (earlier sessions, options never shown), from the server's suggestion records and stored sessions; the <em>source</em> column says which. Click a user id below for one participant's log and timeline.</p>
+          </div>
+          {% if study_all %}
+          <div>
+            <a class="study-log-dl study-log-dl--all" href="{{ study_all.url }}" download="{{ study_all.filename }}" title="Every log row of this quiz in one CSV: all conditions, interactions, compilations and survey answers">
+              <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M7.4 1.5h1.2v7.6l2.6-2.6.85.85L8 11.4 3.95 7.35l.85-.85 2.6 2.6V1.5zM2.5 12.6h11v1.2h-11z"/></svg>
+              <span>Download all logs (one CSV)</span>
+            </a>
+          </div>
+          {% endif %}
+        </div>
+        <div class="table-card-body">
+          <div class="data-table-wrap">
+            <table class="data-table" id="study-log-table">
+              <thead>
+                <tr><th>Condition</th><th>Interaction log</th><th>Compilation log</th><th>Code submissions</th><th>Survey answers</th></tr>
+              </thead>
+              <tbody>
+                {% for cond in study_downloads or [] %}
+                <tr>
+                  <td><span class="condition-badge condition-{{ cond.condition }}">C{{ cond.condition }}</span> {{ cond.name }}</td>
+                  {% for kind in ['interaction', 'compilation', 'submissions', 'surveys'] %}
+                  {% set f = (cond.files | selectattr('table', 'in', ['suggestions', 'responses', 'autocomplete', 'agent']) | list | first) if kind == 'interaction' else (cond.files | selectattr('table', 'equalto', kind) | list | first) %}
+                  <td>
+                    {% if f %}
+                    <a class="study-log-dl" href="{{ f.url }}" download="{{ f.filename }}" title="Download {{ f.title }} (CSV)">
+                      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M7.4 1.5h1.2v7.6l2.6-2.6.85.85L8 11.4 3.95 7.35l.85-.85 2.6 2.6V1.5zM2.5 12.6h11v1.2h-11z"/></svg>
+                      <span>{{ f.filename }}</span>
+                    </a>
+                    {% else %}<span class="cell-muted">—</span>{% endif %}
+                  </td>
+                  {% endfor %}
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="cell-muted">No conditions selected for this quiz.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
       <div class="table-card" id="bug-stats-card" style="margin-bottom:14px;">
         <div class="table-card-head">
           <div>
             <h3>Bugs (correct vs buggy suggestions)</h3>
-            <p>Every AI suggestion and agent change is shown as two options in random order: one correct, one with a single bug of a selected type. <strong>Accepted buggy</strong> / <strong>Accepted correct</strong> count which option the student took; <strong>Classifier agrees</strong> counts pairs whose planted bug the classifier labelled with the same category.</p>
+            <p>Every AI suggestion and agent change is shown as options in random order: one correct, and one or more buggy ones (the quiz's <em>buggy options per suggestion</em>), each of a different bug type. <strong>Count</strong> is the number of buggy options generated with that bug type and <strong>Percentage</strong> its share of all generated buggy options. <strong>Accepted bug</strong> counts the times students accepted that buggy option (out of the times it was shown). <strong>By condition</strong> gives the count, its share within that condition, and how many were accepted.</p>
           </div>
           <div><span class="cell-muted" id="bug-stats-total"></span></div>
         </div>
@@ -659,16 +709,13 @@
               <thead>
                 <tr>
                   <th>Bug type</th>
-                  <th>Generated</th>
-                  <th>Shown</th>
-                  <th>Accepted buggy</th>
-                  <th>Accepted correct</th>
-                  <th>Buggy rate</th>
-                  <th>Classifier agrees</th>
-                  <th>By condition (generated · buggy / correct)</th>
+                  <th>Count</th>
+                  <th>Percentage</th>
+                  <th>Accepted bug</th>
+                  <th>By condition (count · share · accepted)</th>
                 </tr>
               </thead>
-              <tbody id="bug-stats-tbody"><tr><td colspan="8" class="cell-muted">Loading…</td></tr></tbody>
+              <tbody id="bug-stats-tbody"><tr><td colspan="5" class="cell-muted">Loading…</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -749,28 +796,32 @@
         .then((r) => r.json())
         .then((d) => {
           if (d.error) throw new Error(d.error);
-          const t = d.totals || {};
-          const taken = (t.accepted_buggy || 0) + (t.accepted_correct || 0);
+          const rows = (d.types || []).slice().sort((a, b) => b.generated - a.generated);
+          const total = rows.reduce((n, r) => n + (r.generated || 0), 0);
+          const accepted = rows.reduce((n, r) => n + (r.accepted_buggy || 0), 0);
+          // Generated buggy options per condition, for each type's share within its condition.
+          const condTotal = {};
+          rows.forEach((r) => Object.keys(r.by_condition || {}).forEach((c) => {
+            condTotal[c] = (condTotal[c] || 0) + (r.by_condition[c].generated || 0);
+          }));
           document.getElementById('bug-stats-total').textContent =
-            `${t.generated || 0} pairs · ${taken} accepted · ${pct(t.accepted_buggy || 0, taken)} buggy`;
-          const rows = d.types || [];
+            `${total} buggy options generated · ${accepted} accepted`;
           if (!rows.length) {
-            tbody.innerHTML = '<tr><td colspan="8" class="cell-muted">No bug types selected for this quiz.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" class="cell-muted">No bug types selected for this quiz.</td></tr>';
             return;
           }
           tbody.innerHTML = rows.map((r) => {
-            const acc = r.accepted_buggy + r.accepted_correct;
             const conds = Object.keys(r.by_condition || {}).sort().map((c) => {
               const x = r.by_condition[c];
-              return `<span class="condition-badge condition-${h(c)}">C${h(c)}</span> ${x.generated} · ${x.accepted_buggy} / ${x.accepted_correct}`;
+              return `<span class="condition-badge condition-${h(c)}">C${h(c)}</span> ${x.generated} · ${pct(x.generated, condTotal[c])} · ${x.accepted_buggy} accepted`;
             }).join('<br>') || '<span class="cell-muted">–</span>';
             return `<tr><td><strong>${h(r.name)}</strong><br><span class="cell-muted">${h(r.category)}</span></td>` +
-              `<td>${r.generated}</td><td>${r.shown}</td><td>${r.accepted_buggy}</td><td>${r.accepted_correct}</td>` +
-              `<td>${pct(r.accepted_buggy, acc)}</td><td>${pct(r.classifier_agrees, r.generated)}</td><td>${conds}</td></tr>`;
+              `<td>${r.generated}</td><td>${pct(r.generated, total)}</td>` +
+              `<td>${r.accepted_buggy} <span class="cell-muted">of ${r.shown} shown</span></td><td>${conds}</td></tr>`;
           }).join('');
         })
         .catch((e) => {
-          tbody.innerHTML = `<tr><td colspan="8" class="cell-muted">Could not load bug counts: ${h(e.message)}</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="5" class="cell-muted">Could not load bug counts: ${h(e.message)}</td></tr>`;
         });
     })();
     const defaultLabels = boot.problem_labels || ['Problem 1'];

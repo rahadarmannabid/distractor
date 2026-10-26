@@ -344,6 +344,68 @@
             transform: translateX(5px);
         }
 
+        .choice-option input[type="checkbox"] {
+            margin-right: 10px;
+            cursor: pointer;
+            accent-color: #f97316;
+        }
+
+        /* "Other (please specify)": its text box, enabled while the option is chosen */
+        .choice-option .other-input {
+            flex: 1;
+            margin-left: 10px;
+            padding: 6px 10px;
+            background: rgba(30, 30, 30, 0.8);
+            border: 1px solid #404040;
+            border-radius: 6px;
+            color: #d4d4d4;
+            font-size: 14px;
+        }
+
+        .choice-option .other-input:disabled {
+            opacity: 0.5;
+        }
+
+        /* Matrix: one choice per row */
+        .matrix-wrap {
+            overflow-x: auto;
+        }
+
+        .matrix-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            color: #d4d4d4;
+        }
+
+        .matrix-table th,
+        .matrix-table td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #404040;
+            text-align: center;
+        }
+
+        .matrix-table th {
+            font-weight: 600;
+            color: #aaa;
+        }
+
+        .matrix-table th:first-child,
+        .matrix-table td:first-child {
+            text-align: left;
+        }
+
+        .matrix-table tr.row-answered td:first-child {
+            color: #22c55e;
+        }
+
+        .matrix-table input[type="radio"] {
+            cursor: pointer;
+            accent-color: #f97316;
+            width: 16px;
+            height: 16px;
+        }
+
         .button-group {
             display: flex;
             gap: 15px;
@@ -940,6 +1002,10 @@
         // Navigation control flag to prevent warning during legitimate redirects
         let allowNavigation = false;
         
+        // "Other (please specify)": the input value of the option, and the prefix of its answer ("Other: <text>").
+        const OTHER_VALUE = '__other__';
+        const OTHER_PREFIX = 'Other: ';
+
         class SurveyManager {
             constructor() {
                 this.surveyType = new URLSearchParams(window.location.search).get('type');
@@ -1148,9 +1214,28 @@
                     if (!el) continue;
 
                     const qidStr = String(q.id);
-                    if (q.type === 'likert' || q.type === 'likert_7_with_na' || q.type === 'multiple_choice') {
+                    if (q.type === 'multiple_choice' && q.allow_other && String(val).startsWith(OTHER_PREFIX)) {
+                        this.setOtherChoice(el, String(val).slice(OTHER_PREFIX.length));
+                    } else if (q.type === 'likert' || q.type === 'likert_7_with_na' || q.type === 'multiple_choice') {
                         el.querySelectorAll('input[type="radio"]').forEach((radio) => {
                             if (String(radio.name) === qidStr && String(radio.value) === String(val)) radio.checked = true;
+                        });
+                    } else if (q.type === 'checkboxes' && Array.isArray(val)) {
+                        val.forEach((v) => {
+                            if (String(v).startsWith(OTHER_PREFIX)) {
+                                this.setOtherChoice(el, String(v).slice(OTHER_PREFIX.length));
+                                return;
+                            }
+                            el.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+                                if (cb.value === String(v)) cb.checked = true;
+                            });
+                        });
+                    } else if (q.type === 'matrix' && val && typeof val === 'object') {
+                        el.querySelectorAll('input[type="radio"]').forEach((radio) => {
+                            if (val[radio.dataset.row] === radio.value) {
+                                radio.checked = true;
+                                radio.closest('tr').classList.add('row-answered');
+                            }
                         });
                     } else if (q.type === 'slider') {
                         const slider = el.querySelector('input[type="range"]');
@@ -1186,7 +1271,7 @@
                         }
                     }
 
-                    el.classList.add('answered');
+                    el.classList.toggle('answered', this.isComplete(q, val));
                 }
 
                 this.updateProgress();
@@ -1346,6 +1431,10 @@
                     div.appendChild(this.createSlider(question));
                 } else if (question.type === 'multiple_choice') {
                     div.appendChild(this.createMultipleChoice(question));
+                } else if (question.type === 'checkboxes') {
+                    div.appendChild(this.createCheckboxes(question));
+                } else if (question.type === 'matrix') {
+                    div.appendChild(this.createMatrix(question));
                 } else if (question.type === 'open_ended') {
                     div.appendChild(this.createOpenEnded(question));
                 }
@@ -1537,7 +1626,185 @@
                     container.appendChild(optionDiv);
                 });
 
+                if (question.allow_other) {
+                    container.appendChild(this.createOtherOption(question, 'radio', () => this.readMultipleChoice(question, container)));
+                    // Picking a listed option turns the "Other" text box off.
+                    container.addEventListener('change', (e) => {
+                        if (e.target.type === 'radio' && e.target.value !== OTHER_VALUE) {
+                            container.querySelectorAll('.other-input').forEach((t) => { t.disabled = true; });
+                        }
+                    });
+                }
+
                 return container;
+            }
+
+            /** "Other (please specify)" with its text box. Answered as OTHER_PREFIX + the text. */
+            createOtherOption(question, inputType, onChange) {
+                const optionDiv = document.createElement('div');
+                optionDiv.className = 'choice-option other-option';
+
+                const input = document.createElement('input');
+                input.type = inputType;
+                input.name = question.id;
+                input.value = OTHER_VALUE;
+                input.id = `${question.id}_other`;
+
+                const label = document.createElement('label');
+                label.htmlFor = input.id;
+                label.style.flex = '0 0 auto';
+                label.textContent = (question.other_label || 'Other (please specify)') + ':';
+
+                const text = document.createElement('input');
+                text.type = 'text';
+                text.className = 'other-input';
+                text.maxLength = 200;
+                text.placeholder = 'Please specify';
+                text.disabled = true;
+                text.setAttribute('aria-label', question.other_label || 'Other (please specify)');
+
+                input.addEventListener('change', () => {
+                    if (inputType === 'radio') {
+                        optionDiv.parentElement.querySelectorAll('.other-input').forEach((t) => { t.disabled = !input.checked; });
+                    }
+                    text.disabled = !input.checked;
+                    if (input.checked) text.focus();
+                    onChange();
+                });
+                text.addEventListener('input', onChange);
+                optionDiv.addEventListener('click', (e) => {
+                    if (e.target === optionDiv) input.click();
+                });
+
+                optionDiv.appendChild(input);
+                optionDiv.appendChild(label);
+                optionDiv.appendChild(text);
+                return optionDiv;
+            }
+
+            /** Check the "Other" option of a rendered question and fill in its text (rehydration). */
+            setOtherChoice(el, text) {
+                const input = el.querySelector(`input[value="${OTHER_VALUE}"]`);
+                const box = el.querySelector('.other-input');
+                if (!input || !box) return;
+                input.checked = true;
+                box.disabled = false;
+                box.value = text;
+            }
+
+            readMultipleChoice(question, container) {
+                const checked = container.querySelector('input[type="radio"]:checked');
+                if (!checked) return;
+                if (checked.value === OTHER_VALUE) {
+                    this.handleResponse(question.id, OTHER_PREFIX + container.querySelector('.other-input').value);
+                } else {
+                    container.querySelectorAll('.other-input').forEach((t) => { t.disabled = true; });
+                    this.handleResponse(question.id, checked.value);
+                }
+            }
+
+            /** Select all that apply: answered as the list of checked options. */
+            createCheckboxes(question) {
+                const container = document.createElement('div');
+                container.className = 'multiple-choice';
+                const read = () => {
+                    const picked = [];
+                    container.querySelectorAll('input[type="checkbox"]:checked').forEach((cb) => {
+                        picked.push(cb.value === OTHER_VALUE ? OTHER_PREFIX + container.querySelector('.other-input').value : cb.value);
+                    });
+                    if (picked.length) {
+                        this.handleResponse(question.id, picked);
+                    } else {
+                        delete this.responses[question.id];
+                        const el = this.findQuestionElement(question.id);
+                        if (el) el.classList.remove('answered');
+                        this.updateProgress();
+                        this.schedulePersistSurveyDraft();
+                    }
+                };
+
+                (question.options || []).forEach((option, index) => {
+                    const optionDiv = document.createElement('div');
+                    optionDiv.className = 'choice-option';
+
+                    const input = document.createElement('input');
+                    input.type = 'checkbox';
+                    input.name = question.id;
+                    input.value = option;
+                    input.id = `${question.id}_${index}`;
+                    input.addEventListener('change', read);
+
+                    const label = document.createElement('label');
+                    label.htmlFor = input.id;
+                    label.textContent = option;
+
+                    optionDiv.appendChild(input);
+                    optionDiv.appendChild(label);
+                    optionDiv.addEventListener('click', (e) => {
+                        if (e.target === optionDiv) input.click();
+                    });
+                    container.appendChild(optionDiv);
+                });
+
+                if (question.allow_other) {
+                    container.appendChild(this.createOtherOption(question, 'checkbox', read));
+                }
+                return container;
+            }
+
+            /** One choice (question.options) per row (question.rows): answered as {row: option}. */
+            createMatrix(question) {
+                const wrap = document.createElement('div');
+                wrap.className = 'matrix-wrap';
+                const table = document.createElement('table');
+                table.className = 'matrix-table';
+
+                const head = document.createElement('tr');
+                const corner = document.createElement('th');
+                corner.textContent = question.row_header || '';
+                head.appendChild(corner);
+                (question.options || []).forEach((option) => {
+                    const th = document.createElement('th');
+                    th.scope = 'col';
+                    th.textContent = option;
+                    head.appendChild(th);
+                });
+                const thead = document.createElement('thead');
+                thead.appendChild(head);
+                table.appendChild(thead);
+
+                const tbody = document.createElement('tbody');
+                (question.rows || []).forEach((row, ri) => {
+                    const tr = document.createElement('tr');
+                    const th = document.createElement('td');
+                    th.textContent = row;
+                    tr.appendChild(th);
+                    (question.options || []).forEach((option, oi) => {
+                        const td = document.createElement('td');
+                        const input = document.createElement('input');
+                        input.type = 'radio';
+                        input.name = `${question.id}__r${ri}`;
+                        input.value = option;
+                        input.dataset.row = row;
+                        input.setAttribute('aria-label', `${row}: ${option}`);
+                        input.addEventListener('change', () => {
+                            tr.classList.add('row-answered');
+                            const prev = this.responses[question.id];
+                            const answer = prev && typeof prev === 'object' && !Array.isArray(prev) ? { ...prev } : {};
+                            answer[row] = option;
+                            this.handleResponse(question.id, answer);
+                        });
+                        td.appendChild(input);
+                        td.addEventListener('click', (e) => {
+                            if (e.target === td) input.click();
+                        });
+                        tr.appendChild(td);
+                    });
+                    tbody.appendChild(tr);
+                });
+                table.appendChild(tbody);
+                wrap.appendChild(table);
+                return wrap;
             }
 
             createOpenEnded(question) {
@@ -1740,11 +2007,24 @@
                 // Add visual feedback - mark question as answered
                 const questionElement = this.findQuestionElement(questionId);
                 if (questionElement) {
-                    questionElement.classList.add('answered');
+                    const q = (this.surveyConfig.questions || []).find((x) => String(x.id) === String(questionId));
+                    questionElement.classList.toggle('answered', this.isComplete(q, answer));
                 }
                 
                 this.updateProgress();
                 this.schedulePersistSurveyDraft();
+            }
+
+            /** Whether answer `v` fully answers question `q` ("Other" needs its text, a matrix every row). */
+            isComplete(q, v) {
+                if (v === undefined || v === null) return false;
+                const otherOk = (x) => !String(x).startsWith(OTHER_PREFIX) || String(x).slice(OTHER_PREFIX.length).trim() !== '';
+                if (q && q.type === 'matrix') {
+                    return typeof v === 'object' && (q.rows || []).every((row) => v[row] !== undefined && v[row] !== null);
+                }
+                if (Array.isArray(v)) return v.length > 0 && v.every(otherOk);
+                if (typeof v === 'string') return v.trim() !== '' && (!(q && q.allow_other) || otherOk(v));
+                return true;
             }
 
             updateProgress() {
@@ -1752,8 +2032,7 @@
                 const totalQuestions = this.surveyConfig.questions.filter(q => q.type !== 'info_block').length;
                 const answeredQuestions = this.surveyConfig.questions.filter(q => {
                     if (q.type === 'info_block') return false;
-                    const v = this.getAnswerForQuestion(q);
-                    return v !== undefined && v !== null;
+                    return this.isComplete(q, this.getAnswerForQuestion(q));
                 }).length;
                 const progress = totalQuestions ? (answeredQuestions / totalQuestions) * 100 : 0;
 
@@ -1763,10 +2042,7 @@
                 if (submitBtn) {
                     // Only required questions block submission
                     const requiredQuestions = this.surveyConfig.questions.filter(q => q.type !== 'info_block' && q.required !== false);
-                    const answeredRequired = requiredQuestions.filter(q => {
-                        const v = this.getAnswerForQuestion(q);
-                        return v !== undefined && v !== null;
-                    }).length;
+                    const answeredRequired = requiredQuestions.filter(q => this.isComplete(q, this.getAnswerForQuestion(q))).length;
                     submitBtn.disabled = answeredRequired < requiredQuestions.length;
                 }
             }
@@ -1819,12 +2095,7 @@
 
             async submitSurvey() {
                 const requiredQuestions = this.surveyConfig.questions.filter(q => q.required !== false && q.type !== 'info_block');
-                const unansweredRequired = requiredQuestions.filter(q => {
-                    const v = this.getAnswerForQuestion(q);
-                    if (v === undefined || v === null) return true;
-                    if (typeof v === 'string' && !v.trim()) return true;
-                    return false;
-                });
+                const unansweredRequired = requiredQuestions.filter(q => !this.isComplete(q, this.getAnswerForQuestion(q)));
                 
                 if (unansweredRequired.length > 0) {
                     this.showError(`Please answer all required questions (${unansweredRequired.length} remaining).`);
@@ -1873,6 +2144,8 @@
                             required: q.required !== false,
                             scale: q.scale || null,
                             options: q.options || null,
+                            rows: q.rows || null,
+                            allow_other: !!q.allow_other,
                             placeholder: q.placeholder || null,
                             max_length: q.max_length || null
                         })),
@@ -1883,6 +2156,8 @@
                             question_config: {
                                 scale: q.scale,
                                 options: q.options,
+                                rows: q.rows,
+                                allow_other: q.allow_other,
                                 placeholder: q.placeholder,
                                 max_length: q.max_length,
                                 min_length: q.min_length,

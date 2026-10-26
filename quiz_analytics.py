@@ -1455,9 +1455,12 @@ def aggregate_quiz_analytics(
     sessions: List[Dict[str, Any]],
     quiz_id: str,
     problem_labels: List[str],
+    ai_counts: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     sessions: list of user_data dicts from Firebase (session_metadata + activity_log, ...).
+    ai_counts: per session id, AI numbers from the study log (study_log.session_ai_counts) that replace
+    the ones counted from activity events (inline suggestions and the agent do not log those).
     """
     n = len(problem_labels)
     if n < 1:
@@ -1471,6 +1474,8 @@ def aggregate_quiz_analytics(
             continue
         m = derive_session_metrics(ud, quiz_id, n)
         if m is not None:
+            if ai_counts and m.get("session_id") in ai_counts:
+                m.update(ai_counts[m["session_id"]])
             derived.append(m)
             raw_matched.append(ud)
 
@@ -1673,6 +1678,7 @@ def _checkpoint_session_to_user_data(checkpoint: Dict[str, Any]) -> Optional[Dic
         "compiler_clicked": 0,
         "total_problems": sess.get("total_problems", 1),
         "per_problem_submissions": sess.get("per_problem_submissions") or [],
+        "survey_history": sess.get("survey_history") or [],
     }
     if sess.get("quiz_id"):
         session_metadata["quiz_id"] = sess["quiz_id"]
@@ -2246,9 +2252,12 @@ def export_activity_log_csv(
 
 # ─── Correct / buggy pairs (bug_injections/{session_id}/{pair_id}, written by main.py) ───
 
-def _pair_outcome(rec: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
-    """(shown, accepted variant or None) for one pair record, from its events."""
+def _pair_outcome(rec: Dict[str, Any], bug_oid: Optional[str] = None) -> Tuple[bool, Optional[str]]:
+    """(shown, accepted variant or None) for one pair record, from its events. With `bug_oid` (one
+    buggy option of a pair with several), accepting another buggy option counts as "other_buggy"."""
     variants = {o.get("oid"): o.get("variant") for o in _firebase_to_list(rec.get("options")) if isinstance(o, dict)}
+    if bug_oid:
+        variants = {k: ("other_buggy" if v == "buggy" and k != bug_oid else v) for k, v in variants.items()}
     events = rec.get("events")
     events = list(events.values()) if isinstance(events, dict) else _firebase_to_list(events)
     shown, accepted = False, None
@@ -2266,13 +2275,19 @@ def bug_pair_stats(db, quiz_id: str, bug_skills: List[Dict[str, Any]]) -> Dict[s
     q = str(quiz_id or "").strip()
     needle = f"_quiz_{q[:8]}_"
     keys = db.reference("bug_injections").get(shallow=True) or {}
-    records: List[Dict[str, Any]] = []
+    # (pair record, one planted bug, that bug's option id or None for the older one-bug records)
+    records: List[Tuple[Dict[str, Any], Dict[str, Any], Optional[str]]] = []
     for sid in keys if isinstance(keys, dict) else []:
         if needle not in sid:
             continue
         for rec in (db.reference(f"bug_injections/{sid}").get() or {}).values():
-            if isinstance(rec, dict) and rec.get("requested_bug") and rec.get("quiz_id", q) == q:
-                records.append(rec)
+            if not isinstance(rec, dict) or rec.get("quiz_id", q) != q:
+                continue
+            if rec.get("requested_bug"):  # one buggy option, before quiz.bug_options existed
+                records.append((rec, rec, None))
+            for bug in _firebase_to_list(rec.get("bugs")):
+                if isinstance(bug, dict) and bug.get("requested_bug"):
+                    records.append((rec, bug, bug.get("oid")))
 
     def blank(type_id: str, name: str, category: str) -> Dict[str, Any]:
         return {"id": type_id, "name": name, "category": category, "generated": 0, "shown": 0,
@@ -2281,20 +2296,20 @@ def bug_pair_stats(db, quiz_id: str, bug_skills: List[Dict[str, Any]]) -> Dict[s
     by_type: Dict[str, Dict[str, Any]] = {
         s["id"]: blank(s["id"], s["name"], s.get("category", "")) for s in bug_skills if s.get("enabled")
     }
-    for rec in records:
-        req = rec["requested_bug"] if isinstance(rec["requested_bug"], dict) else {}
+    for rec, bug, bug_oid in records:
+        req = bug["requested_bug"] if isinstance(bug["requested_bug"], dict) else {}
         tid = str(req.get("id") or "unknown")
         row = by_type.setdefault(tid, blank(tid, str(req.get("name") or tid), str(req.get("category") or "")))
         cond = str(rec.get("condition") or "unknown")
         cell = row["by_condition"].setdefault(cond, {"generated": 0, "accepted_buggy": 0, "accepted_correct": 0})
-        shown, accepted = _pair_outcome(rec)
+        shown, accepted = _pair_outcome(rec, bug_oid)
         row["generated"] += 1
         cell["generated"] += 1
         row["shown"] += int(shown)
         if accepted in ("buggy", "correct"):
             row[f"accepted_{accepted}"] += 1
             cell[f"accepted_{accepted}"] += 1
-        cls = rec.get("classification") if isinstance(rec.get("classification"), dict) else {}
+        cls = bug.get("classification") if isinstance(bug.get("classification"), dict) else {}
         row["classifier_agrees"] += int(cls.get("category") == tid)
 
     rows = sorted(by_type.values(), key=lambda r: (-r["generated"], r["name"].lower()))

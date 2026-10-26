@@ -38,6 +38,8 @@ from firebase_utils import fb_dict
 from survey_payload_compact import compact_survey_ai_history
 import ai_assist
 import bug_injection
+import study_log
+import problem_images
 from llm_params import DEFAULT_MODEL, chat_args
 import httpx
 import sandbox
@@ -53,13 +55,20 @@ logger = logging.getLogger(__name__)
 _HTML_TAG_RE = re.compile(r"<[a-zA-Z][\w:-]*(?:\s[^>]*)?>")
 # Quill-like tags when stored as entities only (no literal '<' yet) — avoid false positives on "&lt;3"
 _ENTITY_HTML_TAG_OPEN_RE = re.compile(
-    r"&lt;(?:p|br|strong|em|b|i|u|ul|ol|li|div|span|h[1-4]|blockquote|pre|code|a|hr)\b",
+    r"&lt;(?:p|br|strong|em|b|i|u|ul|ol|li|div|span|h[1-4]|blockquote|pre|code|a|hr|img)\b",
     re.IGNORECASE,
 )
 
 
 def _field_looks_like_html(s: str) -> bool:
     return bool(_HTML_TAG_RE.search(s))
+
+
+def _problem_html_attribute_filter(tag: str, attr: str, value: str) -> Optional[str]:
+    """Images only from this quiz's uploads (/quiz-images/...), never external or data: URLs."""
+    if tag == "img" and attr == "src":
+        return value if problem_images.image_path(value) is not None else None
+    return value
 
 
 def sanitize_instructor_rich_html(raw: Optional[str]) -> str:
@@ -79,7 +88,7 @@ def sanitize_instructor_rich_html(raw: Optional[str]) -> str:
     tags = frozenset({
         "p", "br", "strong", "b", "em", "i", "u", "s", "strike",
         "sub", "sup", "h1", "h2", "h3", "h4", "ul", "ol", "li", "a",
-        "blockquote", "pre", "code", "hr", "span", "div",
+        "blockquote", "pre", "code", "hr", "span", "div", "img",
     })
     attributes = {
         "a": frozenset({"href", "title", "target", "rel"}),
@@ -96,6 +105,7 @@ def sanitize_instructor_rich_html(raw: Optional[str]) -> str:
         "blockquote": frozenset({"class", "style"}),
         "pre": frozenset({"class", "style", "spellcheck"}),
         "code": frozenset({"class", "style"}),
+        "img": frozenset({"src", "alt", "width", "height"}),
     }
     filter_style_properties = frozenset({
         "color", "background-color", "text-align", "font-weight", "font-style",
@@ -103,13 +113,16 @@ def sanitize_instructor_rich_html(raw: Optional[str]) -> str:
     })
     try:
         # link_rel=None: we whitelist rel on <a> so nh3 does not force-insert rel (see nh3 docs).
-        return nh3.clean(
+        out = nh3.clean(
             str(raw),
             tags=tags,
             attributes=attributes,
             filter_style_properties=filter_style_properties,
             link_rel=None,
+            attribute_filter=_problem_html_attribute_filter,
         )
+        # An <img> whose src was rejected would show as a broken image.
+        return re.sub(r"<img(?![^>]*\ssrc=)[^>]*>", "", out)
     except Exception as e:
         logger.warning("nh3.clean failed: %s; escaping problem HTML instead", e)
         return html_std.escape(str(raw))
@@ -629,6 +642,9 @@ class AuthRequest(BaseModel):
     assignment_key: str
     programming_language: str = "javascript"
 
+_BAD_USER_ID_CHARS_RE = re.compile(r"[/\\.:$#\[\]?%\x00-\x1f]")
+
+
 def _validated_participant_user_id(raw: Optional[str], field: str = "user_id") -> str:
     """Reject placeholder IDs so submissions and analytics attribute work to real participants."""
     uid = (raw or "").strip()
@@ -642,6 +658,17 @@ def _validated_participant_user_id(raw: Optional[str], field: str = "user_id") -
         raise HTTPException(
             status_code=400,
             detail=f"{field} cannot be '{uid}' — use the participant identifier from login.",
+        )
+    # The ID becomes part of the session id, which is a file name and a Firebase key.
+    if "://" in uid:
+        raise HTTPException(
+            status_code=400,
+            detail="That looks like a link. Enter your participant ID, not the quiz URL.",
+        )
+    if _BAD_USER_ID_CHARS_RE.search(uid) or len(uid) > 64:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field} may only use letters, numbers, spaces, _ - and @ (max 64 characters).",
         )
     return uid
 
@@ -729,6 +756,9 @@ class SessionLog(BaseModel):
     total_problems: int = 1
     quiz_id: Optional[str] = None
     per_problem_submissions: List[Dict[str, Any]] = []
+    # Every pre/post survey submitted, one entry per problem and type (pre_survey_responses and
+    # post_survey_responses keep only the latest).
+    survey_history: List[Dict[str, Any]] = []
 
     # Survey tracking
     pre_survey_status: str = "not_started"
@@ -908,6 +938,11 @@ class ActiveSessionMap:
         """Return 'redis' or 'memory' for health/metrics."""
         return "redis" if self._redis is not None else "memory"
 
+    @property
+    def redis(self) -> Any:
+        """The Redis client (None when sessions are in memory), for other small shared state."""
+        return self._redis
+
 
 # Global session storage (Redis if REDIS_URL, else in-memory; sent to Firebase on submit)
 active_sessions: ActiveSessionMap = ActiveSessionMap()
@@ -923,8 +958,12 @@ _analyze_semaphore: asyncio.Semaphore = asyncio.Semaphore(
 _completion_semaphore: asyncio.Semaphore = asyncio.Semaphore(
     int(os.getenv("COMPLETION_CONCURRENCY", "16"))
 )
-# A suggestion that arrives later than this is stale (the student has typed on), so drop it.
-COMPLETION_TIMEOUT_SEC = float(os.getenv("COMPLETION_TIMEOUT_SEC", "8"))
+# Upper bound on writing one suggestion in the background (see SUGGESTION_WAIT_SEC for how long the
+# student waits); a slower one is dropped.
+COMPLETION_TIMEOUT_SEC = float(os.getenv("COMPLETION_TIMEOUT_SEC", "25"))
+# Longest a student waits for a suggestion, like Copilot. A pair that is not ready by then is still
+# written and cached; the reply says "pending" and the editor asks again, finding it ready.
+SUGGESTION_WAIT_SEC = float(os.getenv("SUGGESTION_WAIT_SEC", "2"))
 
 # Prevent duplicate /submit for the same session (double-click, retries, multiple tabs).
 _submit_gate = asyncio.Lock()
@@ -2553,8 +2592,8 @@ CONDITION_SUGGESTION = 2
 CONDITION_AGENT = 3
 CONDITION_MULTILINE_SUGGESTION = 4
 
-# Most lines one multi-line (condition 4) ghost-text suggestion may span.
-MULTILINE_SUGGESTION_MAX_LINES = int(os.getenv("MULTILINE_SUGGESTION_MAX_LINES", "20"))
+# Most lines one multi-line (condition 4) ghost-text suggestion may span (Copilot-sized: 2 to 5).
+MULTILINE_SUGGESTION_MAX_LINES = int(os.getenv("MULTILINE_SUGGESTION_MAX_LINES", "5"))
 
 # A session's condition never changes, so cache it per worker: /complete runs on every
 # typing pause and should not fetch the whole session from Redis each time.
@@ -2595,38 +2634,65 @@ async def fb_get_cached(path: str) -> Optional[Dict[str, Any]]:
     return value
 
 
-# The quiz's bug skills, cached per session for a minute so instructor edits apply soon
-# without a Firebase read on every keystroke pause.
-_BUG_SKILLS_TTL_SEC = 60
-_session_bug_skills_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+# bug_feedback for sessions without a quiz (assignment keys, local testing).
+BUG_FEEDBACK_DEFAULT = os.getenv("BUG_FEEDBACK_DEFAULT", "").strip().lower() in ("1", "true", "yes")
+
+
+def _bug_feedback_mode(quiz: Optional[Dict[str, Any]], settings: Dict[str, Any]) -> str:
+    """"correct" ("Correct wrong picks" on: explain and switch to the correct option), "reveal" (it is
+    off but "Show correct answer" is on: explain and show the correct option, the code stays) or ""."""
+    if not quiz:
+        return "correct" if BUG_FEEDBACK_DEFAULT else ""
+    if settings["bug_feedback"]:
+        return "correct"
+    return "reveal" if settings["bug_reveal"] else ""
+
+
+async def _session_bug_settings(session_id: str) -> Tuple[List[Dict[str, Any]], str, Any]:
+    """(bug skills, wrong-pick feedback mode, problem.bug_options: buggy options per suggestion)."""
+    ctx = await _session_ai_context(session_id)
+    return ctx["skills"], ctx["feedback"], ctx["bug_options"]
 
 
 async def _session_bug_skills(session_id: str) -> List[Dict[str, Any]]:
-    cached = _session_bug_skills_cache.get(session_id)
-    if cached and time.time() - cached[0] < _BUG_SKILLS_TTL_SEC:
-        return cached[1]
-    quiz: Optional[Dict[str, Any]] = None
-    sl = await ensure_session_log_loaded(session_id)
-    if sl and sl.quiz_id and firebase_db:
-        try:
-            quiz = await fb_get_cached(f"quizzes/{sl.quiz_id}")
-        except Exception as e:
-            logger.warning("Bug skills: quiz %s not loaded: %s", sl.quiz_id, e)
-    skills = bug_injection.quiz_bug_skills(quiz)
-    _session_bug_skills_cache[session_id] = (time.time(), skills)
-    return skills
+    return (await _session_bug_settings(session_id))[0]
+
+
+async def _session_bug_feedback(session_id: str) -> str:
+    """The wrong-pick feedback mode ("correct", "reveal" or ""); falsy when students get none."""
+    return (await _session_bug_settings(session_id))[1]
 
 
 async def _session_selected_bug_skills(session_id: str) -> List[Dict[str, Any]]:
     return bug_injection.selected_bug_skills(await _session_bug_skills(session_id))
 
 
+async def _session_bug_count(session_id: str, skills: List[Dict[str, Any]]) -> int:
+    """How many buggy options to offer with each correct one (each a different selected bug type)."""
+    return bug_injection.bug_option_count((await _session_bug_settings(session_id))[2], skills)
+
+
+# problem.bug_options 0 ("1 option, randomly correct or buggy"): the student sees a single suggestion,
+# like a plain Copilot, that is a buggy one this share of the time and otherwise the correct one.
+SINGLE_OPTION_BUGGY_RATE = float(os.getenv("SINGLE_OPTION_BUGGY_RATE", "0.5"))
+
+
+async def _session_single_option(session_id: str) -> bool:
+    return (await _session_bug_settings(session_id))[2] == 0
+
+
+def _single_option_skills(skills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The bug skills for a single-option suggestion: none (show the correct one) or all (a buggy one)."""
+    return skills if random.random() < SINGLE_OPTION_BUGGY_RATE else []
+
+
 _BLOCK_END_RE = re.compile(r"(?i)<br\s*/?>|</(p|div|li|tr|h[1-6]|pre|table|ul|ol)>")
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
-def _problem_field_text(raw: Any) -> str:
-    """An instructor problem field (plain text or rich-editor HTML) as plain text for a prompt."""
+def _problem_field_text(raw: Any, images: Optional[List[str]] = None) -> str:
+    """An instructor problem field (plain text or rich-editor HTML) as plain text for a prompt.
+    With `images`, each <img> becomes an "[Image N]" marker and its data URL is appended there."""
     s = str(raw or "").strip()
     if not s:
         return ""
@@ -2634,6 +2700,14 @@ def _problem_field_text(raw: Any) -> str:
         if "<" in s or "&lt;" not in s:
             break
         s = html_std.unescape(s)
+    if images is not None:
+        def _marker(m: "re.Match[str]") -> str:
+            url = problem_images.data_url(problem_images.img_src(m.group(0)))
+            if not url or len(images) >= problem_images.MAX_IMAGES:
+                return ""
+            images.append(url)
+            return f"\n[Image {len(images)}]\n"
+        s = problem_images.IMG_TAG_RE.sub(_marker, s)
     s = re.sub(r"(?i)<li[^>]*>", "\n- ", _BLOCK_END_RE.sub("\n", s))
     s = html_std.unescape(_TAG_RE.sub("", s))
     return re.sub(r"\n\s*\n\s*\n+", "\n\n", s).strip()
@@ -2642,34 +2716,99 @@ def _problem_field_text(raw: Any) -> str:
 async def _session_problem(session_id: str) -> str:
     """The problem the student is working on (title, statement, test cases, constraints) as plain
     text for the AI prompts, or "" if unknown."""
-    sl = await ensure_session_log_loaded(session_id)
-    if sl is None:
-        return ""
-    if sl.quiz_id and firebase_db:
+    return (await _session_ai_context(session_id))["problem"]
+
+
+async def _session_problem_context(session_id: str) -> Tuple[str, List[str]]:
+    """(problem text, images): the images the instructor put in the problem as data URLs, in the
+    order of the "[Image N]" markers in the text."""
+    ctx = await _session_ai_context(session_id)
+    return ctx["problem_with_images"], list(ctx["images"])
+
+
+# What the AI calls need about a session's current problem: the quiz's bug skills, the problem's
+# wrong-pick feedback mode and buggy options, and the problem text and images. It is loaded ahead of
+# time (prewarm_ai_context: when the student joins a quiz or moves to the next problem) and kept per
+# session and problem, so a keystroke pause never waits on Firebase. After _AI_CONTEXT_TTL_SEC the
+# kept copy is still used while a fresh one loads in the background, so instructor edits apply
+# within about a minute.
+_AI_CONTEXT_TTL_SEC = 60
+_PROBLEM_FIELDS = (("Title", "title"), ("Problem", "problem_statement"),
+                   ("Test cases", "test_cases"), ("Constraints", "constraints"))
+_ai_context_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_ai_context_loading: Dict[str, "asyncio.Task[Dict[str, Any]]"] = {}
+
+
+async def _load_ai_context(sl: Optional[SessionLog], idx: int) -> Dict[str, Any]:
+    quiz: Optional[Dict[str, Any]] = None
+    if sl and sl.quiz_id and firebase_db:
         try:
             quiz = await fb_get_cached(f"quizzes/{sl.quiz_id}")
         except Exception as e:
-            logger.warning("Problem context: quiz %s not loaded: %s", sl.quiz_id, e)
-            quiz = None
-        problems = normalize_quiz_data(quiz).get("problems", []) if quiz else []
-        idx = sl.current_problem_index or 0
-        prob = problems[idx] if 0 <= idx < len(problems) else {}
-        sections = [
-            (label, _problem_field_text(prob.get(key)))
-            for label, key in (("Title", "title"), ("Problem", "problem_statement"),
-                               ("Test cases", "test_cases"), ("Constraints", "constraints"))
-        ]
-        text = "\n\n".join(f"{label}:\n{body}" for label, body in sections if body)
-        if text:
-            return text
-    return _problem_field_text(sl.problem_description)
+            logger.warning("AI context: quiz %s not loaded: %s", sl.quiz_id, e)
+    skills = bug_injection.quiz_bug_skills(quiz)
+    problems = normalize_quiz_data(quiz).get("problems", []) if quiz else []
+    prob = problems[idx] if isinstance(problems, list) and 0 <= idx < len(problems) else {}
+    prob = prob if isinstance(prob, dict) else {}
+    settings = bug_injection.clean_problem_bug_settings(prob, quiz)
+    images: List[str] = []
+
+    def texts() -> Tuple[str, str]:
+        join = lambda sections: "\n\n".join(f"{label}:\n{body}" for label, body in sections if body)
+        with_images = join((label, _problem_field_text(prob.get(key), images)) for label, key in _PROBLEM_FIELDS)
+        plain = join((label, _problem_field_text(prob.get(key))) for label, key in _PROBLEM_FIELDS)
+        return with_images, plain
+
+    # Reads and (the first time) resizes image files, so off the event loop.
+    with_images, plain = await asyncio.to_thread(texts)
+    if not plain:
+        with_images = plain = _problem_field_text(sl.problem_description) if sl else ""
+        images = []
+    return {"skills": skills, "feedback": _bug_feedback_mode(quiz, settings),
+            "bug_options": settings["bug_options"],
+            "problem": plain, "problem_with_images": with_images, "images": images}
+
+
+async def _session_ai_context(session_id: str) -> Dict[str, Any]:
+    sl = await ensure_session_log_loaded(session_id)
+    idx = int(getattr(sl, "current_problem_index", 0) or 0) if sl else 0
+    key = f"{session_id}:{idx}"
+    cached = _ai_context_cache.get(key)
+    if cached and time.time() - cached[0] < _AI_CONTEXT_TTL_SEC:
+        return cached[1]
+    task = _ai_context_loading.get(key)
+    if task is None:
+        task = asyncio.create_task(_load_ai_context(sl, idx))
+        _ai_context_loading[key] = task
+
+        def _store(t: "asyncio.Task[Dict[str, Any]]") -> None:
+            _ai_context_loading.pop(key, None)
+            if t.cancelled():
+                return
+            if t.exception() is not None:
+                logger.warning("AI context for %s not loaded: %s", key, t.exception())
+                return
+            if len(_ai_context_cache) > 5000:
+                _ai_context_cache.clear()
+            _ai_context_cache[key] = (time.time(), t.result())
+
+        task.add_done_callback(_store)
+    if cached:
+        return cached[1]  # stale: use it while the fresh copy loads
+    return await asyncio.shield(task)
+
+
+def prewarm_ai_context(session_id: str) -> None:
+    """Load the AI context of the session's current problem now, before the first keystroke pause."""
+    _spawn(_session_ai_context(session_id))
 
 
 # ─── Correct / buggy pairs (see bug_injection.py) ───────────────────────────
-# Every inline suggestion and agent change is offered as two options in random order: one
-# correct, one with a single bug. The pair is stored at bug_injections/{session_id}/{pair_id}
-# in Firebase (plus a local JSONL backup): which option id is which variant, the bug type the
-# model chose, and the classifier's label. The browser only ever sees option ids, never which
+# Every inline suggestion and agent change is offered as options in random order: one correct,
+# and problem.bug_options buggy ones (default 1), each with a single bug of a different bug type. The
+# pair is stored at bug_injections/{session_id}/{pair_id} in Firebase (plus a local JSONL backup):
+# which option id is which variant and, under "bugs", each buggy option's bug type the model
+# chose and the classifier's label. The browser only ever sees option ids, never which
 # one is buggy; it reports "shown" / "accepted" events per option id (POST /pair-event).
 # pair_id is the suggestion id in the activity log, or the agent turn_id (matches agent_log).
 
@@ -2717,12 +2856,12 @@ def _write_pair_event(session_id: str, pair_id: str, entry: Dict[str, Any]) -> N
             logger.error("Firebase pair event write failed: %s", e)
 
 
-def _shuffled_options(correct: Dict[str, Any], buggy: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """[{oid, variant, **payload}] in random order (just the correct one when there is no buggy version)."""
+def _shuffled_options(correct: Dict[str, Any], buggy: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """[{oid, variant, **payload}] in random order: the correct one and every buggy version (the buggy
+    ones keep their index into `buggy` as "bug")."""
     options = [{"oid": uuid.uuid4().hex[:10], "variant": "correct", **correct}]
-    if buggy is not None:
-        options.append({"oid": uuid.uuid4().hex[:10], "variant": "buggy", **buggy})
-        random.shuffle(options)
+    options += [{"oid": uuid.uuid4().hex[:10], "variant": "buggy", "bug": i, **b} for i, b in enumerate(buggy)]
+    random.shuffle(options)
     return options
 
 
@@ -2731,8 +2870,130 @@ def _requested_bug(skill: Dict[str, Any]) -> Dict[str, Any]:
     return {"requested_bug": {"id": skill["id"], "name": skill["name"], "category": skill["category"]}}
 
 
-async def _record_bug(session_id: str, kind: str, bug_id: str, details: Dict[str, Any], classify) -> None:
-    """Classify a planted bug (classify: coroutine) and store the pair record."""
+# "Correct wrong picks" (problem.bug_feedback) or "Show correct answer" (problem.bug_reveal): the server keeps each buggy option it offered
+# (under "{pair_id}:{oid}": the correct and buggy code, an explanation), so that accepting a buggy
+# option is answered with the fix. One entry per buggy option, so their classifiers never overwrite
+# each other's explanation. In Redis when available, since the accept may reach another worker.
+_PAIR_TTL_SEC = 6 * 3600
+_PAIR_KEY_PREFIX = "autosuggest:pair:"
+# Accepting a buggy option waits this long for the classifier's explanation of the bug.
+_FEEDBACK_EXPLANATION_WAIT_SEC = 6.0
+_local_pairs: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+
+def _pair_save(session_id: str, pair_id: str, data: Dict[str, Any]) -> None:
+    key = f"{_PAIR_KEY_PREFIX}{session_id}:{pair_id}"
+    r = active_sessions.redis
+    if r is not None:
+        try:
+            r.setex(key, _PAIR_TTL_SEC, json.dumps(data))
+            return
+        except Exception as e:
+            logger.warning("Pair store write failed: %s", e)
+    now = time.time()
+    if len(_local_pairs) > 5000:
+        for k in [k for k, (t, _) in _local_pairs.items() if now - t > _PAIR_TTL_SEC]:
+            _local_pairs.pop(k, None)
+    _local_pairs[key] = (now, data)
+
+
+def _pair_load(session_id: str, pair_id: str) -> Optional[Dict[str, Any]]:
+    key = f"{_PAIR_KEY_PREFIX}{session_id}:{pair_id}"
+    r = active_sessions.redis
+    if r is not None:
+        try:
+            raw = r.get(key)
+            return json.loads(raw) if raw else None
+        except Exception as e:
+            logger.warning("Pair store read failed: %s", e)
+    hit = _local_pairs.get(key)
+    return hit[1] if hit and time.time() - hit[0] < _PAIR_TTL_SEC else None
+
+
+# The bug types each session has been shown, newest first (the last _BUG_HISTORY_LEN), so the next
+# ones are chosen to vary (bug_injection.choose_bug_types makes recent types less likely). In Redis
+# when available, since a session's requests may reach different workers.
+_BUG_HISTORY_LEN = 20
+_BUG_HISTORY_KEY_PREFIX = "autosuggest:bughistory:"
+_local_bug_history: Dict[str, List[str]] = {}
+
+
+def _bug_history(session_id: str) -> List[str]:
+    r = active_sessions.redis
+    if r is not None:
+        try:
+            raw = r.lrange(f"{_BUG_HISTORY_KEY_PREFIX}{session_id}", 0, _BUG_HISTORY_LEN - 1)
+            return [x.decode() if isinstance(x, bytes) else str(x) for x in raw]
+        except Exception as e:
+            logger.warning("Bug history read failed: %s", e)
+    return list(_local_bug_history.get(session_id, []))
+
+
+def _bug_history_add(session_id: str, bug_types: List[str]) -> None:
+    if not bug_types:
+        return
+    r = active_sessions.redis
+    if r is not None:
+        try:
+            key = f"{_BUG_HISTORY_KEY_PREFIX}{session_id}"
+            pipe = r.pipeline()
+            pipe.lpush(key, *bug_types)
+            pipe.ltrim(key, 0, _BUG_HISTORY_LEN - 1)
+            pipe.expire(key, _PAIR_TTL_SEC)
+            pipe.execute()
+            return
+        except Exception as e:
+            logger.warning("Bug history write failed: %s", e)
+    if len(_local_bug_history) > 5000:
+        _local_bug_history.clear()
+    _local_bug_history[session_id] = (list(bug_types) + _local_bug_history.get(session_id, []))[:_BUG_HISTORY_LEN]
+
+
+def _pair_add_explanation(session_id: str, pair_id: str, oid: str, classification: Dict[str, Any],
+                          bug_type: str = "", lesson: Optional[Dict[str, str]] = None) -> None:
+    data = _pair_load(session_id, f"{pair_id}:{oid}")
+    if data is None:
+        return
+    data["explanation"] = str(classification.get("description") or "").strip()
+    if lesson:
+        # The lesson (written for the bug type the model planted) is what the student sees; the
+        # classifier's description and label are only the fallback when there is none.
+        data["lesson"] = lesson
+    elif bug_type:
+        data["bug_type"] = bug_type
+    data["explained"] = True
+    _pair_save(session_id, f"{pair_id}:{oid}", data)
+
+
+async def _classified_bug_type(session_id: str, classification: Dict[str, Any]) -> str:
+    """The name of the bug skill the classifier found ("" when it matched none of them)."""
+    category = classification.get("category")
+    for skill in await _session_bug_skills(session_id):
+        if skill["id"] == category:
+            return skill["name"]
+    return ""
+
+
+async def _wrong_pick_feedback(session_id: str, pair_id: str, oid: str) -> Optional[Dict[str, Any]]:
+    """The fix to show when the student accepted a buggy option of a stored pair, else None."""
+    key = f"{pair_id}:{oid}"
+    data = await asyncio.to_thread(_pair_load, session_id, key)
+    if not data or data.get("buggy_oid") != oid:
+        return None
+    deadline = time.time() + _FEEDBACK_EXPLANATION_WAIT_SEC
+    while not data.get("explained") and time.time() < deadline:
+        await asyncio.sleep(0.25)
+        data = await asyncio.to_thread(_pair_load, session_id, key) or data
+    return {key: data.get(key, "") for key in
+            ("kind", "correct_oid", "filename", "correct", "buggy", "explanation", "description_error", "bug_type",
+             "lesson", "correct_files")}
+
+
+async def _record_bug(session_id: str, kind: str, bug_id: str, details: Dict[str, Any],
+                      bugs: List[Tuple[Dict[str, Any], Any, Any]]) -> None:
+    """Classify the planted bugs, write their lessons and store the pair record. bugs: one (details,
+    classify coroutine, lesson coroutine) per buggy option; the details include its "oid". The record
+    keeps them under "bugs"."""
     record: Dict[str, Any] = {"bug_id": bug_id, "kind": kind, "session_id": session_id,
                               "created_at": datetime.now().isoformat(), **details}
     try:
@@ -2742,11 +3003,20 @@ async def _record_bug(session_id: str, kind: str, bug_id: str, details: Dict[str
                           problem_index=sl.current_problem_index)
     except Exception as e:
         logger.warning("Bug record: session %s not loaded: %s", session_id, e)
-    try:
-        record["classification"] = await classify
-    except Exception as e:
-        logger.warning("Bug classification failed for %s: %s", bug_id, e)
-        record["classification"] = {"category": "classifier_error", "error": str(e)[:300]}
+
+    async def classified(bug: Dict[str, Any], classify, lesson_call) -> Dict[str, Any]:
+        classification, lesson = await asyncio.gather(classify, lesson_call, return_exceptions=True)
+        if isinstance(classification, BaseException):
+            logger.warning("Bug classification failed for %s: %s", bug_id, classification)
+            classification = {"category": "classifier_error", "error": str(classification)[:300]}
+        if isinstance(lesson, BaseException):
+            logger.warning("Bug lesson failed for %s: %s", bug_id, lesson)
+            lesson = {}
+        bug_type = await _classified_bug_type(session_id, classification)
+        await asyncio.to_thread(_pair_add_explanation, session_id, bug_id, bug["oid"], classification, bug_type, lesson)
+        return {**bug, "classification": classification, "lesson": lesson}
+
+    record["bugs"] = list(await asyncio.gather(*(classified(*b) for b in bugs)))
     record["classified_at"] = datetime.now().isoformat()
     await asyncio.to_thread(_write_bug_record, record)
 
@@ -2755,7 +3025,7 @@ class PairEventRequest(BaseModel):
     session_id: str
     pair_id: str = Field(max_length=32)
     oid: str = Field(max_length=32)
-    event: str  # "shown" | "accepted" | "rejected" (the student undid both versions)
+    event: str  # "shown" | "accepted" | "rejected" (the student undid all versions)
 
 
 @app.post("/pair-event")
@@ -2769,7 +3039,57 @@ async def pair_event(request: PairEventRequest):
         raise HTTPException(status_code=403, detail="Unknown session")
     entry = {"event": request.event, "oid": request.oid, "at": datetime.now().isoformat()}
     _spawn(asyncio.to_thread(_write_pair_event, request.session_id, request.pair_id, entry))
+    mode = await _session_bug_feedback(request.session_id) if request.event == "accepted" else ""
+    if mode:
+        feedback = await _wrong_pick_feedback(request.session_id, request.pair_id, request.oid)
+        if feedback:
+            # "correct": the browser replaces the buggy code with the correct one and explains the bug.
+            # "reveal": it explains the bug and shows the correct code, but leaves the student's code.
+            feedback["mode"] = mode
+            event = "corrected" if mode == "correct" else "revealed"
+            entry = {"event": event, "oid": feedback["correct_oid"], "at": datetime.now().isoformat()}
+            _spawn(asyncio.to_thread(_write_pair_event, request.session_id, request.pair_id, entry))
+            return {"status": "ok", "feedback": feedback}
     return {"status": "ok"}
+
+
+# ─── Study log (per-condition tables for the instructor; see study_log.py) ────
+@app.post("/study-log")
+async def study_log_rows(http_request: Request):
+    """Rows the browser kept during a step, sent when the student moves on (also as a beacon when the
+    page closes, which posts the JSON as text/plain). Stamped with the session's participant,
+    condition and quiz here."""
+    try:
+        body = json.loads((await http_request.body()) or b"{}")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Bad JSON")
+    session_id = str(body.get("session_id") or "")
+    sl = await ensure_session_log_loaded(session_id) if session_id else None
+    if sl is None:
+        raise HTTPException(status_code=403, detail="Unknown session")
+    rows = study_log.clean_rows(body.get("rows") or [])
+    await asyncio.to_thread(_study_log_write, sl, rows)
+    return {"status": "ok", "stored": [r["row_id"] for r in rows]}
+
+
+def _study_log_write(sl: "SessionLog", rows: List[Dict[str, Any]]) -> None:
+    stamp = {"participant_id": sl.user_id, "condition": int(sl.condition or 0),
+             "assignment_id": sl.quiz_id or sl.assignment_id, "quiz_id": sl.quiz_id or ""}
+    try:
+        study_log.write_rows(firebase_db, study_log.quiz_key(sl.quiz_id, sl.assignment_id), sl.session_id, stamp, rows)
+    except Exception as e:
+        logger.error("Study log write failed for %s: %s", sl.session_id, e)
+
+
+async def _study_log_survey(session_id: str, survey_type: str, responses: List[Tuple[str, str, str, Any]], *,
+                            survey_round: Any = "", timestamp: str = "", completion_time_seconds: Any = None) -> None:
+    sl = await ensure_session_log_loaded(session_id)
+    if sl is None:
+        return
+    rows = study_log.survey_rows(survey_type, responses, problem_index=sl.current_problem_index,
+                                 survey_round=survey_round, timestamp=timestamp,
+                                 completion_time_seconds=completion_time_seconds)
+    await asyncio.to_thread(_study_log_write, sl, rows)
 
 
 class CompletionRequest(BaseModel):
@@ -2780,58 +3100,140 @@ class CompletionRequest(BaseModel):
     suffix: str = ""
 
 
-@app.post("/complete")
-async def inline_complete(request: CompletionRequest, http_request: Request):
-    """Copilot-style ghost-text completion, one line (condition 2) or a multi-line block (condition 4),
-    offered as two options in random order: one correct, one with a single bug."""
+async def _completion_args(request: CompletionRequest) -> Dict[str, Any]:
+    """ai_assist.inline_completion's arguments for this session and cursor, without the bug skills."""
     condition = await _session_condition(request.session_id)
     if condition not in (CONDITION_SUGGESTION, CONDITION_MULTILINE_SUGGESTION):
         raise HTTPException(status_code=403, detail="Inline suggestions are not enabled for this session")
+    skills = await _session_selected_bug_skills(request.session_id)
+    problem, images = await _session_problem_context(request.session_id)
+    return dict(
+        language=request.language,
+        filename=request.filename,
+        prefix=request.prefix,
+        suffix=request.suffix,
+        max_lines=MULTILINE_SUGGESTION_MAX_LINES if condition == CONDITION_MULTILINE_SUGGESTION else 1,
+        session_skills=skills,
+        bug_count=await _session_bug_count(request.session_id, skills),
+        recent_bugs=await asyncio.to_thread(_bug_history, request.session_id) if skills else [],
+        problem=problem,
+        problem_images=images,
+        cache_key=request.session_id,
+    )
+
+
+@app.post("/complete/warm")
+async def inline_complete_warm(request: CompletionRequest):
+    """Writes the program and first suggestions for the student's cursor before they ask (see
+    ai_assist.warm_up); returns at once."""
+    if not request.prefix.strip():
+        return {"status": "ok"}
+    args = await _completion_args(request)
+    _spawn(ai_assist.warm_up(async_client, bug_skills=args["session_skills"], **args))
+    return {"status": "ok"}
+
+
+# When a spot first got "pending" (session, editor text) -> monotonic time, so the time to generate a
+# suggestion counts from the student's first request there, not from the editor's retry.
+_pending_since: Dict[Tuple[str, str], float] = {}
+
+
+@app.post("/complete")
+async def inline_complete(request: CompletionRequest, http_request: Request):
+    """Copilot-style ghost-text completion, one line (condition 2) or a multi-line block (condition 4),
+    offered as options in random order: one correct, and problem.bug_options buggy ones, each with a
+    single bug of a different bug type. Replies within SUGGESTION_WAIT_SEC: {"pending": true} when the
+    suggestion is still being written."""
     if not request.prefix.strip():
         return {"id": "", "options": []}
-    skills = await _session_selected_bug_skills(request.session_id)
-    max_lines = MULTILINE_SUGGESTION_MAX_LINES if condition == CONDITION_MULTILINE_SUGGESTION else 1
-    problem = await _session_problem(request.session_id)
-    try:
-        async with _completion_semaphore:
-            # The editor cancels the request when the student types on; skip the OpenAI call then.
-            if await http_request.is_disconnected():
-                return {"id": "", "options": []}
-            pair = await asyncio.wait_for(ai_assist.inline_completion(
-                async_client,
-                language=request.language,
-                filename=request.filename,
-                prefix=request.prefix,
-                suffix=request.suffix,
-                max_lines=max_lines,
-                bug_skills=skills,
-                problem=problem,
-            ), COMPLETION_TIMEOUT_SEC)
-    except asyncio.TimeoutError:
-        logger.warning("Inline completion timed out after %ss", COMPLETION_TIMEOUT_SEC)
-        return {"id": "", "options": []}
-    except Exception as e:
-        logger.warning("Inline completion failed: %s", e)
-        return {"id": "", "options": []}
+    started = time.monotonic()
+    spot = (request.session_id, hashlib.sha1((request.prefix[-3000:] + "\0" + request.suffix[:500]).encode("utf-8", "replace")).hexdigest())
+    args = await _completion_args(request)
+    skills = args["session_skills"]
+    bug_count = args["bug_count"]
+    max_lines = args["max_lines"]
+    problem = args["problem"]
+    single = await _session_single_option(request.session_id)
+    if single:
+        skills = _single_option_skills(skills)
+    # Write ahead for a student who keeps a buggy pick, unless the pick is corrected for them.
+    branch = await _session_bug_feedback(request.session_id) != "correct"
+    async with _completion_semaphore:
+        # The editor cancels the request when the student types on; skip the OpenAI call then.
+        if await http_request.is_disconnected():
+            return {"id": "", "options": []}
+        # Shielded: past the wait the suggestion is still finished (and cached) in the background.
+        task = asyncio.create_task(asyncio.wait_for(ai_assist.inline_completion(
+            async_client, bug_skills=skills, branch_prefetch=branch, **args), COMPLETION_TIMEOUT_SEC))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+        task.add_done_callback(lambda t: t.cancelled() or t.exception())  # retrieved: no "never retrieved" log
+        try:
+            pair = await asyncio.wait_for(asyncio.shield(task), SUGGESTION_WAIT_SEC)
+        except asyncio.TimeoutError:
+            if len(_pending_since) > 5000:
+                _pending_since.clear()
+            _pending_since.setdefault(spot, started)
+            return {"id": "", "options": [], "pending": True}
+        except Exception as e:
+            logger.warning("Inline completion failed: %s", e)
+            return {"id": "", "options": []}
     if not pair["correct"]:
         return {"id": "", "options": []}
+    bugs = pair["bugs"]
+    if skills and not single and len(bugs) < bug_count:
+        # Shown only with every buggy option the problem asks for; the editor asks again (written anew).
+        logger.info("Suggestion held back: %d of %d buggy options (%s)", len(bugs), bug_count, pair.get("no_bug", ""))
+        _pending_since.setdefault(spot, started)
+        return {"id": "", "options": [], "pending": True}
+    generation_ms = int((time.monotonic() - _pending_since.pop(spot, started)) * 1000)
     pair_id = uuid.uuid4().hex[:12]
-    options = _shuffled_options({"text": pair["correct"]}, {"text": pair["buggy"]} if pair["buggy"] else None)
-    if pair["buggy"]:
+    options = _shuffled_options({"text": pair["correct"]}, [{"text": b["buggy"]} for b in bugs])
+    # A single-option suggestion that got a buggy version shows only that one.
+    shown = [o for o in options if o["variant"] == "buggy"][:1] if single and bugs else options
+    if single and not bugs:
+        # Recorded too, so the single-option suggestions shown correct can be told from the buggy ones.
+        _spawn(_record_bug(
+            request.session_id, "completion", pair_id,
+            {"language": request.language, "filename": request.filename, "correct": pair["correct"],
+             "max_lines": max_lines, "single_option": True, "no_bug": pair.get("no_bug", "") or "chose_correct",
+             "generation_ms": generation_ms,
+             "options": [{"oid": o["oid"], "variant": o["variant"], "offered": True} for o in options]},
+            []))
+    if bugs:
+        await asyncio.to_thread(_bug_history_add, request.session_id, [b["bug_skill"]["id"] for b in bugs])
         prefix, suffix = request.prefix[-4000:], request.suffix[:1500]
+        correct_oid = next(o["oid"] for o in options if o["variant"] == "correct")
+        buggy_oids = {o["bug"]: o["oid"] for o in options if o["variant"] == "buggy"}
+        if await _session_bug_feedback(request.session_id):
+            for i, b in enumerate(bugs):
+                await asyncio.to_thread(_pair_save, request.session_id, f"{pair_id}:{buggy_oids[i]}", {
+                    "kind": "completion", "filename": request.filename,
+                    "buggy_oid": buggy_oids[i], "correct_oid": correct_oid,
+                    "correct": pair["correct"], "buggy": b["buggy"], "bug_type": b["bug_skill"]["name"],
+                })
         _spawn(_record_bug(
             request.session_id, "completion", pair_id,
             {"language": request.language, "filename": request.filename, "prefix": prefix, "suffix": suffix,
-             "correct": pair["correct"], "buggy": pair["buggy"], "max_lines": max_lines,
-             "explanation": pair.get("bug_plan", ""),
-             "options": [{"oid": o["oid"], "variant": o["variant"]} for o in options],
-             **_requested_bug(pair["bug_skill"])},
-            bug_injection.classify_pair(
-                async_client, language=request.language, filename=request.filename,
-                context=f"{prefix}<CURSOR>{suffix}", correct=pair["correct"], buggy=pair["buggy"], skills=skills,
-            ),
+             "correct": pair["correct"], "max_lines": max_lines, "bug_options_requested": bug_count,
+             "generation_ms": generation_ms,
+             "single_option": single, "bug_choice": pair.get("choice") or {},
+             # The look-ahead the correct suggestion was cut from, and whether it was reused.
+             "program_insert": pair.get("program_insert", ""), "solution_check": pair.get("check", {}),
+             "options": [{"oid": o["oid"], "variant": o["variant"], "offered": o in shown} for o in options]},
+            [({"oid": buggy_oids[i], "buggy": b["buggy"], "explanation": b.get("bug_plan", ""),
+               **_requested_bug(b["bug_skill"])},
+              bug_injection.classify_pair(
+                  async_client, language=request.language, filename=request.filename,
+                  context=f"{prefix}<CURSOR>{suffix}", correct=pair["correct"], buggy=b["buggy"], skills=skills,
+              ),
+              bug_injection.write_lesson(
+                  async_client, language=request.language, filename=request.filename,
+                  context=f"{prefix}<CURSOR>{suffix}", correct=pair["correct"], buggy=b["buggy"],
+                  bug_name=b["bug_skill"]["name"], bug_plan=b.get("bug_plan", ""), problem=problem,
+              )) for i, b in enumerate(bugs)],
         ))
-    return {"id": pair_id, "options": [{"oid": o["oid"], "text": o["text"]} for o in options],
+    return {"id": pair_id, "options": [{"oid": o["oid"], "text": o["text"]} for o in shown],
             "no_bug": pair.get("no_bug", "")}
 
 
@@ -2853,59 +3255,108 @@ class AgentChatRequest(BaseModel):
     terminal_output: Optional[str] = None
 
 
-async def _agent_versions(turn: "ai_assist.AgentTurn", request: AgentChatRequest) -> Optional[Dict[str, Any]]:
-    """After an agent turn that changed files: the "versions" event offering the correct changes and a
-    copy with one bug, in random order, each with its description (the agent's summary; the buggy
-    one's may contain a wrong claim too), and the pair's bug record is stored. None when nothing changed."""
+def _record_files(files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Files as kept in a bug record (for the study log's snapshot and "code edit" columns)."""
+    return [{"filename": str(f.get("filename") or ""), "action": f.get("action") or "",
+             "content": None if f.get("content") is None else str(f.get("content"))[:20000]} for f in files[:20]]
+
+
+async def _agent_versions(turn: "ai_assist.AgentTurn", request: AgentChatRequest,
+                          started: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    """After an agent turn that changed files: the "versions" event offering the correct changes and
+    problem.bug_options copies with one bug each (of different bug types), in random order, each with
+    its description (the agent's summary; a buggy one's may contain a wrong claim too), and the
+    pair's bug record is stored. None when nothing changed."""
     changes = turn.changes()
     if not changes:
         return None
     correct_files = [{"filename": c["filename"], "action": c["action"], "content": c["content"]} for c in changes]
     skills = await _session_selected_bug_skills(request.session_id)
     files_after = {c["filename"]: c["content"] for c in changes if c["content"] is not None}
-    buggy = None
-    if skills and files_after:
+    bug_count = await _session_bug_count(request.session_id, skills)
+    single = await _session_single_option(request.session_id)
+    if single:
+        skills = _single_option_skills(skills)
+    agent_problem = await _session_problem(request.session_id)
+    bugs: List[Dict[str, Any]] = []
+    if skills and files_after and bug_count:
         try:
-            buggy = await bug_injection.make_buggy_agent_version(
+            bugs = await bug_injection.make_buggy_agent_versions(
                 async_client, language=request.language, message=request.message,
                 diffs={c["filename"]: c["diff"] for c in changes}, files_after=files_after, skills=skills,
-                problem=await _session_problem(request.session_id), description=turn.final_text,
+                count=bug_count, problem=agent_problem, description=turn.final_text,
+                recent=await asyncio.to_thread(_bug_history, request.session_id),
             )
         except Exception as e:
-            logger.warning("Buggy agent version failed: %s", e)
-    buggy_files = None
-    if buggy:
-        buggy_files = [dict(f, content=buggy["files"][f["filename"]]) if f["filename"] == buggy["filename"] else f
-                       for f in correct_files]
+            logger.warning("Buggy agent versions failed: %s", e)
     options = _shuffled_options(
         {"files": correct_files, "description": turn.final_text},
-        {"files": buggy_files, "description": buggy["description"]} if buggy_files else None,
+        [{"files": [dict(f, content=b["files"][f["filename"]]) if f["filename"] == b["filename"] else f
+                    for f in correct_files],
+          "description": b["description"]} for b in bugs],
     )
     pair_id = turn.record["turn_id"]
-    turn.record["pair_options"] = [{"oid": o["oid"], "variant": o["variant"]} for o in options]
-    if buggy:
-        fn = buggy["filename"]
+    # For the study log: how long the response took, the student's files when they asked, and each
+    # version's files (to tell later whether they edited the applied code).
+    study = {"generation_ms": int((time.monotonic() - started) * 1000) if started else None,
+             "workspace_snapshot": _record_files([f.dict() if hasattr(f, "dict") else dict(f) for f in request.files]),
+             "version_files": {o["oid"]: _record_files(o["files"]) for o in options},
+             "description_correct": turn.final_text}
+    # A single-option turn that got a buggy version shows only that one.
+    shown = [o for o in options if o["variant"] == "buggy"][:1] if single and bugs else options
+    turn.record["pair_options"] = [{"oid": o["oid"], "variant": o["variant"], "offered": o in shown} for o in options]
+    if single and not bugs:
+        # Recorded too, so the single-option turns shown correct can be told from the buggy ones.
         _spawn(_record_bug(
             request.session_id, "agent", pair_id,
             {"language": request.language, "mode": turn.mode, "message": turn.message[:3000],
-             "filename": fn, "correct": buggy["old"], "buggy": buggy["new"],
-             "explanation": buggy["explanation"], "files_changed": [c["filename"] for c in changes],
-             "description_correct": turn.final_text, "description_buggy": buggy["description"],
-             "description_offered": buggy["description_offered"], "description_error": buggy["description_error"],
-             "options": turn.record["pair_options"], **_requested_bug(buggy["bug_skill"])},
-            bug_injection.classify_pair(
-                async_client, language=request.language, filename=fn,
-                context=files_after[fn], correct=buggy["old"], buggy=buggy["new"], skills=skills,
-            ),
+             "files_changed": [c["filename"] for c in changes], "single_option": True,
+             "options": turn.record["pair_options"], **study},
+            []))
+    if bugs:
+        await asyncio.to_thread(_bug_history_add, request.session_id, [b["bug_skill"]["id"] for b in bugs])
+        correct_oid = next(o["oid"] for o in options if o["variant"] == "correct")
+        buggy_oids = {o["bug"]: o["oid"] for o in options if o["variant"] == "buggy"}
+        if await _session_bug_feedback(request.session_id):
+            for i, b in enumerate(bugs):
+                await asyncio.to_thread(_pair_save, request.session_id, f"{pair_id}:{buggy_oids[i]}", {
+                    "kind": "agent", "filename": b["filename"],
+                    "buggy_oid": buggy_oids[i], "correct_oid": correct_oid,
+                    "correct": b["old"], "buggy": b["new"], "description_error": b["description_error"],
+                    "bug_type": b["bug_skill"]["name"],
+                    # The correct version is not among the options the student saw: send its files with the fix.
+                    **({"correct_files": correct_files} if single else {}),
+                })
+        _spawn(_record_bug(
+            request.session_id, "agent", pair_id,
+            {"language": request.language, "mode": turn.mode, "message": turn.message[:3000],
+             "files_changed": [c["filename"] for c in changes], "description_correct": turn.final_text,
+             "description_offered": bugs[0]["description_offered"], "bug_options_requested": bug_count,
+             "single_option": single, "bug_choice": bugs[0].get("choice") or {},
+             "options": turn.record["pair_options"], "solution_check": turn.record.get("solution_check", {}), **study},
+            [({"oid": buggy_oids[i], "filename": b["filename"], "correct": b["old"], "buggy": b["new"],
+               "explanation": b["explanation"], "description_buggy": b["description"],
+               "description_error": b["description_error"], **_requested_bug(b["bug_skill"])},
+              bug_injection.classify_pair(
+                  async_client, language=request.language, filename=b["filename"],
+                  context=files_after[b["filename"]], correct=b["old"], buggy=b["new"], skills=skills,
+              ),
+              bug_injection.write_lesson(
+                  async_client, language=request.language, filename=b["filename"],
+                  context=files_after[b["filename"]], correct=b["old"], buggy=b["new"],
+                  bug_name=b["bug_skill"]["name"], bug_plan=b["explanation"], problem=agent_problem,
+              )) for i, b in enumerate(bugs)],
         ))
-    return {"type": "versions", "pair_id": pair_id,
-            "versions": [{"oid": o["oid"], "files": o["files"], "description": o["description"]} for o in options]}
+    # "single": the one version shown may be the correct or a buggy one, so the browser reports
+    # applying it (and gets the fix if it was buggy). Sent for both, so it does not give that away.
+    return {"type": "versions", "pair_id": pair_id, "single": single,
+            "versions": [{"oid": o["oid"], "files": o["files"], "description": o["description"]} for o in shown]}
 
 
 @app.post("/agent/chat")
 async def agent_chat(request: AgentChatRequest):
     """Cursor-style agent turn (condition 3), streamed as server-sent events. File changes are not
-    applied by the browser as they stream: the turn ends with a "versions" event (correct + buggy)."""
+    applied by the browser as they stream: the turn ends with a "versions" event (correct + buggy ones)."""
     if await _session_condition(request.session_id) != CONDITION_AGENT:
         raise HTTPException(status_code=403, detail="The agent is not enabled for this session")
     if not request.message.strip():
@@ -2913,6 +3364,8 @@ async def agent_chat(request: AgentChatRequest):
     if len(request.files) > ai_assist.MAX_FILES:
         raise HTTPException(status_code=400, detail="Too many files")
 
+    started = time.monotonic()
+    problem, images = await _session_problem_context(request.session_id)
     turn = ai_assist.AgentTurn(
         async_client,
         mode=request.mode,
@@ -2926,7 +3379,11 @@ async def agent_chat(request: AgentChatRequest):
         run_code=lambda code, files, language, stdin: execute_code_safely(
             code, language, files=files, key=f"{request.session_id}:agent", stdin=stdin
         ),
-        problem=await _session_problem(request.session_id),
+        problem=problem,
+        problem_images=images,
+        # Closing check on the problem's test cases; own runner keys, so it never stops the agent's runs.
+        run_check=lambda slot, code, language, stdin, files=None: execute_code_safely(
+            code, language, files=files, key=f"{request.session_id}:agentcheck{slot}", stdin=stdin),
     )
 
     async def events():
@@ -2938,7 +3395,7 @@ async def agent_chat(request: AgentChatRequest):
                 yield f"data: {json.dumps({'type': 'text', 'delta': turn.final_text})}\n\n"
             if turn.record.get("files_changed"):
                 yield f"data: {json.dumps({'type': 'versions_pending'})}\n\n"
-                versions = await _agent_versions(turn, request)
+                versions = await _agent_versions(turn, request, started)
                 if versions:
                     yield f"data: {json.dumps(versions)}\n\n"
         except Exception as e:
@@ -3075,6 +3532,7 @@ async def submit_code(request: SubmitRequest):
                 session_log.per_problem_submissions.append({
                     "problem_index": session_log.current_problem_index,
                     "code": code,
+                    "files": _record_files(submitted_files or []),
                     "timestamp": timestamp,
                     "final_submit": True,
                 })
@@ -3828,6 +4286,11 @@ async def submit_survey(request: SurveySubmission):
         
         logger.info(f"Survey with AI history saved: {request.user_id} - {request.survey_type} survey at analysis {request.analysis_count}")
 
+        _spawn(_study_log_survey(
+            request.session_id, request.survey_type,
+            [(f"q{i + 1}", r.question, "likert" if isinstance(r.response, (int, float)) else "text", r.response)
+             for i, r in enumerate(request.responses)],
+            survey_round=request.analysis_count, timestamp=request.timestamp))
         # Firebase: same path as /log-periodic-survey (incremental, not only at final submit)
         if request.survey_type in ("periodic", "final"):
             fb_payload: Dict[str, Any] = {
@@ -3923,12 +4386,14 @@ class SurveyStatus(str, Enum):
 class SurveyQuestionData(BaseModel):
     """Store complete question data"""
     id: str
-    type: str  # likert, multiple_choice, open_ended, info_block
+    type: str  # likert, multiple_choice, checkboxes, matrix, open_ended, info_block
     question: str
     required: bool
     # Type-specific fields
     scale: Optional[Dict[str, Any]] = None  # For likert questions
-    options: Optional[List[str]] = None      # For multiple choice
+    options: Optional[List[str]] = None      # For multiple choice / checkboxes; a matrix's columns
+    rows: Optional[List[str]] = None         # For matrix (answer: {row: option})
+    allow_other: bool = False                # Multiple choice / checkboxes: "Other (please specify)" box
     placeholder: Optional[str] = None        # For open-ended
     max_length: Optional[int] = None         # For open-ended
     min_length: Optional[int] = None         # For open-ended (minimum character requirement)
@@ -4569,6 +5034,20 @@ async def submit_pre_post_survey(request: PrePostSurveySubmission):
                 session_log.post_survey_status = SurveyStatus.COMPLETED
                 session_log.post_survey_timestamp = request.timestamp
                 session_log.post_survey_responses = survey_package
+            _spawn(_study_log_survey(
+                request.session_id, request.survey_type,
+                [(r.question_id, r.question_text, r.question_type, r.answer) for r in request.responses],
+                timestamp=request.timestamp, completion_time_seconds=request.completion_time_seconds))
+            # Kept per problem (a later problem's survey must not replace this one).
+            pi = int(session_log.current_problem_index or 0)
+            session_log.survey_history = [h for h in session_log.survey_history
+                                          if not (h.get("survey_type") == request.survey_type and h.get("problem_index") == pi)]
+            session_log.survey_history.append({
+                "survey_type": request.survey_type, "problem_index": pi, "timestamp": request.timestamp,
+                "completion_time_seconds": request.completion_time_seconds,
+                "responses": [{"question_id": r.question_id, "question_text": r.question_text,
+                               "question_type": r.question_type, "answer": r.answer} for r in request.responses],
+            })
 
             # Multi-problem quiz: record completion per problem so gates stay correct after advancing
             if session_log.quiz_id:
@@ -4597,7 +5076,8 @@ async def submit_pre_post_survey(request: PrePostSurveySubmission):
 
         surveys_dir = Path(os.getenv("SUBMISSIONS_DIR", "submissions")) / "pre_post_surveys"
         session_id_short = request.session_id.split('_')[-1][:8] if '_' in request.session_id else request.session_id[:8]
-        survey_file = surveys_dir / f"{request.user_id}_{request.assignment_key}_{session_id_short}_{request.survey_type}.json"
+        survey_pi = int(session_log.current_problem_index or 0) if session_log is not None else 0
+        survey_file = surveys_dir / f"{request.user_id}_{request.assignment_key}_{session_id_short}_{request.survey_type}_p{survey_pi + 1}.json"
 
         file_data = {
             'user_id': request.user_id,
@@ -4917,6 +5397,7 @@ async def authenticate_user(request: AuthRequest):
         
         active_sessions[session_id] = session_log
         save_session_to_local(session_log)
+        prewarm_ai_context(session_id)
 
         try:
             await asyncio.to_thread(
@@ -5050,6 +5531,7 @@ async def save_session_to_firebase(
             'compiler_clicked': compiler_clicked,
             'total_problems': session_log.total_problems,
             'per_problem_submissions': session_log.per_problem_submissions,
+            'survey_history': session_log.survey_history,
         }
         if session_log.quiz_id:
             session_metadata['quiz_id'] = session_log.quiz_id
@@ -5759,6 +6241,7 @@ def build_quiz_join_response(
     resumed: bool = False,
 ) -> Dict[str, Any]:
     """Shared JSON shape for /quiz/join and resume."""
+    prewarm_ai_context(session_log.session_id)
     problems = quiz_data.get("problems", []) or []
     prob = problems[problem_idx] if problem_idx < len(problems) else {}
     problem_description = prob.get("problem_statement", "")
@@ -6088,10 +6571,12 @@ async def quiz_next_problem(request: Request):
             "periodic_survey_interval": int(problem.get("recurrent_survey_interval", 4)),
         }
 
-    # Save current problem's code
+    # Save current problem's code (every file of the workspace when the browser sends them)
+    files = body.get("files") if isinstance(body.get("files"), list) else []
     session_log.per_problem_submissions.append({
         "problem_index": session_log.current_problem_index,
         "code": code,
+        "files": _record_files([f for f in files if isinstance(f, dict)]),
         "timestamp": datetime.now().isoformat(),
     })
 
@@ -6123,6 +6608,7 @@ async def quiz_next_problem(request: Request):
             )
         return {"status": "complete", "message": "All problems completed"}
 
+    prewarm_ai_context(session_id)
     # Reset recurrent survey counter for the new problem
     session_log.periodic_survey_count = 0
 

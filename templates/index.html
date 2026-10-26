@@ -220,6 +220,28 @@
         .problem-panel__body[hidden] {
             display: none !important;
         }
+        .problem-panel__body .section-content img {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            margin: 8px 0;
+            border-radius: 6px;
+            background: #fff;
+            pointer-events: none;
+        }
+        /* Problem description / test cases / constraints are not selectable or copyable */
+        #problemPanelBody,
+        #problemPanelBody *,
+        #problemPanelHeading {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-user-drag: none;
+        }
+        @media print {
+            #problemPanel { display: none !important; }
+        }
         .problem-panel__ai-history-embed .ai-history-section {
             margin: 0;
             padding: 0;
@@ -907,7 +929,7 @@
             white-space: pre-wrap;
         }
         .term-stdin {
-            color: #9cdcfe;
+            color: inherit;
         }
         .term-input {
             display: inline-block;
@@ -916,7 +938,7 @@
             background: transparent;
             border: 0;
             outline: none;
-            color: #9cdcfe;
+            color: inherit;
             font: inherit;
             padding: 0;
             caret-color: #ffffff;
@@ -2229,6 +2251,9 @@
             <div class="lc-card__header code-card__header">
                 <span class="lc-card__title"><svg viewBox="0 0 16 16" class="tab-icon" style="color:#2cbb5d"><path fill="currentColor" d="M5.3 4.2 1.5 8l3.8 3.8.9-.9L3.3 8l2.9-2.9zm5.4 0-.9.9L12.7 8l-2.9 2.9.9.9L14.5 8zM9.2 2.5 5.6 13.2l1.2.3L10.4 2.8z"/></svg>Code</span>
                 <span class="code-card__lang" id="codeLangLabel">—</span>
+                <span id="suggestStatus" class="suggest-status" role="status" aria-live="polite" hidden>
+                    <span class="suggest-status__ring"></span><span class="suggest-status__text">Suggestions on</span>
+                </span>
                 <span id="autosaveIndicator" class="autosave-indicator saved" role="status" aria-live="polite" title="Your code is saved automatically as you type">
                     <span class="autosave-icon"></span><span class="autosave-text">Saved</span>
                 </span>
@@ -2348,6 +2373,9 @@
 
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs/loader.min.js"></script>
+<script>
+{% include 'study_log.js' %}
+</script>
 <script>
 {% include 'workspace.js' %}
 </script>
@@ -3229,6 +3257,7 @@ var ALLOWED_ACTIVITY_TYPES = {
     code_editing_delete: true,
     code_editing_modify: true,
     paste_attempt: true,
+    tab_switching: true,
     ai_analysis_trigger: true,
     ai_analysis_complete: true,
     copilot_popup_cleared_for_analysis: true,
@@ -3240,6 +3269,16 @@ var ALLOWED_ACTIVITY_TYPES = {
     // Condition 2: inline ghost-text suggestions (ai_modes.js)
     inline_suggestion_shown: true,
     inline_suggestion_accepted: true,
+    // Wrong-pick feedback (conditions 2-4, ai_modes.js)
+    wrong_pick_corrected: true,
+    wrong_pick_revealed: true,
+    wrong_pick_explanation_opened: true,
+    wrong_pick_notice_closed: true,
+    agent_version_viewed: true,
+    agent_version_file_viewed: true,
+    agent_version_applied: true,
+    agent_versions_undone: true,
+    agent_versions_skipped: true,
     // Condition 3: coding agent (ai_modes.js)
     agent_panel_opened: true,
     agent_mode_changed: true,
@@ -3255,6 +3294,8 @@ var ALLOWED_ACTIVITY_TYPES = {
     agent_skill_deleted: true,
     // Workspace + terminal (workspace.js, terminal.js)
     terminal_command: true,
+    terminal_input_wait: true,
+    terminal_auto_eof: true,
     file_created: true,
     file_renamed: true,
     file_deleted: true
@@ -4129,6 +4170,7 @@ async function initializeFromURL() {
         
         initializeSidebar();
         initProblemPanelTabs();
+        initProblemPanelCopyGuard();
         refreshProblemPanelAiHistory();
         
         // Check for saved progress / resumed session
@@ -6208,6 +6250,52 @@ function refreshProblemPanelAiHistoryContent() {
     }
 }
 
+// Block copying the problem description, test cases and constraints (so they can't be pasted into an external chatbot)
+var _problemPanelCopyGuardInitialized = false;
+function initProblemPanelCopyGuard() {
+    if (_problemPanelCopyGuardInitialized) return;
+    var panel = document.getElementById('problemPanelBody');
+    if (!panel) return;
+    _problemPanelCopyGuardInitialized = true;
+
+    function selectionTouchesPanel() {
+        var sel = window.getSelection && window.getSelection();
+        if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return false;
+        for (var i = 0; i < sel.rangeCount; i++) {
+            if (sel.getRangeAt(i).intersectsNode(panel)) return true;
+        }
+        return false;
+    }
+
+    function block(e, kind) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.clipboardData) {
+            try { e.clipboardData.setData('text/plain', ''); } catch (_e) { /* ignore */ }
+        }
+        logActivity('problem_copy_attempt', { method: kind, attempt_blocked: true });
+    }
+
+    // Copy/cut: block when fired inside the panel or when the selection includes it (e.g. Ctrl+A on the page)
+    ['copy', 'cut'].forEach(function (type) {
+        document.addEventListener(type, function (e) {
+            if (panel.contains(e.target) || selectionTouchesPanel()) block(e, type);
+        }, true);
+    });
+    ['contextmenu', 'dragstart', 'selectstart'].forEach(function (type) {
+        panel.addEventListener(type, function (e) {
+            if (type === 'selectstart') { e.preventDefault(); return; }
+            block(e, type);
+        }, true);
+    });
+    // Ctrl/Cmd+A while focus is in the panel would select the whole page
+    document.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A') && panel.contains(document.activeElement)) {
+            e.preventDefault();
+        }
+    }, true);
+}
+
 function initProblemPanelTabs() {
     if (_problemPanelTabsInitialized) return;
     var tabProblem = document.getElementById('problemTabProblem');
@@ -6522,6 +6610,11 @@ async function submitToDatabase() {
     // Set submission flag to prevent any periodic surveys during submission process
     isSubmissionInProgress = true;
 
+    // End of this step: the study log rows kept in the browser go to the server (study_log.js).
+    if (window.StudyLog) {
+        try { await StudyLog.endStep(); } catch (e) { console.warn('Study log send failed (kept locally)', e); }
+    }
+
     // Check if final periodic survey is needed (same gate as mid-task periodic: must be enabled)
     if (surveyData.questions.length > 0 &&
         !surveyData.finalSurveyResponse &&
@@ -6609,6 +6702,8 @@ async function checkAndShowPostSurvey() {
                 body: JSON.stringify({
                     session_id: currentSession.sessionId,
                     code: code,
+                    // Every file of the workspace, so a multi-file solution is kept per problem.
+                    files: window.WS ? WS.list() : [],
                     programming_language: currentSession.programmingLanguage || 'python',
                 })
             });
@@ -6676,6 +6771,9 @@ async function proceedWithActualSubmission() {
         return;
     }
     _submitInflight = true;
+    if (window.StudyLog) {
+        try { await StudyLog.endStep(); } catch (e) { console.warn('Study log send failed (kept locally)', e); }
+    }
     var submitButtonEarly = document.getElementById('submitButton');
     if (submitButtonEarly) {
         submitButtonEarly.disabled = true;
@@ -7195,7 +7293,8 @@ document.addEventListener('visibilitychange', function() {
         // User switched away from tab
         lastFocusTime = currentTime;
     } else if (newVisibilityState === 'visible' && !isTabVisible) {
-        // User returned to tab
+        // User returned to tab (counted as a tab switch in the analytics sessions table)
+        logActivity('tab_switching', { away_ms: lastFocusTime ? currentTime - lastFocusTime : null });
         if (tabTrackingEnabled) {
             // Show popup like paste notification (center popup + top banner)
             showTabReturnNotification();

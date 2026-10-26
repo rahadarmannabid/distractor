@@ -1,40 +1,54 @@
 [
   {
-    "id": "post_mental_q1",
-    "question": "Please describe in your own words, how CodeOracle generates code suggestions.",
+    "id": "post_unc_ai_help",
+    "question": "During the task, how did the AI help you solve the programming problem?",
     "type": "open_ended",
     "required": true,
     "options": [],
     "help_text": "",
-    "placeholder": "Explain your understanding...",
+    "placeholder": "Describe how the AI helped...",
     "min_length": 30,
     "max_length": 1000
   },
   {
-    "id": "post_mental_q2",
-    "question": "Where do you think CodeOracle obtains the contextual information it uses to generate the next lines of code?",
+    "id": "post_unc_trust",
+    "question": "During the task, how much did you trust the AI to solve the programming problem correctly?",
+    "type": "likert",
+    "required": true,
+    "options": [],
+    "scale": {
+      "min": 1,
+      "max": 5,
+      "minLabel": "Not at all",
+      "maxLabel": "Completely"
+    },
+    "help_text": ""
+  },
+  {
+    "id": "post_unc_find_bugs",
+    "question": "During the task, how did you find the bugs in generated code suggestions?",
     "type": "open_ended",
     "required": true,
     "options": [],
     "help_text": "",
-    "placeholder": "Describe how you think context is used...",
+    "placeholder": "Describe how you found the bugs...",
     "min_length": 30,
     "max_length": 1000
   },
   {
-    "id": "post_mental_q3",
-    "question": "Please describe what might cause CodeOracle's code suggestions to be incorrect.",
+    "id": "post_unc_easy_hard_bugs",
+    "question": "During the task, which types of bugs in the code suggestions were easy and which types were hard for you to find? Give a couple of examples.",
     "type": "open_ended",
     "required": true,
     "options": [],
     "help_text": "",
-    "placeholder": "Describe potential causes...",
+    "placeholder": "Give a couple of examples...",
     "min_length": 30,
     "max_length": 1000
   },
   {
-    "id": "post_mental_q4",
-    "question": "Why might CodeOracle's interpretation of your goal differ from your original intention?",
+    "id": "post_unc_why_incorrect",
+    "question": "Why do you think the code completion tool might generate code suggestions that are incorrect?",
     "type": "open_ended",
     "required": true,
     "options": [],
@@ -42,257 +56,5 @@
     "placeholder": "Describe possible reasons...",
     "min_length": 30,
     "max_length": 1000
-  },
-  {
-    "id": "post_accuracy_q1",
-    "question": "How accurate do you believe CodeOracle generated code suggestions are?",
-    "type": "slider",
-    "required": true,
-    "options": [],
-    "scale": {
-      "min": 0,
-      "max": 100,
-      "step": 5,
-      "default": 50,
-      "unit": "%"
-    },
-    "help_text": "0% = completely inaccurate, 100% = perfectly accurate",
-    "image": {
-      "src": "guess_and_next_line.png"
-    }
-  },
-  {
-    "id": "post_impact_q1",
-    "question": "How do you think CodeOracle generated code suggestions affect your ability to correctly complete programming assignments?",
-    "type": "likert",
-    "required": true,
-    "options": [],
-    "scale": {
-      "min": 1,
-      "max": 5,
-      "minLabel": "Hinder greatly",
-      "maxLabel": "Help greatly"
-    },
-    "help_text": ""
-  },
-  {
-    "id": "post_impact_q2",
-    "question": "CodeOracle appeared to understand my goals really well.",
-    "type": "likert",
-    "required": true,
-    "options": [],
-    "scale": {
-      "min": 1,
-      "max": 5,
-      "minLabel": "Strongly disagree",
-      "maxLabel": "Strongly agree"
-    },
-    "help_text": ""
-  },
-  {
-    "id": "post_experience_q1",
-    "question": "The CodeOracle system provides next-line code suggestions alongside a guess of the problem you were attempting to solve. Share your overall experience with how this system helped or hindered you in solving the programming assignment.",
-    "type": "open_ended",
-    "required": true,
-    "options": [],
-    "help_text": "",
-    "placeholder": "Describe your overall experience...",
-    "min_length": 50,
-    "max_length": 1500
-  },
-  {
-    "id": "post_helpfulness_q1",
-    "question": "Seeing the next-line code suggestions was:",
-    "type": "multiple_choice",
-    "required": true,
-    "options": [
-      "Very unhelpful",
-      "Unhelpful",
-      "Neither",
-      "Helpful",
-      "Very helpful"
-    ],
-    "help_text": ""
-  },
-  {
-    "id": "post_helpfulness_q2",
-    "question": "Seeing the AI's interpretation was:",
-    "type": "multiple_choice",
-    "required": true,
-    "options": [
-      "Very unhelpful",
-      "Unhelpful",
-      "Neither",
-      "Helpful",
-      "Very helpful"
-    ],
-    "help_text": ""
-  },
-  {
-    "id": "post_strategy_q1",
-    "question": "Explain how you used the AI's interpretation during this activity.",
-    "type": "open_ended",
-    "required": true,
-    "options": [],
-    "help_text": "",
-    "placeholder": "Describe how you used the AI's interpretation...",
-    "min_length": 30,
-    "max_length": 1000
-  },
-  {
-    "id": "post_strategy_q2",
-    "question": "Would you continue to use this tool, why or why not?",
-    "type": "open_ended",
-    "required": true,
-    "options": [],
-    "help_text": "",
-    "placeholder": "Explain your reasoning...",
-    "min_length": 30,
-    "max_length": 1000
-  },
-  {
-    "id": "post_misalignment_q1",
-    "question": "How often was the AI's understanding different from your intention, and how did you interpret those misalignments?",
-    "type": "open_ended",
-    "required": true,
-    "options": [],
-    "help_text": "In this system, the AI coding assistant provided next-line code suggestions alongside a guess of the problem you were attempting to solve.",
-    "placeholder": "Describe frequency and how you interpreted misalignments...",
-    "min_length": 30,
-    "max_length": 1500
-  },
-  {
-    "id": "post_reflection_q1",
-    "question": "Has using this tool helped you to change your view on how AI coding assistants work, and if so, why?",
-    "type": "open_ended",
-    "required": true,
-    "options": [],
-    "help_text": "",
-    "placeholder": "Reflect on your view of AI coding assistants...",
-    "min_length": 30,
-    "max_length": 1000
-  },
-  {
-    "id": "post_trust_open",
-    "question": "Please describe why you trust or distrust CodeOracle. Give some examples.",
-    "type": "open_ended",
-    "required": true,
-    "options": [],
-    "help_text": "",
-    "placeholder": "Describe your trust or distrust with examples...",
-    "min_length": 30,
-    "max_length": 1000
-  },
-  {
-    "id": "post_trust_q1",
-    "question": "CodeOracle is very reliable. I can trust it to be correct all the time.",
-    "type": "likert",
-    "required": true,
-    "options": [],
-    "scale": {
-      "min": 1,
-      "max": 5,
-      "minLabel": "Strongly disagree",
-      "maxLabel": "Strongly agree"
-    },
-    "help_text": ""
-  },
-  {
-    "id": "post_trust_q2",
-    "question": "I am confident in CodeOracle. I feel that it works well.",
-    "type": "likert",
-    "required": true,
-    "options": [],
-    "scale": {
-      "min": 1,
-      "max": 5,
-      "minLabel": "Strongly disagree",
-      "maxLabel": "Strongly agree"
-    },
-    "help_text": ""
-  },
-  {
-    "id": "post_trust_q3",
-    "question": "The outputs of CodeOracle are very predictable.",
-    "type": "likert",
-    "required": true,
-    "options": [],
-    "scale": {
-      "min": 1,
-      "max": 5,
-      "minLabel": "Strongly disagree",
-      "maxLabel": "Strongly agree"
-    },
-    "help_text": ""
-  },
-  {
-    "id": "post_trust_q4",
-    "question": "I feel safe that when I rely on CodeOracle I will get the right answers.",
-    "type": "likert",
-    "required": true,
-    "options": [],
-    "scale": {
-      "min": 1,
-      "max": 5,
-      "minLabel": "Strongly disagree",
-      "maxLabel": "Strongly agree"
-    },
-    "help_text": ""
-  },
-  {
-    "id": "post_trust_q5",
-    "question": "CodeOracle is efficient and works very quickly.",
-    "type": "likert",
-    "required": true,
-    "options": [],
-    "scale": {
-      "min": 1,
-      "max": 5,
-      "minLabel": "Strongly disagree",
-      "maxLabel": "Strongly agree"
-    },
-    "help_text": ""
-  },
-  {
-    "id": "post_trust_q6",
-    "question": "I am wary of CodeOracle.",
-    "type": "likert",
-    "required": true,
-    "options": [],
-    "scale": {
-      "min": 1,
-      "max": 5,
-      "minLabel": "Strongly disagree",
-      "maxLabel": "Strongly agree"
-    },
-    "help_text": ""
-  },
-  {
-    "id": "post_trust_q7",
-    "question": "CodeOracle can perform the task better than a novice human user.",
-    "type": "likert",
-    "required": true,
-    "options": [],
-    "scale": {
-      "min": 1,
-      "max": 5,
-      "minLabel": "Strongly disagree",
-      "maxLabel": "Strongly agree"
-    },
-    "help_text": ""
-  },
-  {
-    "id": "post_trust_q8",
-    "question": "I like using CodeOracle for decision making.",
-    "type": "likert",
-    "required": true,
-    "options": [],
-    "scale": {
-      "min": 1,
-      "max": 5,
-      "minLabel": "Strongly disagree",
-      "maxLabel": "Strongly agree"
-    },
-    "help_text": ""
   }
 ]

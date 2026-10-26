@@ -45,7 +45,9 @@ services:
       - ./submissions:/app/submissions
       - ./session_logs:/app/session_logs
       - ./logs:/app/logs
-      
+      # Images instructors upload (problem statements, survey questions); lost on rebuild without this
+      - ./surveys/quiz_assets:/app/surveys/quiz_assets
+
       # ❌ REMOVED - These will come from Docker image:
       # - ./starter_code:/app/starter_code:ro
       # - ./surveys:/app/surveys:ro
@@ -88,7 +90,8 @@ services:
       - runner_network
     read_only: true
     tmpfs:
-      - /tmp:size=1g,mode=1777
+      # exec: compiled C/C++ programs run from /tmp (Docker mounts tmpfs noexec by default)
+      - /tmp:size=1g,mode=1777,exec
     pids_limit: 1024
     mem_limit: 6g
     cpus: 2

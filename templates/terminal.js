@@ -10,8 +10,53 @@
     var JS_TIMEOUT_MS = 10000;
     var JS_OUTPUT_LIMIT = 100000;
     var CWD = '~/project';
+    // A program that reads all of its input (sys.stdin.read(), while (cin >> x), hasNext()) only
+    // finishes at end of input, which a real terminal needs Ctrl+D for. For such programs the input
+    // is ended for the student once they have typed at least one line and then stopped typing this long.
+    var AUTO_EOF_MS = 2000;
+    var READS_TO_EOF = {
+        python: /\bstdin(?:\.buffer)?\.read(?:lines)?\s*\(|\bin\s+(?:sys\.)?stdin\b|\(\s*(?:sys\.)?stdin\s*\)|open\(\s*0\s*[,)]|\bfileinput\b|except\s*\(?\s*EOFError/,
+        c: /\bEOF\b|while\s*\(\s*(?:scanf|fgets|getline)\s*\(/,
+        cpp: /\bEOF\b|while\s*\(\s*(?:std::)?(?:cin\s*>>|getline\s*\(|scanf\s*\(|fgets\s*\()|istreambuf_iterator|\.eof\s*\(/,
+        java: /\.hasNext\w*\s*\(|readLine\s*\(\s*\)\s*\)\s*!=\s*null|\.lines\s*\(|readAllBytes|transferTo/
+    };
+    function readsToEof(language) {
+        var re = READS_TO_EOF[language];
+        if (!re) return false;
+        return WS.list().some(function (f) { return re.test(f.content || ''); });
+    }
 
     function lang() { return currentSession.programmingLanguage || 'python'; }
+
+    // Study log (study_log.js, table "compilation"): one row per run or compile by the student, linked to
+    // the suggestion or agent version accepted last (which also gets this run as its next_compilation_id).
+    var COMPILED = { c: 1, cpp: 1, java: 1 };
+    function codeVersionId(code) {
+        var h = 5381;
+        for (var i = 0; i < code.length; i++) h = ((h << 5) + h + code.charCodeAt(i)) | 0;
+        return 'v' + (h >>> 0).toString(36) + '_' + code.length;
+    }
+    function logCompilation(language, entry, compileOnly, trigger, res, started, code) {
+        if (!window.StudyLog) return;
+        var id = StudyLog.id('cr'), last = StudyLog.lastAccepted();
+        var compileStatus = res.compile_error ? 'failure' : (COMPILED[language] ? (res.status === 'rejected' ? 'not_attempted' : 'success') : 'no_compile_step');
+        var runStatus = compileOnly || res.compile_error ? 'not_run'
+            : res.status === 'success' ? 'success'
+            : res.status === 'rejected' ? 'rejected'
+            : res.reason ? (res.reason === 'stopped' ? 'stopped' : 'stopped_' + res.reason)
+            : 'runtime_error';
+        StudyLog.upsert('compilation', id, {
+            timestamp: new Date(started).toISOString(), compilation_attempt_id: id, code_version_id: codeVersionId(code),
+            run_by: 'student', run_trigger: trigger || '', language: language, entry_file: entry, compile_only: compileOnly ? 'Yes' : 'No',
+            compilation_status: compileStatus, compilation_error: res.compile_error ? (res.error || res.output || '').slice(0, 4000) : '',
+            compilation_time_ms: res.compile_ms != null ? res.compile_ms : (res.compile_error ? res.duration_ms : ''),
+            run_status: runStatus, exit_code: res.exit_code, runtime_error: runStatus === 'runtime_error' || runStatus.indexOf('stopped_') === 0 ? (res.error || '').slice(0, 4000) : '',
+            output_excerpt: (res.output || '').slice(0, 2000), run_time_ms: res.compile_error ? '' : res.duration_ms,
+            total_time_ms: Date.now() - started, stdin_lines: res.stdin_lines, input_wait_count: term.waitCount || 0,
+            suggestion_id: last ? last.suggestion_id || '' : ''
+        });
+        if (last && !last.next_compilation_id) StudyLog.upsert(last.table, last.row_id, { next_compilation_id: id });
+    }
     function log(type, d) { try { logActivity(type, d || {}); } catch (e) { /* ignore */ } }
 
     // ── Output + the single input line ───────────────────────────────────
@@ -23,8 +68,10 @@
         history: [],
         hIdx: 0,
         onProgramLine: null,
+        onProgramKey: null,
         onProgramEof: null,
         onProgramStop: null,
+        waiting: false,    // the running program is waiting for input (the server's "input_wait")
         out: function () { return document.getElementById('terminalOutput'); },
         newLine: function () {
             var div = document.createElement('div');
@@ -93,7 +140,31 @@
             }
             this.placeInput();
         },
-        finish: function () { this.open = null; this.setMode('shell'); this.scroll(); },
+        finish: function () { this.setWaiting(false); this.open = null; this.setMode('shell'); this.scroll(); },
+        // Shows that the program wants input: the input line pulses with a placeholder, and a badge
+        // next to the Terminal tab pulses too (the student may be looking at the editor).
+        setWaiting: function (on) {
+            on = !!on && this.mode === 'program';
+            if (on === this.waiting) return;
+            this.waiting = on;
+            this.ensureInput();
+            this.input.classList.toggle('term-input--waiting', on);
+            this.input.placeholder = on ? '⌨ Waiting for input… type here and press Enter' : '';
+            if (on) this.waitCount = (this.waitCount || 0) + 1;
+            var badge = document.getElementById('termWaitBadge');
+            if (!badge) {
+                var tabs = document.querySelector('#terminal .panel-tabs');
+                if (!tabs) return;
+                badge = document.createElement('span');
+                badge.id = 'termWaitBadge';
+                badge.className = 'term-wait-badge';
+                badge.setAttribute('role', 'status');
+                badge.innerHTML = '<span class="term-wait-badge__dot"></span>Waiting for input';
+                tabs.appendChild(badge);
+            }
+            badge.hidden = !on;
+            if (on) { this.scroll(); log('terminal_input_wait', {}); }
+        },
         // Freeze the current prompt line as a history line showing what was typed.
         echoCommand: function (cmd) {
             var line = this.open || this.newLine();
@@ -112,6 +183,7 @@
         onKey: function (e) {
             var input = this.input;
             if (this.mode === 'program') {
+                if (this.onProgramKey) this.onProgramKey();
                 if (e.key === 'Enter') {
                     e.preventDefault();
                     var v = input.value;
@@ -178,8 +250,24 @@
             var ws = new WebSocket(proto + '://' + location.host + '/ws/run');
             var ended = false;
             function send(msg) { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); }
+            var autoEof = !compileOnly && readsToEof(language), eofTimer = null;
+            function clearEof() { clearTimeout(eofTimer); eofTimer = null; }
+            // (Re)start the wait once the student has entered a line; typing or new output restarts it.
+            function armEof() {
+                clearEof();
+                if (!autoEof || !result.stdin_lines || ended) return;
+                eofTimer = setTimeout(function () {
+                    eofTimer = null;
+                    if (ended) return;
+                    if (term.input && term.input.value) { armEof(); return; }   // a line is still being typed
+                    autoEof = false;
+                    send({ type: 'eof' });
+                    log('terminal_auto_eof', { entry_file: entry, stdin_lines: result.stdin_lines });
+                }, AUTO_EOF_MS);
+            }
             running = { stop: function () { send({ type: 'stop' }); } };
-            term.onProgramLine = function (line) { result.stdin_lines++; send({ type: 'stdin', data: line }); };
+            term.onProgramLine = function (line) { result.stdin_lines++; send({ type: 'stdin', data: line }); armEof(); };
+            term.onProgramKey = function () { if (eofTimer) armEof(); };
             term.onProgramEof = function () { send({ type: 'eof' }); };
             term.onProgramStop = function () { send({ type: 'stop' }); };
             term.setMode('program');
@@ -193,14 +281,23 @@
                 var ev;
                 try { ev = JSON.parse(e.data); } catch (err) { return; }
                 if (ev.type === 'status') {
+                    // Like a real terminal: a program waiting for input just shows the cursor.
                     if (ev.phase === 'queued') term.write('Waiting for a free slot on the server…\n', 'term-muted');
+                } else if (ev.type === 'input_wait') {
+                    if (!ended) term.setWaiting(ev.waiting);
                 } else if (ev.type === 'output') {
+                    term.setWaiting(false);
+                    if (eofTimer) armEof();
                     term.write(ev.data, ev.stream === 'stderr' ? 'term-stderr' : '');
                     if (ev.stream === 'stderr') { if (result.error.length < 2000) result.error += ev.data; }
                     else if (result.output.length < 2000) result.output += ev.data;
                 } else if (ev.type === 'exit') {
                     ended = true;
+                    term.setWaiting(false);
+                    clearEof();
                     result.exit_code = ev.exit_code;
+                    result.duration_ms = ev.duration_ms;
+                    result.compile_ms = ev.compile_ms;
                     result.reason = ev.reason || '';
                     result.compile_error = !!ev.compile_error;
                     result.status = ev.exit_code === 0 && !ev.reason ? 'success' : (ev.compile_error ? 'compile_error' : 'error');
@@ -211,12 +308,14 @@
                     }
                 } else if (ev.type === 'rejected') {
                     ended = true;
+                    clearEof();
                     result.status = 'rejected';
                     result.error = ev.message || '';
                     term.write((ev.message || 'Could not run the program.') + '\n', 'term-warning');
                 }
             };
             ws.onclose = function () {
+                clearEof();
                 if (!ended) term.write('\nLost connection to the server while running.\n', 'term-stderr');
                 resolve(result);
             };
@@ -420,7 +519,24 @@
         },
 
         runCurrent: async function (trigger) {
-            var commands = this.runCommandFor().split('&&');
+            var L = lang();
+            var commands = this.runCommandFor().split('&&').map(function (c) { return c.trim(); });
+            if (commands.length === 2 && (L === 'c' || L === 'cpp' || L === 'java')) {
+                // "compile && run" in one server call: the run step compiles again anyway, so two
+                // calls would compile twice (slow, and doubles compiler load when a class runs at once).
+                commands.forEach(function (c) {
+                    var a = tokenize(c);
+                    log('terminal_command', { command: a[0], args: a.slice(1, 7).join(' ').slice(0, 120), trigger: trigger });
+                });
+                var runArgv = tokenize(commands[1]);
+                var entry = L === 'java' ? runArgv[1] + '.java' : tokenize(commands[0])[1];
+                var res = await this.program(L, entry, false, trigger);
+                if (this.lastResult && !this.lastResult.compile_error && this.lastResult.status !== 'rejected') {
+                    if (L === 'java') WS.names().forEach(function (n) { if (/\.java$/.test(n)) this.built[n.slice(0, -5)] = true; }, this);
+                    else this.built[runArgv[0].slice(2)] = true;
+                }
+                return res;
+            }
             for (var i = 0; i < commands.length; i++) {
                 if (!(await this.run(commands[i].trim(), trigger))) return false;
             }
@@ -429,6 +545,7 @@
 
         program: async function (language, entry, compileOnly, trigger) {
             var started = Date.now();
+            term.waitCount = 0;
             currentSession.compilerClickCount = (currentSession.compilerClickCount || 0) + 1;
             var res;
             try {
@@ -437,7 +554,8 @@
                 res = { status: 'error', output: '', error: String(err && err.message || err), exit_code: null, reason: '', stdin_lines: 0 };
                 term.write('Execution failed: ' + res.error + '\n', 'term-stderr');
             }
-            term.onProgramLine = term.onProgramEof = term.onProgramStop = null;
+            this.lastResult = res;
+            term.onProgramLine = term.onProgramKey = term.onProgramEof = term.onProgramStop = null;
             term.setMode('shell');
             var code = WS.list().map(function (f) { return f.content; }).join('\n');
             log('code_execution', {
@@ -458,6 +576,7 @@
                 error_message: res.error.substring(0, 100) + (res.error.length > 100 ? '...' : '')
             });
             try { queueActivityBatchUpload(); } catch (e) { /* ignore */ }
+            logCompilation(language, entry, compileOnly, trigger, res, started, code);
             return res.status === 'success';
         }
     };

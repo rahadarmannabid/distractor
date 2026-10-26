@@ -114,8 +114,17 @@ def _set_cached_analytics_aggregate(
 
 
 def _compute_analytics_aggregate(db, quiz_id: str, labels: List[str]) -> dict:
+    import study_log
+
     sessions = collect_quiz_sessions_from_firebase(db, quiz_id)
-    return aggregate_quiz_analytics(sessions, quiz_id, labels)
+    try:
+        # AI suggestions, accepts and rejects per session from the study log (conditions 2-4 do not log
+        # the activity events these numbers used to be counted from).
+        ai_counts = study_log.session_ai_counts(study_log.collect_all(db.reference(), quiz_id, labels, sessions))
+    except Exception as e:
+        logger.warning("Study log counts for analytics failed: %s", e)
+        ai_counts = None
+    return aggregate_quiz_analytics(sessions, quiz_id, labels, ai_counts)
 
 
 def _attach_live_now_to_analytics(data: dict, quiz_id: str, labels: List[str]) -> None:
@@ -159,10 +168,12 @@ def _load_analytics_payload_for_request(
     return data, False
 
 
-# Instructor quiz builder: default survey question banks (editable JSON on disk)
+# Instructor quiz builder: default survey question banks (editable JSON on disk). The post-survey
+# default depends on the problem's "Correct wrong picks": "post_controlled" when on, "post" when off.
 _DEFAULT_SURVEY_TEMPLATE_FILES = {
     "pre": Path("surveys/instructor_default_pre_survey.json"),
     "post": Path("surveys/instructor_default_post_survey.json"),
+    "post_controlled": Path("surveys/instructor_default_post_survey_controlled.json"),
     "recurrent": Path("surveys/instructor_default_recurrent_survey.json"),
 }
 
@@ -182,19 +193,29 @@ def _sanitize_quiz_asset_filename(name: str) -> str:
 
 
 def _rewrite_quiz_image_ids(obj: object, old_id: str, new_id: str) -> None:
-    """Rewrite image.src from old_id/filename → new_id/filename everywhere in nested structures."""
+    """Rewrite image.src from old_id/filename → new_id/filename everywhere in nested structures,
+    and /quiz-images/old_id/… links inside rich-text fields (problem statement, test cases, constraints)."""
     prefix = old_id + "/"
+    url_old, url_new = f"/quiz-images/{old_id}/", f"/quiz-images/{new_id}/"
     if isinstance(obj, dict):
         im = obj.get("image")
         if isinstance(im, dict) and isinstance(im.get("src"), str):
             s = im["src"]
             if s.startswith(prefix):
                 im["src"] = new_id + "/" + s[len(prefix) :]
-        for v in obj.values():
-            _rewrite_quiz_image_ids(v, old_id, new_id)
+        for k, v in obj.items():
+            if isinstance(v, str):
+                if url_old in v:
+                    obj[k] = v.replace(url_old, url_new)
+            else:
+                _rewrite_quiz_image_ids(v, old_id, new_id)
     elif isinstance(obj, list):
-        for x in obj:
-            _rewrite_quiz_image_ids(x, old_id, new_id)
+        for i, x in enumerate(obj):
+            if isinstance(x, str):
+                if url_old in x:
+                    obj[i] = x.replace(url_old, url_new)
+            else:
+                _rewrite_quiz_image_ids(x, old_id, new_id)
 
 
 @router.get("/default-survey-templates/{which}")
@@ -327,6 +348,7 @@ def _normalize_quiz_data(quiz_data: dict) -> dict:
         for i, prob in enumerate(quiz_data["problems"]):
             if not (prob.get("title") or "").strip():
                 prob["title"] = f"Problem {i + 1}"
+            prob.update(bug_injection.clean_problem_bug_settings(prob, quiz_data))
             if "test_cases" not in prob:
                 prob["test_cases"] = ""
             if not prob.get("_has_surveys"):
@@ -555,6 +577,7 @@ async def save_quiz(request: Request, payload: dict = Body(...)):
             return JSONResponse({"success": False, "error": f"Problem {i+1} requires a title."}, status_code=400)
         if not (prob.get("problem_statement") or "").strip():
             return JSONResponse({"success": False, "error": f"Problem {i+1} requires a problem statement."}, status_code=400)
+        prob.update(bug_injection.clean_problem_bug_settings(prob))
 
     # Validate conditions (list, each must be 1, 2, 3 or 4)
     conditions = payload.get("conditions", [1])
@@ -782,6 +805,7 @@ async def update_quiz(request: Request, quiz_id: str, payload: dict = Body(...))
                 return JSONResponse({"success": False, "error": f"Problem {i+1} requires a title."}, status_code=400)
             if not (prob.get("problem_statement") or "").strip():
                 return JSONResponse({"success": False, "error": f"Problem {i+1} requires a problem statement."}, status_code=400)
+            prob.update(bug_injection.clean_problem_bug_settings(prob))
 
     updatable_fields = [
         "teaser", "problems",
@@ -869,6 +893,34 @@ def _safe_quiz_export_slug(quiz_id: str) -> str:
     return s or "quiz"
 
 
+def _study_slug(quiz: dict, quiz_id: str) -> str:
+    """Quiz title + id prefix for study-log file names, e.g. "pyramid-practice-3f2a1b"."""
+    title = re.sub(r"[^a-z0-9]+", "-", str(quiz.get("title") or quiz.get("teaser") or "quiz").lower()).strip("-")[:40]
+    return f"{title or 'quiz'}-{_safe_quiz_export_slug(quiz_id)[:6]}"
+
+
+def _study_downloads(quiz: dict, quiz_id: str, participant: Optional[str] = None) -> List[dict]:
+    """The study-log CSVs of the quiz's selected conditions: [{condition, name, files: [{table, title,
+    filename, url}]}] (for one participant when given)."""
+    import study_log
+
+    slug = _study_slug(quiz, quiz_id)
+    names = {1: "No AI", 2: "Autocomplete, single line", 3: "Coding agent", 4: "Autocomplete, multi-line"}
+    out = []
+    for c in sorted({int(x) for x in (quiz.get("conditions") or [1]) if str(x).isdigit()}):
+        if c not in study_log.CONDITION_NAMES:
+            continue
+        files = []
+        for t in study_log.available_tables(c):
+            url = f"/instructor/quiz/{quote(quiz_id, safe='')}/study-log-export?condition={c}&table={t}"
+            if participant:
+                url += f"&user_id={quote(participant, safe='')}"
+            files.append({"table": t, "title": study_log.TABLE_TITLE[t],
+                          "filename": study_log.export_filename(slug, c, t, participant), "url": url})
+        out.append({"condition": c, "name": names[c], "files": files})
+    return out
+
+
 def _quiz_problem_labels(quiz: dict) -> List[str]:
     probs = quiz.get("problems") or []
     labels: List[str] = []
@@ -917,6 +969,9 @@ async def quiz_analytics_page(request: Request, quiz_id: str):
             "quiz_teaser": (quiz.get("teaser") or quiz.get("title") or "").strip(),
             "problem_labels": labels,
             "firebase_available": True,
+            "study_downloads": _study_downloads(quiz, quiz_id),
+            "study_all": {"url": f"/instructor/quiz/{quote(quiz_id, safe='')}/study-log-all",
+                          "filename": f"{_study_slug(quiz, quiz_id)}_all-logs.csv"},
         },
     )
 
@@ -1002,6 +1057,7 @@ async def quiz_activity_log_page(
     log = build_user_ai_activity_log(payload, labels)
     rows = log.get("rows") or []
     problem_tables = log.get("problem_tables") or []
+    study = await asyncio.to_thread(_participant_study, db, quiz, quiz_id, uid, session_condition, labels)
     return templates.TemplateResponse(
         "instructor_activity_log.html",
         {
@@ -1017,11 +1073,36 @@ async def quiz_activity_log_page(
             "problem_tables": problem_tables,
             "session_id": log.get("session_id"),
             "error": None
-            if rows
+            if rows or (study and study["has_rows"])
             else "No AI suggestion rows in Firebase logs for this session (older submissions may lack `logs.ai_guesses`).",
             "firebase_available": True,
+            "study": study,
         },
     )
+
+
+def _participant_study(db, quiz: dict, quiz_id: str, uid: str, condition: Any, labels: List[str]) -> Optional[dict]:
+    """The participant's study-log tables, line-chart data and per-participant downloads."""
+    import study_log
+
+    try:
+        c = int(condition)
+    except (TypeError, ValueError):
+        return None
+    if c not in study_log.CONDITION_NAMES:
+        return None
+    try:
+        sessions = collect_quiz_sessions_from_firebase(db, quiz_id)
+        by_table = study_log.participant_rows(db.reference(), quiz_id, uid, c, labels, sessions)
+    except Exception as e:
+        logger.warning("Study log rows for %s not loaded: %s", uid, e)
+        return None
+    downloads = next((d["files"] for d in _study_downloads({**quiz, "conditions": [c]}, quiz_id, uid)), [])
+    tables = [{"table": t, "title": study_log.TABLE_TITLE[t], "columns": study_log.VIEW_COLUMNS[t],
+               "rows": by_table.get(t, []), "download": next((f for f in downloads if f["table"] == t), None)}
+              for t in study_log.available_tables(c)]
+    return {"condition": c, "condition_name": study_log.CONDITION_NAMES[c], "tables": tables,
+            "timeline": study_log.timeline(by_table), "has_rows": any(t["rows"] for t in tables)}
 
 
 @router.get("/quiz/{quiz_id}/activity-log-data")
@@ -1241,6 +1322,80 @@ async def quiz_analytics_delete_user(
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
+@router.get("/quiz/{quiz_id}/study-log-export")
+async def quiz_study_log_export(request: Request, quiz_id: str, condition: int = Query(...), table: str = Query(...),
+                                user_id: Optional[str] = Query(None)):
+    """One condition's study log table as CSV, every participant of that condition in one file (or only
+    `user_id`; see study_log.py): its interaction table (autocomplete or agent), compilation, or surveys."""
+    import study_log
+
+    email = _require_instructor(request)
+    if not email:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    fb = _get_firebase()
+    if not fb:
+        return JSONResponse({"error": "Database unavailable"}, status_code=503)
+    if condition not in study_log.CONDITION_NAMES or table not in study_log.available_tables(condition):
+        return JSONResponse({"error": "No such table for this condition"}, status_code=400)
+
+    from firebase_admin import db
+
+    try:
+        quiz = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
+        if not quiz:
+            return JSONResponse({"error": "Quiz not found"}, status_code=404)
+        if quiz.get("created_by") != email:
+            return JSONResponse({"error": "Not authorised"}, status_code=403)
+        quiz = _normalize_quiz_data(quiz)
+        labels = _quiz_problem_labels(quiz)
+        participant = validate_analytics_user_id(user_id) if user_id else None
+        sessions = await asyncio.to_thread(collect_quiz_sessions_from_firebase, db, quiz_id)
+        rows = await asyncio.to_thread(study_log.export_rows, db.reference(), quiz_id, table, condition, labels,
+                                       participant, sessions)
+        name = study_log.export_filename(_study_slug(quiz, quiz_id), condition, table, participant)
+        h = dict(_ANALYTICS_JSON_NO_CACHE)
+        h["Content-Disposition"] = f'attachment; filename="{name}"'
+        return Response(content=("\ufeff" + study_log.to_csv(table, rows)).encode("utf-8"),
+                        media_type="text/csv; charset=utf-8", headers=h)
+    except Exception as e:
+        logger.exception("quiz_study_log_export failed")
+        return JSONResponse({"error": f"Server error: {e!s}"}, status_code=500)
+
+
+@router.get("/quiz/{quiz_id}/study-log-all")
+async def quiz_study_log_all(request: Request, quiz_id: str):
+    """Every log row of the quiz in one CSV: all conditions and tables (autocomplete, agent,
+    compilation, surveys), with "log_type" and "source" columns (study_log.all_logs_csv)."""
+    import study_log
+
+    email = _require_instructor(request)
+    if not email:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    fb = _get_firebase()
+    if not fb:
+        return JSONResponse({"error": "Database unavailable"}, status_code=503)
+
+    from firebase_admin import db
+
+    try:
+        quiz = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
+        if not quiz:
+            return JSONResponse({"error": "Quiz not found"}, status_code=404)
+        if quiz.get("created_by") != email:
+            return JSONResponse({"error": "Not authorised"}, status_code=403)
+        quiz = _normalize_quiz_data(quiz)
+        labels = _quiz_problem_labels(quiz)
+        sessions = await asyncio.to_thread(collect_quiz_sessions_from_firebase, db, quiz_id)
+        data = await asyncio.to_thread(study_log.collect_all, db.reference(), quiz_id, labels, sessions)
+        h = dict(_ANALYTICS_JSON_NO_CACHE)
+        h["Content-Disposition"] = f'attachment; filename="{_study_slug(quiz, quiz_id)}_all-logs.csv"'
+        return Response(content=("\ufeff" + study_log.all_logs_csv(data)).encode("utf-8"),
+                        media_type="text/csv; charset=utf-8", headers=h)
+    except Exception as e:
+        logger.exception("quiz_study_log_all failed")
+        return JSONResponse({"error": f"Server error: {e!s}"}, status_code=500)
+
+
 @router.get("/quiz/{quiz_id}/analytics-export")
 async def quiz_analytics_export(
     request: Request,
@@ -1248,7 +1403,7 @@ async def quiz_analytics_export(
     fmt: str = "csv",
     refresh: int = Query(0, description="Set to 1 to bypass server aggregate cache"),
 ):
-    """Download per-session CSV (flattened) or full aggregate JSON for this quiz."""
+    """Download the per-session CSV (flattened) for this quiz."""
     email = _require_instructor(request)
     if not email:
         return JSONResponse({"error": "Not authenticated"}, status_code=401)
@@ -1259,9 +1414,8 @@ async def quiz_analytics_export(
 
     from firebase_admin import db
 
-    kind = (fmt or "csv").strip().lower()
-    if kind not in ("csv", "json"):
-        return JSONResponse({"error": "fmt must be csv or json"}, status_code=400)
+    if (fmt or "csv").strip().lower() != "csv":
+        return JSONResponse({"error": "Only CSV export is available"}, status_code=400)
 
     try:
         quiz = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
@@ -1278,16 +1432,6 @@ async def quiz_analytics_export(
         )
 
         slug = _safe_quiz_export_slug(quiz_id)
-        if kind == "json":
-            blob = json.dumps(data, ensure_ascii=False, indent=2)
-            h = dict(_ANALYTICS_JSON_NO_CACHE)
-            h["Content-Disposition"] = f'attachment; filename="{slug}-analytics.json"'
-            return Response(
-                content=blob.encode("utf-8"),
-                media_type="application/json; charset=utf-8",
-                headers=h,
-            )
-
         csv_text = export_per_session_csv(labels, data.get("per_session") or [])
         bom = "\ufeff"
         h = dict(_ANALYTICS_JSON_NO_CACHE)

@@ -12,3 +12,4 @@ itsdangerous>=2.0
 nh3>=0.2.14
 redis>=5.0.0
 gunicorn>=21.2.0
+pillow>=10.0

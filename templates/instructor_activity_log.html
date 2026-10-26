@@ -255,6 +255,24 @@
     }
     .csv-link:hover { color: #a7f3d0; border-color: #34d399; }
 
+    .study-section { margin-bottom: 28px; padding-bottom: 20px; border-bottom: 1px solid #1f2937; }
+    .study-timeline-chart { width: 100%; height: 320px; }
+    .study-table { margin-top: 12px; border: 1px solid #1f2937; border-radius: 8px; background: rgba(2, 6, 23, 0.25); }
+    .study-table > summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; cursor: pointer; color: #e2e8f0; font-weight: 600; font-size: 0.85rem; }
+    .study-table__count { color: #64748b; font-weight: 400; font-size: 0.75rem; }
+    .study-table .log-table-wrap { margin: 0 12px 12px; }
+    .study-log-table td { vertical-align: top; }
+    .study-pre { max-width: 360px; max-height: 120px; overflow: auto; margin: 0; }
+    .study-pre--wide { max-width: 520px; max-height: 260px; }
+    .study-log-table tr.row-buggy td:first-child { box-shadow: inset 3px 0 0 #f87171; }
+    .cell-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.72rem; color: #94a3b8; }
+    .status-pill { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 0.68rem; background: #1e293b; color: #cbd5e1; white-space: nowrap; }
+    .status-pill.status-accepted { background: rgba(52, 211, 153, 0.15); color: #6ee7b7; }
+    .status-pill.status-rejected { background: rgba(248, 113, 113, 0.15); color: #fca5a5; }
+    .status-pill.status-not_chosen, .status-pill.status-ignored { color: #94a3b8; }
+    a.study-log-dl { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding: 3px 8px; border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 6px; color: #38bdf8; text-decoration: none; font-size: 0.7rem; font-weight: 400; word-break: break-all; }
+    a.study-log-dl:hover { color: #e0f2fe; border-color: #38bdf8; background: rgba(56, 189, 248, 0.08); }
     .interaction-timeline-block {
       margin-bottom: 14px;
       padding: 12px 14px;
@@ -310,7 +328,6 @@
       <span style="font-size:0.75rem;color:var(--muted);">{{ instructor_email }}</span>
       {% if firebase_available %}
       <a class="csv-link" href="/instructor/quiz/{{ quiz_id }}/activity-log-export?user_id={{ user_id_query }}">CSV (all problems)</a>
-      <a class="json-link" href="/instructor/quiz/{{ quiz_id }}/activity-log-data?user_id={{ user_id_query }}">JSON</a>
       {% endif %}
       <a href="/instructor/quiz/{{ quiz_id }}/analytics">Back to analytics</a>
       <a href="/instructor/dashboard">Dashboard</a>
@@ -328,6 +345,62 @@
       </div>
     </div>
 
+    {% if study %}
+    <section class="study-section" aria-labelledby="study-heading">
+      <div class="problem-log-head">
+        <h2 class="problem-log-heading" id="study-heading">Study log · <span class="condition-badge condition-{{ study.condition }}">C{{ study.condition }}</span> {{ study.condition_name|replace('_', ' ') }}</h2>
+      </div>
+      <div class="interaction-timeline-block">
+        <h3>What they did during the task</h3>
+        <p style="font-size:0.72rem;color:#64748b;margin:0 0 8px 0;line-height:1.45;">
+          One line for the whole task: it rises by one at each event (a suggestion appearing, accepting a correct or buggy one, rejecting, a code run), and each event is a marker coloured by what happened. Dashed lines mark where each problem starts. Hover a marker for details; scroll or drag the bar below to zoom in.
+        </p>
+        <div class="study-timeline-chart" id="study-timeline" role="img" aria-label="Line chart of the participant's actions over time"></div>
+      </div>
+      {% for t in study.tables %}
+      <details class="study-table" {% if loop.first %}open{% endif %}>
+        <summary>
+          <span class="study-table__title">{{ t.title }}</span>
+          <span class="study-table__count">{{ t.rows|length }} row{{ '' if t.rows|length == 1 else 's' }}</span>
+          {% if t.download %}
+          <a class="study-log-dl" href="{{ t.download.url }}" download="{{ t.download.filename }}" title="Download {{ t.title }} for this participant (CSV)" onclick="event.stopPropagation()">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M7.4 1.5h1.2v7.6l2.6-2.6.85.85L8 11.4 3.95 7.35l.85-.85 2.6 2.6V1.5zM2.5 12.6h11v1.2h-11z"/></svg>
+            <span>{{ t.download.filename }}</span>
+          </a>
+          {% endif %}
+        </summary>
+        {% if t.rows %}
+        <div class="log-table-wrap">
+          <table class="log-table study-log-table">
+            <thead><tr>{% for key, label in t.columns %}<th>{{ label }}</th>{% endfor %}</tr></thead>
+            <tbody>
+              {% for row in t.rows %}
+              <tr class="{{ 'row-buggy' if row.suggestion_correctness == 'buggy' or row.accepted_suggestion_correct == 'No' or row.is_option_correct == 'No' else '' }}">
+                {% for key, label in t.columns %}
+                {% set v = row[key] if row[key] is not none else '' %}
+                <td>
+                  {% if key == 'timestamp' %}<span class="cell-mono">{{ (v|string)[11:19] or '—' }}</span>
+                  {% elif key in ['code_snapshot', 'submitted_code'] and (v|string)|length > 0 %}<details class="final-code-details"><summary>Snapshot</summary><pre class="log-pre study-pre study-pre--wide">{{ v }}</pre></details>
+                  {% elif key in ['suggestion_code', 'correct_suggestion_code', 'buggy_code_suggestions', 'accepted_code_suggestion', 'agent_correct_response', 'agent_correct_code', 'agent_buggy_response', 'agent_buggy_code', 'explanation', 'user_prompt', 'compilation_error', 'runtime_error', 'answer', 'question_text'] and (v|string)|length > 0 %}<pre class="log-pre study-pre">{{ v }}</pre>
+                  {% elif key in ['accepted_suggestion_correct', 'is_option_correct'] and v %}<span class="verdict {{ 'accepted' if v == 'Yes' else 'rejected' }}">{{ v }}</span>
+                  {% elif key == 'suggestion_correctness' and v %}<span class="verdict {{ 'rejected' if v == 'buggy' else 'accepted' }}">{{ v }}</span>
+                  {% elif key in ['suggestion_status', 'user_selected_status'] and v %}<span class="status-pill status-{{ v }}">{{ v|replace('_', ' ') }}</span>
+                  {% else %}{{ v if v != '' else '—' }}{% endif %}
+                </td>
+                {% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="empty-box">No rows yet. Rows arrive when the participant moves to the next step.</div>
+        {% endif %}
+      </details>
+      {% endfor %}
+    </section>
+    <script type="application/json" id="study-timeline-json">{{ study.timeline | tojson | safe }}</script>
+    {% endif %}
     {% if error %}
     <div class="banner warn">{{ error }}</div>
     {% endif %}
@@ -412,7 +485,7 @@
       </div>
     </section>
     {% endfor %}
-    {% elif not error %}
+    {% elif not error and not (study and study.has_rows) %}
     <div class="empty-box">No rows to display.</div>
     {% endif %}
   </div>
@@ -593,6 +666,82 @@
     });
   });
 })();
+  </script>
+  <script>
+  (function () {
+    // The participant's task as one line of events (study_log.timeline on the server): the line rises by
+    // one at each event, and each event is a marker coloured by what happened.
+    var boot = document.getElementById('study-timeline-json'), el = document.getElementById('study-timeline');
+    if (!boot || !el || typeof echarts === 'undefined') return;
+    var data;
+    try { data = JSON.parse(boot.textContent || '{}'); } catch (e) { return; }
+    var events = data.events || [];
+    if (!events.length) {
+      el.innerHTML = '<p class="timeline-empty">No study log rows yet for this participant.</p>';
+      el.style.height = 'auto';
+      return;
+    }
+    var KINDS = [
+      ['suggestion', 'Suggestion appeared', '#60a5fa', 'circle'],
+      ['prompt', 'Prompt sent', '#a78bfa', 'circle'],
+      ['accepted_correct', 'Accepted correct', '#34d399', 'circle'],
+      ['applied_correct', 'Applied correct', '#34d399', 'circle'],
+      ['accepted_buggy', 'Accepted buggy', '#f87171', 'diamond'],
+      ['applied_buggy', 'Applied buggy', '#f87171', 'diamond'],
+      ['rejected', 'Rejected', '#94a3b8', 'triangle'],
+      ['run_ok', 'Code run (success)', '#fbbf24', 'rect'],
+      ['run_failed', 'Code run (failed)', '#fb923c', 'rect']
+    ];
+    function fmt(min) {
+      var s = Math.round(min * 60);
+      return s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+    }
+    var series = [{
+      name: 'Task', type: 'line', step: 'end', showSymbol: false, silent: true, z: 1,
+      data: [[0, 0]].concat(events.map(function (e) { return [e[0], e[1]]; })),
+      lineStyle: { width: 2, color: '#475569' },
+      markLine: data.problems && data.problems.length ? {
+        silent: true, symbol: 'none', lineStyle: { type: 'dashed', color: '#475569' },
+        label: { color: '#94a3b8', fontSize: 10, formatter: function (p) { return p.name; } },
+        data: data.problems.map(function (p) { return { xAxis: p[0], name: p[1] }; })
+      } : undefined
+    }];
+    KINDS.forEach(function (k) {
+      var pts = events.filter(function (e) { return e[2] === k[0]; });
+      if (!pts.length) return;
+      series.push({
+        name: k[1], type: 'scatter', z: 3, symbol: k[3], symbolSize: k[0] === 'suggestion' || k[0] === 'prompt' ? 6 : 9,
+        itemStyle: { color: k[2] },
+        data: pts.map(function (e) { return { value: [e[0], e[1]], detail: e[3] }; })
+      });
+    });
+    var chart = echarts.init(el, null, { renderer: 'canvas' });
+    chart.setOption({
+      backgroundColor: 'transparent',
+      textStyle: { fontFamily: 'Inter, system-ui, sans-serif', fontSize: 11, color: '#e2e8f0' },
+      legend: { top: 0, data: series.slice(1).map(function (s) { return s.name; }), textStyle: { color: '#cbd5e1', fontSize: 11 } },
+      tooltip: {
+        trigger: 'item', confine: true, backgroundColor: 'rgba(15,23,42,0.95)', borderColor: '#1f2937',
+        textStyle: { color: '#e2e8f0', fontSize: 11 },
+        formatter: function (p) {
+          var d = p.data || {};
+          return '<strong>' + p.seriesName + '</strong> · ' + fmt(p.value[0]) +
+            '<br/><span style="color:#94a3b8">event #' + p.value[1] + '</span>' +
+            (d.detail ? '<br/>' + String(d.detail).replace(/</g, '&lt;') : '');
+        }
+      },
+      dataZoom: [{ type: 'inside', xAxisIndex: 0 }, { type: 'slider', xAxisIndex: 0, height: 14, bottom: 6,
+                   borderColor: '#334155', textStyle: { color: '#94a3b8' } }],
+      grid: { left: 44, right: 20, top: 44, bottom: 64 },
+      xAxis: { type: 'value', name: 'Minutes', nameLocation: 'middle', nameGap: 24, min: 0,
+               nameTextStyle: { color: '#94a3b8' }, axisLine: { lineStyle: { color: '#334155' } },
+               axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: '#1e293b' } } },
+      yAxis: { type: 'value', name: 'Events so far', minInterval: 1, nameTextStyle: { color: '#94a3b8' },
+               axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: '#1e293b' } } },
+      series: series
+    });
+    window.addEventListener('resize', function () { chart.resize(); });
+  })();
   </script>
 </body>
 </html>

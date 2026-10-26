@@ -972,6 +972,14 @@
                 showError('User ID must be at least 3 characters long');
                 return;
             }
+            if (userId.indexOf('://') !== -1) {
+                showError('That looks like a link. Enter your participant ID, not the quiz URL.');
+                return;
+            }
+            if (/[\/\\.:$#\[\]?%]/.test(userId) || userId.length > 64) {
+                showError('User ID may only use letters, numbers, spaces, _ - and @ (max 64 characters).');
+                return;
+            }
 
             if (assignmentKey.length < 4) {
                 showError('Assignment Key must be at least 4 characters long');

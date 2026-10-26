@@ -132,6 +132,7 @@
       border-bottom: 1px solid var(--border);
       padding: 8px;
     }
+    .rich-editor-wrap .ql-editor img { max-width: 100%; height: auto; border-radius: 6px; }
     .rich-editor-wrap .ql-container.ql-snow {
       border: none;
       font-family: 'Inter', system-ui, sans-serif;
@@ -549,7 +550,7 @@
 
     <div class="skills-section" id="bugSkillsSection" style="display:none;">
       <h3>Bug skills</h3>
-      <p class="subtitle">Every AI code suggestion and agent change is shown to students as <strong>two options in random order</strong>: one correct, and one with exactly one bug. For each pair the AI picks the <strong>selected</strong> bug type below that best fits the code and follows its instructions. Each bug is a <code>.md</code> file: edit it here, download it, or upload your own. Students never see these. If none is selected, students get a single correct suggestion.</p>
+      <p class="subtitle">Every AI code suggestion and agent change is shown to students as <strong>options in random order</strong>: one correct, and one or more with exactly one bug each. For each buggy option the AI picks a <strong>selected</strong> bug type below that fits the code and follows its instructions; no two buggy options of a suggestion share a bug type. Each bug is a <code>.md</code> file: edit it here, download it, or upload your own. Students never see these. If none is selected, students get a single correct suggestion. How many buggy options students see and what happens when they accept one are set per problem, in the Problems step.</p>
       <div class="bug-toolbar">
         <button type="button" class="btn btn-secondary" onclick="addBugSkill()">+ Add bug</button>
         <button type="button" class="btn btn-secondary" onclick="document.getElementById('bugSkillUpload').click()">Upload .md</button>
@@ -607,6 +608,39 @@
       <div class="starter-files-wrap">
         <div id="starterFilesContainer"></div>
         <button class="add-btn" id="addFileBtn" onclick="addStarterFile()" style="margin-top:16px;">+ Add File</button>
+      </div>
+    </div>
+
+    <div class="card" id="problemBugCard" style="display:none;">
+      <h2 id="bugCardTitle">AI bugs for Problem 1</h2>
+      <p class="subtitle">How AI suggestions with bugs work for students on this problem.</p>
+      <div class="fg">
+        <label for="prob_bug_options">Buggy options per suggestion</label>
+        <select id="prob_bug_options" style="max-width:300px;" onchange="renderBugSkills()">
+          <option value="0">1 option: randomly correct or buggy</option>
+          <option value="1">1 buggy + 1 correct</option><option value="2">2 buggy + 1 correct</option><option value="3">3 buggy + 1 correct</option>
+        </select>
+        <p class="hint">How many buggy options students see next to the correct one, each with a different bug type (e.g. option B has an API error, option C an off-by-one). Needs at least that many bug types selected in the Bug skills step; with fewer, students get one buggy option per selected type. <strong>1 option: randomly correct or buggy:</strong> students see a single suggestion, like a plain code assistant, which is the correct one or one with a bug, at random (half the time each).</p>
+      </div>
+      <div class="fg">
+        <div class="toggle-item">
+          <label class="toggle-switch">
+            <input type="checkbox" id="prob_bug_feedback" onchange="onBugFeedbackToggle()">
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="active-label">Correct wrong picks</span>
+        </div>
+        <p class="hint"><strong>On:</strong> when a student accepts the option with the bug, they are told right away, shown why it is wrong, and their code is switched to the correct option before they continue. <strong>Off:</strong> their code is left as they accepted it.</p>
+      </div>
+      <div class="fg" id="probBugRevealGroup">
+        <div class="toggle-item">
+          <label class="toggle-switch">
+            <input type="checkbox" id="prob_bug_reveal">
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="active-label">Show correct answer</span>
+        </div>
+        <p class="hint"><strong>On:</strong> when a student accepts the option with the bug, they are told it had a bug and shown why and the correct code, but their code is not changed: fixing it is up to them. <strong>Off:</strong> students are never told which option was wrong and get no explanation.</p>
       </div>
     </div>
 
@@ -780,12 +814,22 @@ function initQuillEditors() {
     [{ color: [] }, { background: [] }],
     [{ list: 'ordered' }, { list: 'bullet' }],
     ['blockquote', 'code-block'],
-    ['link'],
+    ['link', 'image'],
     ['hr'],
   ];
   var icons = Quill.import('ui/icons');
   icons.hr = '<svg viewBox="0 0 18 18" width="18" height="18"><line x1="2" y1="9" x2="16" y2="9" stroke="currentColor" stroke-width="2"/></svg>';
   var handlers = {
+    image: function () {
+      var q = this.quill;
+      var inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = 'image/png,image/jpeg,image/gif,image/webp';
+      inp.onchange = function () {
+        if (inp.files && inp.files[0]) uploadProblemImage(q, inp.files[0]);
+      };
+      inp.click();
+    },
     hr: function () {
       var q = this.quill;
       var range = q.getSelection(true);
@@ -812,6 +856,59 @@ function initQuillEditors() {
   window._quillConstraints = new Quill('#editorConstraints', Object.assign({}, baseOpts, {
     placeholder: 'e.g., 1 <= N <= 10^5',
   }));
+  [window._quillProblemStatement, window._quillTestCases, window._quillConstraints].forEach(wireProblemImagePaste);
+}
+
+// Problem images are stored as quiz assets (/quiz-images/...), never as data: URLs in the HTML,
+// so the student panel can show them and the AI suggestions can see them (problem_images.py).
+async function uploadProblemImage(quill, file) {
+  if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type)) {
+    showToast('Use a PNG, JPEG, GIF or WebP image.', 'error');
+    return;
+  }
+  if (!QUIZ_ID && !DRAFT_UPLOAD_ID) {
+    showToast('Cannot upload: reload the create-quiz page.', 'error');
+    return;
+  }
+  var fd = new FormData();
+  fd.append('file', file);
+  if (QUIZ_ID) fd.append('quiz_id', QUIZ_ID);
+  else fd.append('draft_upload_id', DRAFT_UPLOAD_ID);
+  var range = quill.getSelection(true) || { index: quill.getLength() };
+  try {
+    var res = await fetch('/instructor/upload-survey-image', { method: 'POST', body: fd, credentials: 'same-origin' });
+    var data = await res.json();
+    if (!data.success || !data.src) {
+      showToast(data.error || 'Upload failed', 'error');
+      return;
+    }
+    quill.insertEmbed(range.index, 'image', surveyQuestionImageUrl(data.src), Quill.sources.USER);
+    quill.setSelection(range.index + 1, Quill.sources.SILENT);
+  } catch (e) {
+    showToast('Upload failed', 'error');
+  }
+}
+
+function wireProblemImagePaste(quill) {
+  if (!quill) return;
+  // Pasted HTML: drop images that are not our uploads (data: or external URLs would be stripped on display anyway).
+  quill.clipboard.addMatcher('IMG', function (node, delta) {
+    var src = node.getAttribute('src') || '';
+    return src.indexOf('/quiz-images/') === 0 ? delta : new (Quill.import('delta'))();
+  });
+  function takeImageFiles(e, files) {
+    var imgs = Array.prototype.filter.call(files || [], function (f) { return /^image\//.test(f.type); });
+    if (!imgs.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    imgs.forEach(function (f) { uploadProblemImage(quill, f); });
+  }
+  quill.root.addEventListener('paste', function (e) {
+    takeImageFiles(e, e.clipboardData && e.clipboardData.files);
+  }, true);
+  quill.root.addEventListener('drop', function (e) {
+    takeImageFiles(e, e.dataTransfer && e.dataTransfer.files);
+  }, true);
 }
 
 function setQuillHtml(quill, htmlOrText) {
@@ -831,7 +928,7 @@ function setQuillHtml(quill, htmlOrText) {
 function getQuillHtml(quill) {
   if (!quill) return '';
   var t = (quill.getText() || '').replace(/\u200b/g, '').trim();
-  var hasHr = quill.root && quill.root.querySelector && quill.root.querySelector('hr');
+  var hasHr = quill.root && quill.root.querySelector && quill.root.querySelector('hr, img');
   if (!t && !hasHr) return '';
   return (quill.root.innerHTML || '').trim();
 }
@@ -839,7 +936,7 @@ function getQuillHtml(quill) {
 function isQuillEmpty(quill) {
   if (!quill) return true;
   var t = (quill.getText() || '').replace(/\u200b/g, '').trim();
-  var hasHr = quill.root && quill.root.querySelector && quill.root.querySelector('hr');
+  var hasHr = quill.root && quill.root.querySelector && quill.root.querySelector('hr, img');
   return !t && !hasHr;
 }
 
@@ -856,7 +953,7 @@ function isProblemStatementEmpty(stmt) {
   if (!stmt || !String(stmt).trim()) return true;
   var d = document.createElement('div');
   d.innerHTML = stmt;
-  return !d.textContent.replace(/\u200b/g, '').trim();
+  return !d.textContent.replace(/\u200b/g, '').trim() && !d.querySelector('img');
 }
 
 // Starter code storage
@@ -865,19 +962,60 @@ let activeCodeLang = null;
 
 // ─── Default survey templates: loaded from `surveys/instructor_default_*.json` via API ───
 let DEFAULT_PRE_SURVEY = [];
-let DEFAULT_POST_SURVEY = [];
+let DEFAULT_POST_SURVEY = [];  // "Correct wrong picks" off
+let DEFAULT_POST_SURVEY_CONTROLLED = [];  // "Correct wrong picks" on
 let DEFAULT_RECURRENT_SURVEY = [];
+
+// ─── Default problems for a new quiz (Quill HTML; example outputs in code blocks to keep their spaces) ───
+const DEFAULT_PROBLEMS = [
+  {
+    title: 'Pattern Printing',
+    problem_statement:
+      '<p>Given an integer <code>height</code>, print a right-aligned triangle of letters. The first row starts with the letter at position <code>height</code> in the alphabet (for example, 3 = C) and prints <code>height</code> letters in alphabetical order. Each row after that starts one letter earlier and prints one fewer letter, until the last row prints just A. Separate letters with a space, and shift each row 2 spaces to the right so the triangle lines up on the right side. If <code>height</code> is negative, use its positive value. If <code>height</code> is 0, print <code>Error</code>.</p>',
+    test_cases:
+      '<p><strong>Example 1:</strong></p><p>Input: height = 3</p><p>Output:</p>' +
+      '<pre class="ql-syntax" spellcheck="false">C D E\n  B C\n    A\n</pre>' +
+      '<p><strong>Example 2:</strong></p><p>Input: height = -5</p><p>Output:</p>' +
+      '<pre class="ql-syntax" spellcheck="false">E F G H I\n  D E F G\n    C D E\n      B C\n        A\n</pre>' +
+      '<p>Explanation: Negative height uses its absolute value.</p>' +
+      '<p><strong>Example 3:</strong></p><p>Input: height = 0</p><p>Output: Error</p>',
+    constraints: '<p>-13 &lt;= height &lt;= 13</p>',
+  },
+  {
+    title: 'Growing Shift Cipher',
+    problem_statement:
+      '<p>Write a program that reads a key and a message, then prints the encrypted message using these rules:</p>' +
+      '<ul><li><strong>Letters:</strong> The first letter in the message is shifted forward by the key, the second letter by key + 1, the third by key + 2, and so on. Only letters count toward this; spaces, digits, and punctuation do not increase the shift. If a shift goes past Z, wrap around to A. Keep uppercase letters uppercase and lowercase letters lowercase.</li>' +
+      '<li><strong>Digits:</strong> Every digit is shifted forward by the key. If the shift goes past 9, wrap around to 0 (for example, 9 shifted by 1 becomes 0).</li>' +
+      '<li><strong>Anything else</strong> (spaces, punctuation) stays unchanged.</li></ul>' +
+      '<p>The key must be a non-negative whole number. If it is not, print <code>Error</code>.</p>' +
+      '<p><strong>Input format:</strong> the key on the first line and the message on the second line. The message may contain spaces.</p>',
+    test_cases:
+      '<p><strong>Example 1:</strong></p><p>Input: key = 1, message = abc</p><p>Output: bdf</p>' +
+      '<p>Explanation: a shifts by 1 to b, b shifts by 2 to d, c shifts by 3 to f.</p>' +
+      '<p><strong>Example 2:</strong></p><p>Input: key = 3, message = Hi, Bob 42!</p><p>Output: Km, Gui 75!</p>' +
+      '<p>Explanation: The letters shift by 3, 4, 5, 6, 7 in order (H to K, i to m, B to G, o to u, b to i). The comma and space do not increase the shift. The digits 4 and 2 each shift by 3 to become 7 and 5.</p>' +
+      '<p><strong>Example 3:</strong></p><p>Input: key = 25, message = zz9</p><p>Output: yz4</p>' +
+      '<p>Explanation: The first z shifts by 25 and wraps to y. The second z shifts by 26 and wraps back to z. The 9 shifts by 25 and wraps to 4.</p>' +
+      '<p><strong>Example 4:</strong></p><p>Input: key = -2, message = abc</p><p>Output: Error</p>' +
+      '<p><strong>Example 5:</strong></p><p>Input: key = 3x, message = abc</p><p>Output: Error</p>' +
+      '<p>Explanation: The key must contain only digits.</p>',
+    constraints: '',
+  },
+];
 
 async function loadDefaultSurveyTemplates() {
   const base = '/instructor/default-survey-templates';
   const opts = { credentials: 'same-origin' };
-  const [pre, post, rec] = await Promise.all([
+  const [pre, post, postControlled, rec] = await Promise.all([
     fetch(`${base}/pre`, opts).then(r => { if (!r.ok) throw new Error('pre template'); return r.json(); }),
     fetch(`${base}/post`, opts).then(r => { if (!r.ok) throw new Error('post template'); return r.json(); }),
+    fetch(`${base}/post_controlled`, opts).then(r => { if (!r.ok) throw new Error('post_controlled template'); return r.json(); }),
     fetch(`${base}/recurrent`, opts).then(r => { if (!r.ok) throw new Error('recurrent template'); return r.json(); }),
   ]);
   DEFAULT_PRE_SURVEY = Array.isArray(pre) ? pre : [];
   DEFAULT_POST_SURVEY = Array.isArray(post) ? post : [];
+  DEFAULT_POST_SURVEY_CONTROLLED = Array.isArray(postControlled) ? postControlled : [];
   DEFAULT_RECURRENT_SURVEY = Array.isArray(rec) ? rec : [];
 }
 
@@ -956,12 +1094,67 @@ function defaultSurveyFields() {
     pre_survey_enabled: true,
     pre_survey: JSON.parse(JSON.stringify(DEFAULT_PRE_SURVEY)),
     post_survey_enabled: true,
-    post_survey: JSON.parse(JSON.stringify(DEFAULT_POST_SURVEY)),
+    post_survey: defaultPostSurvey(false),
     recurrent_survey_enabled: true,
     recurrent_survey: JSON.parse(JSON.stringify(DEFAULT_RECURRENT_SURVEY)),
     recurrent_survey_interval: 4,
     recurrent_survey_start: 5,
   };
+}
+
+// The default post-survey for a problem with "Correct wrong picks" on (controlled) or off.
+function defaultPostSurvey(bugFeedback) {
+  return JSON.parse(JSON.stringify(bugFeedback ? DEFAULT_POST_SURVEY_CONTROLLED : DEFAULT_POST_SURVEY));
+}
+function surveyIds(questions) { return (questions || []).map(q => q.id).join('|'); }
+
+// A saved post-survey made from a default post-survey that has gained questions since: the new ones
+// (after the last of its questions in that default) are added. Questions the instructor removed from
+// the middle stay removed; one with any question not from that default is left as it is.
+let upgradedPostSurveys = 0;
+function withNewDefaultQuestions(questions) {
+  if (!Array.isArray(questions) || !questions.length) return questions;
+  for (const def of [DEFAULT_POST_SURVEY, DEFAULT_POST_SURVEY_CONTROLLED]) {
+    const ids = def.map(q => q.id);
+    if (!questions.every(q => ids.includes(q.id))) continue;
+    const last = Math.max(...questions.map(q => ids.indexOf(q.id)));
+    const added = def.slice(last + 1);
+    if (!added.length) return questions;
+    upgradedPostSurveys++;
+    return questions.concat(JSON.parse(JSON.stringify(added)));
+  }
+  return questions;
+}
+
+// "Correct wrong picks" toggled: switch the problem's post-survey to the matching default. A
+// post-survey still equal to the other default is switched as is; one the instructor edited only
+// after they confirm.
+function onBugFeedbackToggle() {
+  syncBugReveal();
+  const on = document.getElementById('prob_bug_feedback').checked;
+  const current = collectSurvey('probPostSurveyList');
+  const next = defaultPostSurvey(on);
+  if (surveyIds(current) === surveyIds(next)) return;
+  const other = surveyIds(on ? DEFAULT_POST_SURVEY : DEFAULT_POST_SURVEY_CONTROLLED);
+  const label = on ? '"Correct wrong picks" on' : '"Correct wrong picks" off';
+  if (current.length && surveyIds(current) !== other &&
+      !confirm(`Replace this problem's post-survey with the default post-survey for ${label}? Your edits to it will be lost.`)) return;
+  renderSurveyList('probPostSurveyList', next);
+  showToast(`Post-survey switched to the default for ${label}.`, 'success');
+}
+
+// A problem's bug_options: 0 (one option, randomly correct or buggy) to 3; 1 when unset.
+function bugOptionsValue(v) {
+  const n = parseInt(v);
+  return Number.isNaN(n) ? 1 : Math.max(0, Math.min(3, n));
+}
+function bugOptionsLabel(n) {
+  return n === 0 ? '1 option, randomly correct or buggy' : `${n} buggy + 1 correct`;
+}
+
+// Helper: wrong-pick feedback and buggy options for a new problem
+function defaultBugFields() {
+  return { bug_options: 1, bug_feedback: false, bug_reveal: false };
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -1007,25 +1200,25 @@ document.addEventListener('DOMContentLoaded', async () => {
       pre_survey_enabled: hasSurveys ? (prob.pre_survey_enabled !== false) : (quizPre.length ? true : defaults.pre_survey_enabled),
       pre_survey: hasSurveys ? (prob.pre_survey || []) : (quizPre.length ? quizPre : defaults.pre_survey),
       post_survey_enabled: hasSurveys ? (prob.post_survey_enabled !== false) : (quizPost.length ? true : defaults.post_survey_enabled),
-      post_survey: hasSurveys ? (prob.post_survey || []) : (quizPost.length ? quizPost : defaults.post_survey),
+      post_survey: withNewDefaultQuestions(hasSurveys ? (prob.post_survey || []) : (quizPost.length ? quizPost : defaults.post_survey)),
       recurrent_survey_enabled: hasSurveys ? (prob.recurrent_survey_enabled !== false) : (quizRec.length ? true : defaults.recurrent_survey_enabled),
       recurrent_survey: hasSurveys ? (prob.recurrent_survey || []) : (quizRec.length ? quizRec : defaults.recurrent_survey),
       recurrent_survey_interval: hasSurveys ? (prob.recurrent_survey_interval || 4) : (quizRec.length ? quizRecInterval : defaults.recurrent_survey_interval),
       recurrent_survey_start: hasSurveys ? (prob.recurrent_survey_start || 5) : (quizRec.length ? quizRecStart : defaults.recurrent_survey_start),
+      bug_options: bugOptionsValue(prob.bug_options),
+      bug_feedback: !!prob.bug_feedback,
+      bug_reveal: !!prob.bug_reveal,
     });
   });
   } else {
-  problemsData.push(Object.assign({
-    title: '',
-    problem_statement: '',
-    constraints: '',
-    test_cases: '',
-    starter_code: {},
-  }, defaultSurveyFields()));
+  DEFAULT_PROBLEMS.forEach(p => problemsData.push(Object.assign({ starter_code: {} }, p, defaultSurveyFields(), defaultBugFields())));
   }
 
   switchProblem(0);
   renderProblemTabs();
+  if (upgradedPostSurveys) {
+    showToast(`Added the new default post-survey question(s) to ${upgradedPostSurveys} problem(s). Save the quiz to keep them.`, 'success');
+  }
 });
 
 // Toast
@@ -1063,6 +1256,7 @@ function updateSkillsVisibility() {
   document.getElementById('skillsSection').style.display = selectedConditions.includes(3) ? '' : 'none';
   // Bugs are planted in AI output, so only conditions with AI (2, 3, 4) need them.
   document.getElementById('bugSkillsSection').style.display = selectedConditions.some(c => c !== 1) ? '' : 'none';
+  document.getElementById('problemBugCard').style.display = selectedConditions.some(c => c !== 1) ? '' : 'none';
 }
 function renderSkills() {
   const list = document.getElementById('skillsList');
@@ -1078,6 +1272,10 @@ function renderSkills() {
 function addSkill() { agentSkills.push({ name: '', instructions: '' }); renderSkills(); }
 function removeSkill(i) { agentSkills.splice(i, 1); renderSkills(); }
 document.addEventListener('DOMContentLoaded', () => { renderSkills(); renderBugSkills(); updateSkillsVisibility(); });
+// "Show correct answer" is only offered while "Correct wrong picks" is off.
+function syncBugReveal() {
+  document.getElementById('probBugRevealGroup').style.display = document.getElementById('prob_bug_feedback').checked ? 'none' : '';
+}
 
 // Bug skills: same .md format as bug_skills/*.md on the server (front matter + instructions).
 function slugify(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60); }
@@ -1129,7 +1327,14 @@ function renderBugSkills() {
       </div>
     </div>`).join('') || '<p class="subtitle" style="margin-top:12px;">No bug skills. Add one, upload a .md file, or restore the built-in set.</p>';
   const on = bugSkills.filter(s => s.enabled).length;
-  document.getElementById('bugSkillCount').textContent = `${on} of ${bugSkills.length} selected`;
+  // The most buggy options any problem asks for (the problem on screen from its form fields).
+  // (A single random option needs one bug type, like "1 buggy + 1 correct".)
+  const want = Math.max(1, bugOptionsValue(document.getElementById('prob_bug_options').value),
+    ...problemsData.filter((_, i) => i !== currentProblemIndex).map(p => bugOptionsValue(p.bug_options)));
+  const count = document.getElementById('bugSkillCount');
+  count.textContent = `${on} of ${bugSkills.length} selected` +
+    (on && on < want ? ` (select at least ${want} for ${want} buggy options)` : '');
+  count.style.color = on && on < want ? 'var(--danger-light)' : '';
 }
 function toggleBugSkill(i, on) { bugSkills[i].enabled = on; renderBugSkills(); }
 function toggleBugSkillEditor(i) { bugSkills[i]._open = !bugSkills[i]._open; renderBugSkills(); }
@@ -1222,6 +1427,10 @@ function saveCurrentProblem() {
     recurrent_survey: collectSurvey('probRecurrentSurveyList'),
     recurrent_survey_interval: parseInt(document.getElementById('probRecurrentInterval').value) || 4,
     recurrent_survey_start: parseInt(document.getElementById('probRecurrentStart').value) || 5,
+    bug_options: bugOptionsValue(document.getElementById('prob_bug_options').value),
+    bug_feedback: document.getElementById('prob_bug_feedback').checked,
+    // Only applies while "Correct wrong picks" is off.
+    bug_reveal: document.getElementById('prob_bug_reveal').checked,
   };
 }
 
@@ -1246,6 +1455,14 @@ function switchProblem(idx) {
   }
   activeCodeLang = null;
   updateCodeTabs();
+
+  // Per-problem wrong-pick feedback and buggy options
+  document.getElementById('bugCardTitle').textContent = 'AI bugs for ' + ((prob.title || '').trim() || ('Problem ' + (idx + 1)));
+  document.getElementById('prob_bug_options').value = String(bugOptionsValue(prob.bug_options));
+  document.getElementById('prob_bug_feedback').checked = !!prob.bug_feedback;
+  document.getElementById('prob_bug_reveal').checked = !!prob.bug_reveal;
+  syncBugReveal();
+  renderBugSkills();
 
   // Render per-problem surveys
   document.getElementById('surveysCardTitle').textContent = 'Surveys for ' + ((prob.title || '').trim() || ('Problem ' + (idx + 1)));
@@ -1275,7 +1492,7 @@ function addProblem() {
     constraints: '',
     test_cases: '',
     starter_code: {},
-  }, defaultSurveyFields()));
+  }, defaultSurveyFields(), defaultBugFields()));
   switchProblem(problemsData.length - 1);
 }
 
@@ -1284,6 +1501,8 @@ function removeCurrentProblem() {
   problemsData.splice(currentProblemIndex, 1);
   const newIdx = Math.min(currentProblemIndex, problemsData.length - 1);
   currentProblemIndex = newIdx;
+  // The form still shows the removed problem: don't let switchProblem save it over newIdx.
+  problemRendered = false;
   switchProblem(newIdx);
 }
 
@@ -1421,7 +1640,7 @@ function createSurveyCard(q, idx) {
   card.dataset.idx = idx;
   card.dataset.meta = JSON.stringify(q);
 
-  const typeOptions = ['likert','likert_7_with_na','multiple_choice','open_ended','slider','info_block']
+  const typeOptions = ['likert','likert_7_with_na','multiple_choice','checkboxes','matrix','open_ended','slider','info_block']
     .map(t => `<option value="${t}" ${q.type===t?'selected':''}>${t.replace(/_/g,' ')}</option>`).join('');
 
   const isRequired = q.required !== false;
@@ -1458,14 +1677,8 @@ function createSurveyCard(q, idx) {
     </div>`;
   }
 
-  if (q.type === 'multiple_choice' && q.options && q.options.length) {
-    html += '<div class="sq-options">';
-    q.options.forEach((opt, oi) => {
-      html += `<div class="sq-option-row"><span style="color:var(--dim);font-size:0.9rem;min-width:24px;font-weight:600;">${String.fromCharCode(65+oi)}.</span><input type="text" class="sq-opt-input" value="${escHtml(opt)}"><button class="remove-btn" style="width:28px;height:28px;font-size:0.9rem;" onclick="this.parentElement.remove()">✕</button></div>`;
-    });
-    html += `<button class="action-btn-sm" onclick="addOption(this)" style="margin-top:8px;">+ Add Option</button></div>`;
-  } else if (q.type === 'multiple_choice') {
-    html += `<div class="sq-options"><button class="action-btn-sm" onclick="addOption(this)">+ Add Option</button></div>`;
+  if (SQ_OPTION_TYPES.includes(q.type)) {
+    html += sqOptionsHtml(q);
   }
 
   html += '</div>';
@@ -1475,16 +1688,40 @@ function createSurveyCard(q, idx) {
   return card;
 }
 
+// Question types with a list of options (for a matrix: its columns, with its rows listed above them).
+const SQ_OPTION_TYPES = ['multiple_choice', 'checkboxes', 'matrix'];
+
+function sqOptionsHtml(q) {
+  let html = '<div class="sq-options">';
+  if (q.type === 'matrix') {
+    html += `<label style="font-size:0.8rem;color:var(--muted);display:block;margin:6px 0;">Rows (one per line), each answered with one of the columns below</label>
+      <textarea class="sq-rows" rows="4" style="width:100%;padding:8px;margin-bottom:8px;" placeholder="Generating code&#10;Debugging code">${escHtml((q.rows || []).join('\n'))}</textarea>
+      <label style="font-size:0.8rem;color:var(--muted);display:block;margin:6px 0;">Columns</label>`;
+  }
+  (q.options || []).forEach((opt, oi) => {
+    html += `<div class="sq-option-row"><span style="color:var(--dim);font-size:0.9rem;min-width:24px;font-weight:600;">${String.fromCharCode(65+oi)}.</span><input type="text" class="sq-opt-input" value="${escHtml(opt)}"><button class="remove-btn" style="width:28px;height:28px;font-size:0.9rem;" onclick="this.parentElement.remove()">✕</button></div>`;
+  });
+  html += `<button class="action-btn-sm" onclick="addOption(this)" style="margin-top:8px;">+ Add ${q.type === 'matrix' ? 'Column' : 'Option'}</button>`;
+  if (q.type !== 'matrix') {
+    html += `<label style="display:flex;align-items:center;gap:6px;font-size:0.85rem;color:var(--muted);margin-top:8px;cursor:pointer;">
+      <input type="checkbox" class="sq-allow-other" ${q.allow_other ? 'checked' : ''}> Add "Other (please specify)" with a text box</label>`;
+  }
+  return html + '</div>';
+}
+
 function onTypeChange(sel) {
   const card = sel.closest('.sq-card');
   let optDiv = card.querySelector('.sq-options');
-  if (sel.value === 'multiple_choice') {
-    if (!optDiv) {
-      optDiv = document.createElement('div');
-      optDiv.className = 'sq-options';
-      optDiv.innerHTML = '<button class="action-btn-sm" onclick="addOption(this)">+ Add Option</button>';
-      card.querySelector('.sq-fields').appendChild(optDiv);
-    }
+  if (SQ_OPTION_TYPES.includes(sel.value)) {
+    // Rebuild for the new type, keeping the options typed so far.
+    const opts = optDiv ? Array.from(optDiv.querySelectorAll('.sq-opt-input')).map(inp => inp.value) : [];
+    const rowsEl = optDiv && optDiv.querySelector('.sq-rows');
+    const otherEl = optDiv && optDiv.querySelector('.sq-allow-other');
+    const tmp = document.createElement('div');
+    tmp.innerHTML = sqOptionsHtml({ type: sel.value, options: opts,
+      rows: rowsEl ? rowsEl.value.split('\n') : [], allow_other: otherEl ? otherEl.checked : false });
+    if (optDiv) optDiv.replaceWith(tmp.firstChild);
+    else card.querySelector('.sq-fields').appendChild(tmp.firstChild);
   } else {
     if (optDiv) optDiv.remove();
   }
@@ -1535,6 +1772,12 @@ function collectSurvey(containerId) {
     if (t === 'open_ended') {
       result.min_length = minLen;
     }
+    const otherCb = card.querySelector('.sq-allow-other');
+    if (otherCb && otherCb.checked) result.allow_other = true;
+    else delete result.allow_other;
+    const rowsEl = card.querySelector('.sq-rows');
+    if (t === 'matrix' && rowsEl) result.rows = rowsEl.value.split('\n').map(r => r.trim()).filter(Boolean);
+    else delete result.rows;
     const imgSrcInp = card.querySelector('.sq-image-src');
     if (imgSrcInp && imgSrcInp.value.trim()) {
       result.image = { src: imgSrcInp.value.trim() };
@@ -1617,7 +1860,10 @@ function buildReview() {
     if (p.post_survey_enabled && (p.post_survey || []).length) surveys.push('Post');
     if (p.recurrent_survey_enabled && (p.recurrent_survey || []).length) surveys.push(`Recurrent (start: ${p.recurrent_survey_start}, every: ${p.recurrent_survey_interval})`);
     const surveyStr = surveys.length ? surveys.join(', ') : '<span style="color:var(--muted)">No surveys</span>';
-    return `<div style="margin-bottom:8px;"><span style="color:var(--primary);font-weight:600;">${escHtml(probLabel)}:</span> ${escHtml(stmt)}${stmt.length >= 60 ? '...' : ''}<br><span style="font-size:0.85rem;color:var(--muted);">Surveys: ${surveyStr}</span></div>`;
+    const wrongPick = p.bug_feedback ? 'correct wrong picks' : (p.bug_reveal ? 'show correct answer' : 'no feedback');
+    const bugStr = selectedConditions.some(c => c !== 1)
+      ? `<br><span style="font-size:0.85rem;color:var(--muted);">AI bugs: ${bugOptionsLabel(bugOptionsValue(p.bug_options))}, ${wrongPick}</span>` : '';
+    return `<div style="margin-bottom:8px;"><span style="color:var(--primary);font-weight:600;">${escHtml(probLabel)}:</span> ${escHtml(stmt)}${stmt.length >= 60 ? '...' : ''}<br><span style="font-size:0.85rem;color:var(--muted);">Surveys: ${surveyStr}</span>${bugStr}</div>`;
   }).join('');
 
   document.getElementById('reviewContent').innerHTML = `

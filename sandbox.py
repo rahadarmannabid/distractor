@@ -26,6 +26,7 @@ import signal
 import sys
 import tempfile
 import time
+import urllib.parse
 from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional, Tuple
 
 try:
@@ -75,6 +76,18 @@ NODE_BIN = os.getenv("NODE_BIN") or shutil.which("node") or "node"
 # The JVM reserves far more address space than it uses, so Java gets a heap cap instead of RLIMIT_AS.
 _JAVA_OPTS = ["-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1", "-XX:CICompilerCount=1", "-Xss8m",
               "-XX:MaxMetaspaceSize=128m", "-Dfile.encoding=UTF-8", "-Dstdout.encoding=UTF-8"]
+# In a real terminal a Node program exits once readline closes; with our open stdin pipe it would wait
+# for EOF until the idle limit. Unref stdin when a readline interface on it closes. Only readline is
+# patched: touching process.stdin up front would break fs.readFileSync(0) (EAGAIN). A data: URL so
+# the permission model needs no extra read access.
+_NODE_PRELOAD = "data:text/javascript," + urllib.parse.quote(
+    "import r from 'node:readline';import rp from 'node:readline/promises';"
+    "import {syncBuiltinESMExports} from 'node:module';"
+    "for(const m of [r,rp]){const c=m.createInterface;m.createInterface=function(...a){"
+    "const i=c.apply(this,a);const s=i.input;"
+    "if(s===process.stdin)i.on('close',()=>{if(s.unref)s.unref();});return i;};}"
+    "syncBuiltinESMExports();"
+)
 _JAVA_MAIN_RE = re.compile(r"public\s+static\s+(?:final\s+)?void\s+main\s*\(")
 _FILENAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$")
 
@@ -147,6 +160,17 @@ except BaseException as exc:
     sys.stderr.write("".join(traceback.format_exception_only(type(exc), exc)))
     sys.exit(1)
 '''
+
+# GCC's <bits/stdc++.h>, which many students include, for compilers without it (clang on macOS).
+# Passed with -idirafter, so a compiler that has the real header uses that one.
+_STDCXX_SHIM = "\n".join("#include <%s>" % h for h in (
+    "cassert cctype cerrno cfloat climits clocale cmath csetjmp csignal cstdarg cstddef cstdint cstdio "
+    "cstdlib cstring ctime cwchar cwctype algorithm array atomic bitset chrono complex condition_variable "
+    "deque exception forward_list fstream functional initializer_list iomanip ios iosfwd iostream istream "
+    "iterator limits list locale map memory mutex new numeric optional ostream queue random ratio regex "
+    "set sstream stack stdexcept streambuf string string_view system_error thread tuple type_traits "
+    "typeindex typeinfo unordered_map unordered_set utility valarray variant vector"
+).split()) + "\n"
 
 # Makes C stdout unbuffered so prompts like printf("Name: ") appear before scanf waits.
 _C_INIT = "#include <stdio.h>\n__attribute__((constructor)) static void _sandbox_unbuffer(void) " \
@@ -244,6 +268,21 @@ def _preexec(memory_mb: int, cpu_seconds: int) -> Callable[[], None]:
     return apply
 
 
+# How long a running program must be silent (and, on Linux, idle) before the terminal shows that it is
+# waiting for input.
+INPUT_WAIT_SECONDS = 0.4
+
+
+def _cpu_ticks(pid: int) -> Optional[int]:
+    """User + system CPU time of the process (all its threads) in clock ticks, or None without /proc."""
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            fields = fh.read().rsplit(")", 1)[1].split()
+        return int(fields[11]) + int(fields[12])
+    except (OSError, IndexError, ValueError):
+        return None
+
+
 class Run:
     def __init__(self, key: str, emit: Emit, stdin: Optional["asyncio.Queue[Optional[str]]"]):
         self.key = key
@@ -256,6 +295,9 @@ class Run:
         self.out_bytes = 0
         self.in_bytes = 0
         self.last_activity = time.monotonic()
+        self.last_output = self.last_input = time.monotonic()
+        self.stdin_open = False
+        self.input_wait = False   # last "input_wait" state sent to the client
         self.stopped = asyncio.Event()
 
     def kill(self, reason: str) -> None:
@@ -277,7 +319,7 @@ class Run:
             chunk = await stream.read(4096)
             if not chunk:
                 break
-            self.last_activity = time.monotonic()
+            self.last_activity = self.last_output = time.monotonic()
             room = LIMITS["output_bytes"] - self.out_bytes
             self.out_bytes += len(chunk)
             if room <= 0:
@@ -295,12 +337,17 @@ class Run:
         if self.stdin is None or not self.interactive:
             self.proc.stdin.close()
             return
+        self.stdin_open = True
         while True:
             line = await self.stdin.get()
             if line is None:  # EOF (Ctrl+D) or client gone
+                self.stdin_open = False
+                await self._set_input_wait(False)
                 self.proc.stdin.close()
                 return
             self.in_bytes += len(line)
+            self.last_input = time.monotonic()
+            await self._set_input_wait(False)  # the program has input to work on
             if self.in_bytes > LIMITS["stdin_bytes"]:
                 self.kill("input_limit")
                 return
@@ -310,6 +357,26 @@ class Run:
                 await self.proc.stdin.drain()
             except (BrokenPipeError, ConnectionResetError):
                 return
+
+    async def _set_input_wait(self, waiting: bool) -> None:
+        if waiting != self.input_wait:
+            self.input_wait = waiting
+            await self.emit({"type": "input_wait", "waiting": waiting})
+
+    async def _input_watch(self) -> None:
+        """Tells the client when the program is most likely waiting for input: stdin is open, it has
+        printed nothing and got no input for INPUT_WAIT_SECONDS, and (where /proc shows it) used no
+        CPU in that time."""
+        cpu_prev, cpu_since = None, time.monotonic()
+        while self.proc and self.proc.returncode is None:
+            await asyncio.sleep(0.2)
+            now = time.monotonic()
+            cpu = _cpu_ticks(self.proc.pid)
+            if cpu != cpu_prev:
+                cpu_prev, cpu_since = cpu, now
+            quiet = now - max(self.last_output, self.last_input) >= INPUT_WAIT_SECONDS
+            idle = cpu is None or now - cpu_since >= INPUT_WAIT_SECONDS
+            await self._set_input_wait(self.stdin_open and quiet and idle)
 
     async def _watchdog(self, started: float) -> None:
         while self.proc and self.proc.returncode is None:
@@ -325,18 +392,25 @@ class Run:
     ) -> Dict[str, Any]:
         self.wall, self.interactive = wall, interactive
         started = self.last_activity = time.monotonic()
-        self.proc = await asyncio.create_subprocess_exec(
-            *argv, cwd=cwd,
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": cwd, "PYTHONIOENCODING": "utf-8"},
-            start_new_session=True, preexec_fn=_preexec(memory_mb, cpu),
-        )
+        try:
+            self.proc = await asyncio.create_subprocess_exec(
+                *argv, cwd=cwd,
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": cwd, "PYTHONIOENCODING": "utf-8"},
+                start_new_session=True, preexec_fn=_preexec(memory_mb, cpu),
+            )
+        except OSError as e:  # missing toolchain, or a noexec /tmp in the runner container
+            logging.getLogger(__name__).error("Could not start %s: %s", argv[0], e)
+            self.reason = "start_failed"
+            return {"exit_code": None, "duration_ms": 0}
         assert self.proc.stdout and self.proc.stderr
         tasks = [
             asyncio.create_task(self._pump(self.proc.stdout, "stdout")),
             asyncio.create_task(self._pump(self.proc.stderr, "stderr")),
         ]
         helpers = [asyncio.create_task(self._feed()), asyncio.create_task(self._watchdog(started))]
+        if interactive:
+            helpers.append(asyncio.create_task(self._input_watch()))
         try:
             await asyncio.gather(*tasks)
             await self.proc.wait()
@@ -364,6 +438,7 @@ _REASON_TEXT = {
     "crash": "The program crashed (segmentation fault).",
     "stopped": "Stopped.",
     "replaced": "Stopped because a new run was started.",
+    "start_failed": "The server could not start the program. Please tell the study team.",
 }
 
 
@@ -442,7 +517,7 @@ async def run_code(
                                        wall=wall, interactive=stdin is not None)
         elif language == "javascript":
             argv = [NODE_BIN, "--no-warnings", "--experimental-permission", f"--allow-fs-read={os.path.realpath(work)}",
-                    f"--max-old-space-size={LIMITS['memory_mb']}", "--stack-size=4000", entry]
+                    f"--max-old-space-size={LIMITS['memory_mb']}", "--stack-size=4000", "--import", _NODE_PRELOAD, entry]
             await emit({"type": "status", "phase": "running"})
             result = await run.execute(argv, work, memory_mb=0, cpu=LIMITS["cpu_seconds"],
                                        wall=wall, interactive=stdin is not None)
@@ -466,6 +541,7 @@ async def run_code(
                     ["java", f"-Xmx{LIMITS['memory_mb']}m", *_JAVA_OPTS, "-cp", "../classes", main_class],
                     work, memory_mb=0, cpu=LIMITS["cpu_seconds"], wall=wall, interactive=stdin is not None,
                 )
+            result["compile_ms"] = cres["duration_ms"]
         else:  # c / cpp
             await emit({"type": "status", "phase": "compiling"})
             init = "sandbox_init.cpp" if language == "cpp" else "sandbox_init.c"
@@ -474,7 +550,10 @@ async def run_code(
             exe = os.path.join(root, "program")
             if language == "cpp":
                 sources = [f["filename"] for f in files if f["filename"].endswith((".cpp", ".cc", ".cxx"))]
-                compiler = ["g++", "-std=gnu++17"]
+                os.makedirs(os.path.join(root, "include", "bits"))
+                with open(os.path.join(root, "include", "bits", "stdc++.h"), "w") as fh:
+                    fh.write(_STDCXX_SHIM)
+                compiler = ["g++", "-std=gnu++17", "-idirafter", "../include"]
             else:
                 sources = [f["filename"] for f in files if f["filename"].endswith(".c")]
                 compiler = ["gcc", "-std=gnu11"]
@@ -492,6 +571,7 @@ async def run_code(
                 await emit({"type": "status", "phase": "running"})
                 result = await run.execute([exe], work, memory_mb=LIMITS["memory_mb"], cpu=LIMITS["cpu_seconds"],
                                            wall=wall, interactive=stdin is not None)
+            result["compile_ms"] = cres["duration_ms"]
     finally:
         stats["running"] -= 1
         _slots.release()

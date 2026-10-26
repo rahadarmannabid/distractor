@@ -91,6 +91,35 @@ body { background: var(--ui-page); color: var(--ui-text); font: var(--fs-md)/var
     width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--ui-border-strong); border-top-color: var(--ui-text);
     animation: ui-spin 0.8s linear infinite;
 }
+/* Code suggestion status (conditions 2 and 4), left of the autosave chip: one ring that spins while
+   a suggestion is generating, then settles into a dot: green = two or more options, yellow = one, red = none. */
+.suggest-status {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border-radius: var(--radius);
+    font: var(--fw-medium) var(--fs-sm)/1 var(--ui-font); color: var(--ui-text-muted); cursor: default; user-select: none;
+    transition: color var(--dur) var(--ease-out), background-color var(--dur) var(--ease-out);
+}
+.suggest-status[hidden] { display: none; }
+.suggest-status:not([hidden]) + .autosave-indicator { margin-left: 2px; }
+.suggest-status:hover { background: var(--ui-fill); }
+.suggest-status__ring {
+    position: relative; width: 12px; height: 12px; flex-shrink: 0; border-radius: 50%;
+    border: 1.5px solid var(--ui-border-strong);
+    transition: border-color var(--dur) var(--ease-out), background-color var(--dur) var(--ease-out), transform var(--dur) var(--ease-out);
+}
+.suggest-status__text { font-variant-numeric: tabular-nums; }
+.suggest-status.is-loading { color: var(--ui-text); }
+.suggest-status.is-loading .suggest-status__ring { border-color: var(--ui-border-strong); border-top-color: var(--ui-accent); animation: ui-spin 0.7s linear infinite; }
+.suggest-status.is-ok .suggest-status__ring,
+.suggest-status.is-one .suggest-status__ring,
+.suggest-status.is-none .suggest-status__ring { transform: scale(0.75); animation: suggest-dot-in var(--dur-slow) var(--ease-out); }
+@keyframes suggest-dot-in { from { transform: scale(0.35); opacity: 0.4; } 60% { transform: scale(0.9); } to { transform: scale(0.75); opacity: 1; } }
+.suggest-status.is-ok .suggest-status__ring { border-color: var(--ui-green); background: var(--ui-green); box-shadow: 0 0 0 3px var(--ui-green-soft); }
+.suggest-status.is-one .suggest-status__ring { border-color: var(--ui-warning); background: var(--ui-warning); box-shadow: 0 0 0 3px rgba(255, 192, 30, 0.14); }
+.suggest-status.is-none .suggest-status__ring { border-color: var(--ui-error); background: var(--ui-error); box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.14); }
+.suggest-status.is-ok { color: var(--ui-green); }
+.suggest-status.is-one { color: var(--ui-warning); }
+.suggest-status.is-none { color: var(--ui-error); }
+@media (prefers-reduced-motion: reduce) { .suggest-status.is-loading .suggest-status__ring { animation-duration: 2s; } }
 .ide-toast {
     position: fixed; right: 20px; bottom: 20px; z-index: 10050; display: flex; align-items: center; gap: 10px;
     max-width: 380px; padding: 10px 14px; border-radius: var(--radius-lg);
@@ -320,9 +349,22 @@ body { background: var(--ui-page); color: var(--ui-text); font: var(--fs-md)/var
 .term-muted, .output-info, .execution-time { color: var(--ui-text-muted); }
 .output-success { color: var(--ui-success); }
 .output-prompt { color: var(--ui-green); }
-.term-stdin { color: #9cdcfe; }
-.term-input { display: inline-block; width: 40ch; max-width: 100%; background: transparent; border: 0; outline: none; color: var(--ui-text-strong); font: inherit; padding: 0; caret-color: #fff; }
+.term-stdin { color: inherit; }
+.term-input { display: inline-block; width: 40ch; max-width: 100%; background: transparent; border: 0; outline: none; color: inherit; font: inherit; padding: 0; caret-color: #fff; }
 .term-input:focus-visible { outline: none; }
+/* The running program waits for input (terminal.js setWaiting). */
+.term-input--waiting { width: 46ch; border-radius: 3px; padding: 0 4px; animation: term-wait-pulse 1.6s ease-in-out infinite; }
+.term-input--waiting::placeholder { color: var(--ui-green); opacity: .9; }
+@keyframes term-wait-pulse {
+  0%, 100% { background: rgba(44, 187, 93, .06); box-shadow: inset 2px 0 0 rgba(44, 187, 93, .9); }
+  50% { background: rgba(44, 187, 93, .2); box-shadow: inset 2px 0 0 rgba(44, 187, 93, .2); }
+}
+.term-wait-badge { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; padding: 1px 8px; border-radius: 10px;
+  font-size: 11px; color: var(--ui-green); background: rgba(44, 187, 93, .12); white-space: nowrap; }
+.term-wait-badge[hidden] { display: none; }
+.term-wait-badge__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ui-green); animation: term-wait-dot 1.2s ease-in-out infinite; }
+@keyframes term-wait-dot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .3; transform: scale(.7); } }
+@media (prefers-reduced-motion: reduce) { .term-input--waiting, .term-wait-badge__dot { animation: none; } }
 
 /* ── Problem card (description / agent) ────────────────────────────────── */
 #problemPanel { background: var(--ui-bg) !important; border-left: 1px solid var(--ui-border) !important; display: flex; flex-direction: column; position: relative; }
@@ -451,3 +493,87 @@ body { background: var(--ui-page); color: var(--ui-text); font: var(--fs-md)/var
 .access-denied-container { background: var(--ui-raised) !important; border: 1px solid var(--ui-border-strong) !important; border-radius: var(--radius-xl) !important; padding: 28px !important; box-shadow: var(--shadow-modal) !important; }
 .access-denied-title { color: var(--ui-text-strong) !important; font: var(--fw-semibold) var(--fs-xl)/1.4 var(--ui-font) !important; margin-bottom: 8px !important; }
 .access-denied-message { color: var(--ui-text) !important; font: var(--fs-md)/1.6 var(--ui-font) !important; margin-bottom: 18px !important; }
+
+/* "Correct wrong picks" (quiz setting): the accepted suggestion or agent version had the bug and was
+   switched to the correct one. Editor notice (conditions 2 and 4) and agent chat card (condition 3). */
+.fix-notice {
+    position: absolute; right: 14px; bottom: 14px; z-index: 60; width: min(420px, calc(100% - 28px));
+    display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 10px 14px;
+    background: var(--ui-raised); border: 1px solid var(--ui-border-strong); border-left: 3px solid var(--ui-error);
+    border-radius: var(--radius-lg); box-shadow: var(--shadow-pop);
+    color: var(--ui-text); font: var(--fs-md)/1.5 var(--ui-font);
+    animation: ui-toast-in var(--dur-slow) var(--ease-out);
+    transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out);
+}
+.fix-notice.is-out { opacity: 0; transform: translateY(6px); }
+.fix-notice__head { display: flex; align-items: center; gap: 8px; }
+.fix-notice__icon, .agent-fix__icon {
+    width: 16px; height: 16px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 50%; background: var(--ui-error); color: #1e1e1e; font: 700 11px/1 var(--ui-font);
+}
+.fix-notice__title { flex: 1; min-width: 0; color: var(--ui-text-strong); font-weight: 600; }
+.fix-notice__close {
+    width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
+    border: 0; border-radius: 4px; background: transparent; color: var(--ui-text-muted); cursor: pointer;
+}
+.fix-notice__close:hover { background: var(--ui-fill-hover); color: var(--ui-text-strong); }
+.fix-notice__close svg { width: 14px; height: 14px; }
+.fix-notice__why, .agent-fix__why { margin: 0; color: var(--ui-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.fix-diff {
+    max-height: 168px; overflow: auto; padding: 4px 0; border-radius: 4px;
+    background: #1b1b1b; border: 1px solid var(--ui-border); font: 12px/1.55 var(--font-code-mono, monospace);
+}
+.fix-diff__file { display: flex; align-items: center; gap: 6px; padding: 2px 8px 4px; color: var(--ui-text-muted); font-family: var(--ui-font); }
+.fix-diff__file svg { width: 13px; height: 13px; }
+.fix-diff__line { display: flex; gap: 8px; padding: 0 8px; white-space: pre; }
+.fix-diff__line > span { width: 10px; flex-shrink: 0; text-align: center; user-select: none; }
+.fix-diff__line code { font: inherit; background: none; padding: 0; color: inherit; }
+.fix-diff__line.is-del { background: rgba(255, 107, 107, 0.12); color: #f2a7a7; }
+.fix-diff__line.is-del code { text-decoration: line-through; text-decoration-color: rgba(255, 107, 107, 0.55); }
+.fix-diff__line.is-add { background: rgba(44, 187, 93, 0.13); color: #9ee0b2; }
+.fix-notice__foot { display: flex; align-items: center; gap: 10px; }
+.fix-notice__done, .agent-fix__done { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 6px; color: var(--ui-green); font-size: var(--fs-sm); }
+.fix-notice__done svg, .agent-fix__done svg { width: 14px; height: 14px; flex-shrink: 0; }
+.fix-notice__done.is-manual { color: var(--ui-warning); }
+.fix-notice__ok {
+    height: 26px; padding: 0 12px; border: 0; border-radius: 4px; flex-shrink: 0;
+    background: #0078d4; color: #fff; font: 500 var(--fs-sm)/1 var(--ui-font); cursor: pointer;
+}
+.fix-notice__ok:hover { background: #026ec1; }
+.fix-notice__ok:active { background: #005ba4; }
+.fix-notice__ok:focus-visible, .fix-notice__close:focus-visible { outline: 1px solid var(--ui-focus); outline-offset: 2px; }
+.agent-fix {
+    display: flex; flex-direction: column; gap: 8px; margin: 6px 0; padding: 10px 12px;
+    background: rgba(255, 107, 107, 0.06); border: 1px solid rgba(255, 107, 107, 0.28); border-radius: var(--radius-lg);
+    font: var(--fs-md)/1.5 var(--ui-font); color: var(--ui-text);
+}
+.agent-fix__head { display: flex; align-items: center; gap: 8px; color: var(--ui-text-strong); font-weight: 600; }
+/* Beside the changed lines in the editor (an overlay widget placed by ai_modes.js), not in the corner. */
+.fix-notice.is-beside { position: absolute; bottom: auto; width: min(340px, calc(100% - 40px)); }
+.fix-why__type { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; color: var(--ui-text-muted, #9da5b4); font-size: var(--fs-sm); }
+.fix-why__type span { padding: 1px 8px; border-radius: 10px; background: rgba(242, 167, 167, 0.14); border: 1px solid rgba(242, 167, 167, 0.35); color: #f2a7a7; font-weight: 600; }
+.fix-lesson + .fix-lesson { margin-top: 8px; }
+.fix-lesson__label { margin-bottom: 1px; color: var(--ui-text-strong); font-size: var(--fs-sm); font-weight: 600; }
+.fix-notice__why code, .agent-fix__why code { padding: 0 4px; border-radius: 3px; background: rgba(255, 255, 255, 0.07); font-family: var(--ui-mono, monospace); font-size: 0.92em; }
+.fix-why-btn {
+    align-self: flex-start; padding: 3px 10px; border: 1px solid var(--ui-border-strong); border-radius: 4px;
+    background: transparent; color: var(--ui-text); font: inherit; font-size: var(--fs-sm); cursor: pointer;
+}
+.fix-why-btn:hover { background: var(--ui-fill-hover); color: var(--ui-text-strong); }
+.fix-why-btn:focus-visible { outline: 1px solid var(--ui-focus); outline-offset: 2px; }
+.fix-why-body { display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto; }
+.fix-why-body[hidden] { display: none; }
+/* The diff in the editor: highlighted lines in the file, the other version's lines in a view zone. */
+.fix-line.is-add { background: rgba(44, 187, 93, 0.16); }
+.fix-line.is-del { background: rgba(255, 107, 107, 0.16); }
+.fix-gutter { width: 3px !important; margin-left: 3px; }
+.fix-gutter.is-add { background: #2cbb5d; }
+.fix-gutter.is-del { background: #ff6b6b; }
+.fix-zone { white-space: pre; overflow: hidden; }
+.fix-zone.is-del { background: rgba(255, 107, 107, 0.12); color: #f2a7a7; }
+.fix-zone.is-del .fix-zone__line { text-decoration: line-through; text-decoration-color: rgba(255, 107, 107, 0.55); }
+.fix-zone.is-add { background: rgba(44, 187, 93, 0.13); color: #9ee0b2; }
+.fix-zone__margin { text-align: right; padding-right: 6px; box-sizing: border-box; user-select: none; }
+.fix-zone__margin.is-del { background: rgba(255, 107, 107, 0.12); color: #ff6b6b; }
+.fix-zone__margin.is-add { background: rgba(44, 187, 93, 0.13); color: #2cbb5d; }
+@media (prefers-reduced-motion: reduce) { .fix-notice { animation: none; transition: none; } }
