@@ -6,6 +6,8 @@
 [![License](https://img.shields.io/badge/license-Project%20local-lightgrey?style=flat)](.)
 [![Uvicorn](https://img.shields.io/badge/uvicorn-async-0.24-4488CC?style=flat)](https://www.uvicorn.org/)
 
+**Hosting it?** Follow **[HOSTING.md](./HOSTING.md)** step by step.
+
 Web-based coding environment for research studies: participants write code in a Monaco editor while the backend calls OpenAI to infer intent and suggest the next line (GitHub Copilot–style). Sessions, submissions, surveys, and activity can be persisted to **Firebase Realtime Database** when configured.
 
 **Author:** Rahad Arman Nabid · *PhD Student, Temple University*
@@ -22,25 +24,38 @@ Web-based coding environment for research studies: participants write code in a 
 | **Problem panel** | Assignment text, **AI history** tab with newest-first pagination (5 + “See more”) |
 | **Surveys** | Pre/post/periodic surveys (content configurable via env and Firebase-backed quiz config where used) |
 | **Persistence** | Code submissions and logs under configurable dirs; optional **Firebase** for live session/checkpoint data |
-| **Admin / instructor** | Separate routers: `/admin` (admin UI/API), `/instructor` (quiz authoring, analytics) |
+| **Instructor** | `/instructor`: quiz authoring and analytics (sign-in with an emailed code) |
 
 ---
 
 ## Quick start
 
+The easiest path on **any OS (Windows, macOS, Linux)** is Docker: install Docker Desktop, create
+`.env` (step 2), then follow **[DOCKER.md → Docker Compose](./DOCKER.md#run-locally-or-on-your-own-server-docker-compose)**.
+Everything there is a `docker` or `python` command that is typed the same in every shell.
+
+To run without Docker:
+
 ### 1. Clone and Python environment
 
-```bash
-git clone <your-repo-url>
-cd autosuggestion-quiz-v4
-python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
 ```
+git clone <your-repo-url>
+cd <repo-folder>
+```
+
+| | macOS / Linux | Windows (PowerShell) | Windows (Command Prompt) |
+|---|---|---|---|
+| Create venv | `python3 -m venv .venv` | `python -m venv .venv` | `python -m venv .venv` |
+| Activate | `source .venv/bin/activate` | `.venv\Scripts\Activate.ps1` | `.venv\Scripts\activate.bat` |
+| Install | `pip install -r requirements.txt` | `pip install -r requirements.txt` | `pip install -r requirements.txt` |
+
+PowerShell refusing to run `Activate.ps1`: run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
+Running C, C++ or Java locally needs `gcc`/`g++` and a JDK on your `PATH` (Docker includes them).
+On macOS/Linux, `./start.sh` does steps 1–3 for you.
 
 ### 2. Environment variables
 
-Create a `.env` file in the project root (same folder as `main.py`). **Minimum** for local dev:
+Copy `.env.example` to `.env` (same folder as `main.py`) and fill it in; [HOSTING.md](./HOSTING.md#step-3-fill-in-your-settings-env) says where each value comes from. **Minimum** for local dev:
 
 ```env
 OPENAI_API_KEY=sk-...
@@ -61,7 +76,7 @@ Optional but common:
 | `SUBMISSIONS_DIR` | Where submissions/logs go (default `submissions`) |
 | `CONDITION_1_PREFIXES`, `CONDITION_2_PREFIXES`, `CONDITION_3_PREFIXES` | Optional, legacy: assignment keys → study condition. Unset = only instructor quiz links work |
 | `MAX_CODE_LENGTH`, `MIN_CODE_CHARS_FOR_SUGGESTION` | Editor / suggestion limits |
-| `MULTILINE_SUGGESTION_MAX_LINES` | Most lines one condition 4 suggestion may span (default 20) |
+| `MULTILINE_SUGGESTION_MAX_LINES` | Most lines one condition 4 suggestion may span (default and maximum 5; a higher value is capped at 5) |
 | `COMPLETION_MODEL`, `AGENT_MODEL`, `AGENT_MAX_STEPS` | Ghost-text model, which writes both the correct and the buggy option in one call (default `gpt-6-sol` with reasoning off: ~2.3 s per pair and the most realistic bugs; `gpt-4.1` (~1.6 s) and `gpt-4.1-mini` are faster and cheaper but plant unrealistic bugs more often), agent model (default `gpt-6-luna`, with `AGENT_REASONING_EFFORT=low`: ~1.8 s vs ~3 s on gpt-5-nano), max agent tool steps per message (default 15) |
 | `OPENAI_MODEL`, `REASONING_EFFORT` | Default model for every AI call (`gpt-5-nano`) and its reasoning effort for the short interactive calls (`minimal`, which keeps latency near 1 s). gpt-4.x models also work; see `llm_params.py` |
 | `BUG_MODEL` | Model that writes the buggy version of an agent turn's changes (default `gpt-6-sol`). The bug type is the one of the quiz's selected **bug skills** that best fits the code: the built-in ones are `bug_skills/*.md`, and instructors select, edit, add, upload or remove them per quiz in the quiz form. No bug type selected = a single correct suggestion. Counts per bug type are on the quiz analytics page. See `bug_injection.py` |
@@ -84,12 +99,18 @@ python main.py
 
 - App: `http://localhost:8000` (or your `API_PORT`)
 - OpenAPI docs: `http://localhost:8000/docs`
-- Admin area: `/admin` (configure as deployed)
 - Instructor area: `/instructor`
 
-### Docker Hub
+### Docker Hub and Koyeb
 
-Container image **`rahadarmannabid/codeoracle`** (`build-and-push.sh` publishes **amd64 + arm64** for hosts like Koyeb). Details: **[DOCKER.md](./DOCKER.md)**.
+Container image **`rahadarmannabid/distractors`**. Build it on your computer and push a new version (macOS / Linux terminal, or Git Bash on Windows):
+
+```
+./release.sh
+```
+
+It bumps `VERSION` (`v1.0.3` → `v1.0.4`), builds **amd64 + arm64**, and pushes `:v1.0.4` and `:latest`.
+Add `--koyeb <app>/<service>` to deploy it to Koyeb in the same step. Details: **[DOCKER.md](./DOCKER.md)**.
 
 ---
 
@@ -97,9 +118,11 @@ Container image **`rahadarmannabid/codeoracle`** (`build-and-push.sh` publishes 
 
 ```
 ├── Dockerfile           # Container build (Hub-safe: no .env in image)
-├── DOCKER.md            # Push to Docker Hub, run on server
+├── HOSTING.md           # Step-by-step hosting guide (Docker Hub + Koyeb)
+├── DOCKER.md            # Docker / release / Koyeb reference
+├── .env.example         # Every setting, with where to get it
+├── VERSION              # Last released image version (written by release.sh)
 ├── main.py              # FastAPI app, AI routes, editor API, surveys
-├── admin.py             # Router: /admin
 ├── instructor.py        # Router: /instructor
 ├── firebase_utils.py    # Firebase helpers
 ├── otp.py, quiz_analytics.py
@@ -107,8 +130,9 @@ Container image **`rahadarmannabid/codeoracle`** (`build-and-push.sh` publishes 
 ├── bug_skills/          # Built-in bug skills (.md): one bug type each, seeded into every quiz
 ├── templates/           # Jinja HTML (index IDE, home, surveys, instructor UIs)
 ├── submissions/       # Default output for submissions (configurable)
-├── scripts/           # Utilities (see Load testing below)
-└── starter_code/      # Default starter files dir (configurable via STARTER_CODE_DIR)
+├── runner.py, sandbox.py # Isolated code runner for students' programs
+├── release.sh         # Build the image and push it to Docker Hub
+└── scripts/           # Load tests
 ```
 
 ---

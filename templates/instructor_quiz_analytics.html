@@ -649,6 +649,17 @@
         </div>
       </div>
 
+      <div class="chart-card" style="margin-bottom:14px;">
+        <div class="chart-card-head">
+          <div>
+            <h3>Suggestion generation time (seconds)</h3>
+            <p>Time from the student's request until a suggestion's options (correct and buggy) were ready: ghost-text suggestions in C2 / C4, agent replies in C3. Total + P1…; one boxplot per condition. A rising median or p90 means students wait too long.</p>
+          </div>
+          <div class="chart-overlay-stat" id="overlay-gen"></div>
+        </div>
+        <div class="chart-card-body tall" id="chart-gen-time"></div>
+      </div>
+
       <div class="table-card" id="study-log-card" style="margin-bottom:14px;">
         <div class="table-card-head">
           <div>
@@ -786,14 +797,15 @@
     const boot = JSON.parse(document.getElementById('analytics-bootstrap').textContent);
     const quizId = boot.quiz_id;
 
-    // Bugs card: counts per bug type from /bug-stats (independent of the aggregate above).
+    // Bugs card and generation-time chart: from /bug-stats (independent of the aggregate above).
+    const bugStatsReq = fetch('/instructor/quiz/' + encodeURIComponent(quizId) + '/bug-stats', { credentials: 'same-origin', cache: 'no-store' })
+      .then((r) => r.json());
     (function loadBugStats() {
       const tbody = document.getElementById('bug-stats-tbody');
       if (!tbody) return;
       const h = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
       const pct = (a, b) => (b ? Math.round((100 * a) / b) + '%' : '–');
-      fetch('/instructor/quiz/' + encodeURIComponent(quizId) + '/bug-stats', { credentials: 'same-origin', cache: 'no-store' })
-        .then((r) => r.json())
+      bugStatsReq
         .then((d) => {
           if (d.error) throw new Error(d.error);
           const rows = (d.types || []).slice().sort((a, b) => b.generated - a.generated);
@@ -899,6 +911,16 @@
         return a[lo] + (a[hi] - a[lo]) * (pos - lo);
       }
       return [a[0], q(0.25), q(0.5), q(0.75), a[n - 1]];
+    }
+
+    /** p-th quantile (0–1) with the same interpolation as boxRow; null for no values. */
+    function boxRowQuantile(arr, p) {
+      var a = (arr || []).filter(function(x) { return x != null && !isNaN(x); }).map(Number).sort(function(x, y) { return x - y; });
+      if (!a.length) return null;
+      var pos = (a.length - 1) * p;
+      var lo = Math.floor(pos);
+      var hi = Math.ceil(pos);
+      return a[lo] + (a[hi] - a[lo]) * (pos - lo);
     }
 
     /** Largest value in boxplot rows (for y-axis — all-zero boxes are invisible without a positive max). */
@@ -1682,6 +1704,78 @@
           }));
         }
 
+        // Suggestion generation time: drawn once the cards are visible (ECharts needs a laid-out box).
+        bugStatsReq.then(function(d) {
+          if (d && d.error) throw new Error(d.error);
+          var gen = (d && d.generation_seconds) || {};
+          var overlayGen = document.getElementById('overlay-gen');
+          // Conditions in the same order (and colors) as the other charts, then any others.
+          var genConds = condOrder.filter(function(c) { return gen[c]; })
+            .concat(Object.keys(gen).filter(function(c) { return condOrder.indexOf(c) === -1; }).sort());
+          if (!genConds.length) {
+            document.getElementById('chart-gen-time').innerHTML = '<div style="text-align:center;color:#64748b;padding:32px 12px;font-size:0.8rem;">No AI suggestions generated yet.</div>';
+            return;
+          }
+          overlayGen.innerHTML = genConds.map(function(c) {
+            var t = gen[c].total || [];
+            var r = boxRow(t);
+            var p90 = boxRowQuantile(t, 0.9);
+            return condLab(c) + ': n ' + t.length + ' · med ' + fmtNum(r[2]) + ' s · p90 ' + fmtNum(p90) + ' s · max ' + fmtNum(r[4]) + ' s';
+          }).join('\n');
+          var genSeries = genConds.map(function(c, idx) {
+            var g = gen[c];
+            var pp = g.per_problem || {};
+            var ci = condOrder.indexOf(c);
+            var sty = condSeriesStyle(ci === -1 ? condOrder.length + idx : ci);
+            var ser = {
+              name: condLab(c),
+              type: 'boxplot',
+              data: [boxRow(g.total || [])].concat(labels.map(function(_, i) { return boxRow(pp[String(i)] || []); })),
+              boxWidth: genConds.length >= 3 ? 12 : 20,
+              itemStyle: { color: sty.color, borderColor: sty.borderColor },
+            };
+            if (idx === 0 && genConds.length > 1) {
+              ser.barGap = '10%';
+              ser.barCategoryGap = '32%';
+            }
+            return ser;
+          });
+          var genYMax = maxFromBoxplotSeriesList(genSeries);
+          initChart('chart-gen-time', Object.assign(baseOption(), {
+            grid: { left: 44, right: 18, top: 30, bottom: gridBottomBox },
+            legend: { data: genConds.map(condLab), top: 2, textStyle: { color: THEME.text, fontSize: 10 } },
+            xAxis: {
+              type: 'category',
+              data: srCats,
+              boundaryGap: true,
+              axisLine: { lineStyle: { color: THEME.border } },
+              axisLabel: { color: THEME.text, fontSize: 10, interval: 0, rotate: rotX },
+            },
+            yAxis: {
+              type: 'value',
+              name: 'Seconds',
+              min: 0,
+              max: genYMax > 0 ? undefined : 1,
+              scale: false,
+              splitLine: { lineStyle: { color: THEME.grid } },
+              axisLabel: { color: THEME.text, fontSize: 10 },
+            },
+            series: genSeries,
+            tooltip: {
+              trigger: 'item',
+              formatter: function(p) {
+                var d = p.data;
+                if (!d || d.length < 5) return '';
+                return p.seriesName + ' · ' + p.name + ' (seconds)<br/>min: ' + fmtNum(d[0]) + ' · Q1: ' + fmtNum(d[1]) +
+                  '<br/>median: <strong>' + fmtNum(d[2]) + '</strong> · Q3: ' + fmtNum(d[3]) +
+                  '<br/>max: ' + fmtNum(d[4]);
+              },
+            },
+          }));
+        }).catch(function(e) {
+          document.getElementById('chart-gen-time').innerHTML = '<div style="text-align:center;color:#64748b;padding:32px 12px;font-size:0.8rem;">Could not load generation times: ' + escHtml(e.message) + '</div>';
+        });
+
         (function renderStudentSessionsTable() {
           var card = document.getElementById('student-sessions-card');
           var tbody = document.getElementById('student-sessions-tbody');
@@ -1813,18 +1907,20 @@
             if (!survey || (!survey.pre && !survey.post && !survey.periodic)) return '—';
             var out =
               '<details class="survey-details-wrap"><summary>Surveys</summary><div class="survey-blocks">';
-            if (survey.pre) {
-              out +=
-                '<div class="survey-block"><div class="survey-block-title">Pre</div>' +
-                surveyQaTableHtml(survey.pre.qa || []) +
-                '</div>';
+            // One block per problem's pre/post survey; sessions from before per-problem history have one.
+            function prePostBlocks(block, title) {
+              var byProblem = (block.by_problem || []).filter(function(e) { return e && (e.qa || []).length; });
+              if (!byProblem.length) {
+                return '<div class="survey-block"><div class="survey-block-title">' + title + '</div>' +
+                  surveyQaTableHtml(block.qa || []) + '</div>';
+              }
+              return byProblem.map(function(e) {
+                return '<div class="survey-block"><div class="survey-block-title">' + title + ' · P' +
+                  escHtml(String(Number(e.problem_index) + 1)) + '</div>' + surveyQaTableHtml(e.qa) + '</div>';
+              }).join('');
             }
-            if (survey.post) {
-              out +=
-                '<div class="survey-block"><div class="survey-block-title">Post</div>' +
-                surveyQaTableHtml(survey.post.qa || []) +
-                '</div>';
-            }
+            if (survey.pre) out += prePostBlocks(survey.pre, 'Pre');
+            if (survey.post) out += prePostBlocks(survey.post, 'Post');
             if (survey.periodic) {
               out += '<div class="survey-block"><div class="survey-block-title">Periodic</div>';
               var occs = survey.periodic.occurrences || [];

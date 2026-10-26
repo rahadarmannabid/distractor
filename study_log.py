@@ -452,8 +452,11 @@ def collect_all(root: Any, quiz_id: str, labels: List[str], sessions: Optional[L
                     covered["compilation"].add(sid)
                 elif table == "surveys":
                     # Per question: a session may have some surveys logged and others only stored
-                    # (e.g. a pre-survey answered before the log existed).
-                    covered["surveys"].add((sid, str(r.get("survey_type")), _squash(str(r.get("question_text") or ""))))
+                    # (e.g. a pre-survey answered before the log existed). Also per problem, so one
+                    # problem's logged post-survey does not hide another problem's stored one.
+                    key = (sid, str(r.get("survey_type")), _squash(str(r.get("question_text") or "")))
+                    covered["surveys"].add(key)
+                    covered["surveys"].add(key + (_int(r.get("problem_index")),))
                 out[table].append(r)
     for sid, recs in records.items():
         for pid, rec in recs.items():
@@ -469,8 +472,11 @@ def collect_all(root: Any, quiz_id: str, labels: List[str], sessions: Optional[L
         with_payload.add(sid)
         extra = _payload_rows(payload, sid not in covered["compilation"], True)
         explained.update((x["session_id"], x["pair_id"]) for x in extra.pop("explanations"))
-        extra["surveys"] = [r for r in extra["surveys"] if (sid, str(r.get("survey_type")),
-                            _squash(str(r.get("question_text") or ""))) not in covered["surveys"]]
+        def survey_key(r: Dict[str, Any]) -> tuple:
+            key = (sid, str(r.get("survey_type")), _squash(str(r.get("question_text") or "")))
+            pi = _int(r.get("problem_index"))  # stored rows without a problem (older sessions) match any
+            return key if pi is None else key + (pi,)
+        extra["surveys"] = [r for r in extra["surveys"] if survey_key(r) not in covered["surveys"]]
         for table, rows in extra.items():
             out[table].extend(rows)
     for r in out["autocomplete"] + out["agent"]:

@@ -32,7 +32,6 @@ import smtplib
 from email.message import EmailMessage
 import traceback
 from enum import Enum
-from admin import router as admin_router
 from instructor import router as instructor_router
 from firebase_utils import fb_dict
 from survey_payload_compact import compact_survey_ai_history
@@ -1196,7 +1195,6 @@ async def persist_session_mutations(request: Request, call_next):
         _request_sessions.reset(token)
 
 
-app.include_router(admin_router)
 app.include_router(instructor_router)
 
 
@@ -2593,7 +2591,8 @@ CONDITION_AGENT = 3
 CONDITION_MULTILINE_SUGGESTION = 4
 
 # Most lines one multi-line (condition 4) ghost-text suggestion may span (Copilot-sized: 2 to 5).
-MULTILINE_SUGGESTION_MAX_LINES = int(os.getenv("MULTILINE_SUGGESTION_MAX_LINES", "5"))
+# The env var can lower it, never raise it above 5.
+MULTILINE_SUGGESTION_MAX_LINES = max(1, min(5, int(os.getenv("MULTILINE_SUGGESTION_MAX_LINES", "5"))))
 
 # A session's condition never changes, so cache it per worker: /complete runs on every
 # typing pause and should not fetch the whole session from Redis each time.
@@ -3769,6 +3768,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "AI Code Assistant with Firebase Integration",
+        "version": os.getenv("APP_VERSION", "dev"),  # image tag, set by release.sh
         "firebase_status": firebase_status,
         "session_store": active_sessions.session_store_backend(),
         "code_runner": code_runner_mode(),
@@ -5753,12 +5753,6 @@ async def serve_assignment_complete(request: Request):
     """Shown when the user has already submitted the assignment or finished the quiz."""
     return templates.TemplateResponse("assignment_complete.html", {"request": request})
 
-
-@app.get("/admin-panel", response_class=HTMLResponse)
-@app.get("/admin-panel.html", response_class=HTMLResponse)
-async def serve_admin_panel(request: Request):
-    """Serve the admin panel page"""
-    return templates.TemplateResponse("admin_client.html", {"request": request})
 
 @app.get("/download-assignment/{assignment_key}")
 async def download_assignment(assignment_key: str):

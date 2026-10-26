@@ -19,7 +19,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: guessing_ide
-    image: rahadarmannabid/codeoracle:latest
+    image: rahadarmannabid/distractors:latest
     ports:
       - "8000:8000"
     depends_on:
@@ -77,12 +77,12 @@ services:
   # credentials. Internal network only (no internet). Each program runs as the unprivileged
   # `sandbox` user (SANDBOX_UID) with CPU/memory/output/process limits from sandbox.py.
   runner:
-    image: rahadarmannabid/codeoracle:latest
+    image: rahadarmannabid/distractors:latest
     container_name: codeoracle_runner
     command: ["uvicorn", "runner:app", "--host", "0.0.0.0", "--port", "8100", "--log-level", "warning"]
     user: root  # only to switch each student program to SANDBOX_UID
     environment:
-      - RUNNER_TOKEN=${RUNNER_TOKEN:?Set RUNNER_TOKEN in .env (openssl rand -hex 32)}
+      - RUNNER_TOKEN=${RUNNER_TOKEN:?Set RUNNER_TOKEN in .env (see DOCKER.md)}
       - SANDBOX_UID=10001
       - CODE_MAX_CONCURRENT=${CODE_MAX_CONCURRENT:-40}
       - CODE_MEMORY_MB=${CODE_MEMORY_MB:-256}

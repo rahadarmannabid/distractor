@@ -426,15 +426,33 @@ def _qa_from_periodic_occurrence(occ: Dict[str, Any]) -> List[Dict[str, str]]:
     return out
 
 
+def _survey_history_by_problem(user_data: Dict[str, Any], kind: str) -> List[Dict[str, Any]]:
+    """Every pre or post survey of the session, one per problem: [{"problem_index", "qa"}] by problem.
+    From session_metadata.survey_history (the top-level pre_survey/post_survey keep only the latest)."""
+    history = _session_meta(user_data).get("survey_history") or user_data.get("survey_history")
+    out: Dict[int, List[Dict[str, str]]] = {}
+    for h in _firebase_to_list(history):
+        if not isinstance(h, dict) or h.get("survey_type") != kind:
+            continue
+        qa = _qa_from_pre_post_block({"responses": h.get("responses")})
+        if qa:
+            out[_int_pi(h.get("problem_index")) or 0] = qa
+    return [{"problem_index": pi, "qa": out[pi]} for pi in sorted(out)]
+
+
 def _summarize_survey_payload(user_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Normalize pre/post/periodic survey Q&A for instructor JSON and UI.
-    Reads top-level Firebase keys: pre_survey, post_survey, periodic_surveys.
+    Reads top-level Firebase keys: pre_survey, post_survey, periodic_surveys, and
+    session_metadata.survey_history for the pre/post survey of every problem ("by_problem").
     """
     pre = user_data.get("pre_survey")
     post = user_data.get("post_survey")
-    pre_qa = _qa_from_pre_post_block(pre) if pre else []
-    post_qa = _qa_from_pre_post_block(post) if post else []
+    pre_by_problem = _survey_history_by_problem(user_data, "pre")
+    post_by_problem = _survey_history_by_problem(user_data, "post")
+    # "qa" stays the latest survey (the only one older sessions have)
+    pre_qa = pre_by_problem[-1]["qa"] if pre_by_problem else _qa_from_pre_post_block(pre) if pre else []
+    post_qa = post_by_problem[-1]["qa"] if post_by_problem else _qa_from_pre_post_block(post) if post else []
 
     periodic_rows: List[Dict[str, Any]] = []
     for occ in _periodic_occurrence_dicts(user_data):
@@ -450,9 +468,9 @@ def _summarize_survey_payload(user_data: Dict[str, Any]) -> Dict[str, Any]:
 
     out: Dict[str, Any] = {}
     if pre_qa:
-        out["pre"] = {"qa": pre_qa}
+        out["pre"] = {"qa": pre_qa, "by_problem": pre_by_problem}
     if post_qa:
-        out["post"] = {"qa": post_qa}
+        out["post"] = {"qa": post_qa, "by_problem": post_by_problem}
     if periodic_rows:
         out["periodic"] = {"occurrences": periodic_rows}
     return out
@@ -1883,18 +1901,20 @@ def delete_user_data_for_quiz(db, quiz_id: str, user_id: str) -> Dict[str, Any]:
     return {"deleted_paths": deleted_paths, "deleted_count": len(deleted_paths)}
 
 
-SurveySlot = Tuple[str, Optional[int], int]  # (pre|post|periodic, occurrence or None, qa_index)
+# (pre|post|periodic, problem index (pre/post; None = a session without per-problem surveys) or
+# periodic occurrence, qa_index)
+SurveySlot = Tuple[str, Optional[int], int]
 
 
 def _get_qa_pair_at(ss: Dict[str, Any], kind: str, occ: Optional[int], idx: int) -> Optional[Dict[str, Any]]:
     """Return the Q/A dict at a fixed slot (pre/post list index or periodic occurrence + index)."""
-    if kind == "pre":
-        pq = (ss.get("pre") or {}).get("qa") or []
-        if isinstance(pq, list) and 0 <= idx < len(pq) and isinstance(pq[idx], dict):
-            return pq[idx]
-        return None
-    if kind == "post":
-        pq = (ss.get("post") or {}).get("qa") or []
+    if kind in ("pre", "post"):
+        block = ss.get(kind) or {}
+        by_problem = block.get("by_problem") or []
+        if occ is None:  # sessions from before survey_history: their one (latest) survey
+            pq = [] if by_problem else block.get("qa") or []
+        else:  # occ = problem index
+            pq = next((e.get("qa") or [] for e in by_problem if isinstance(e, dict) and e.get("problem_index") == occ), [])
         if isinstance(pq, list) and 0 <= idx < len(pq) and isinstance(pq[idx], dict):
             return pq[idx]
         return None
@@ -1929,10 +1949,8 @@ def _question_text_for_slot(per_session: List[Dict[str, Any]], kind: str, occ: O
             q = str(pair.get("q") or "").strip()
             if q:
                 return q
-    if kind == "pre":
-        return f"Pre-survey (question {idx + 1})"
-    if kind == "post":
-        return f"Post-survey (question {idx + 1})"
+    if kind in ("pre", "post"):
+        return f"{kind.title()}-survey (question {idx + 1})"
     return f"Periodic (occ. {occ}) (question {idx + 1})"
 
 
@@ -1953,22 +1971,21 @@ def _dedupe_csv_headers(headers: List[str]) -> List[str]:
 
 def _survey_csv_layout(per_session: List[Dict[str, Any]]) -> Tuple[List[str], List[SurveySlot]]:
     """Survey columns: header string is the question; rows contain answers only."""
-    max_pre = 0
-    max_post = 0
+    # pre/post: problem index (None = session without per-problem surveys) -> most questions
+    pp_max: Dict[str, Dict[Optional[int], int]] = {"pre": {}, "post": {}}
     occ_max: Dict[int, int] = {}
 
     for row in per_session:
         ss = row.get("survey_summary")
         if not isinstance(ss, dict):
             continue
-        pre = ss.get("pre") or {}
-        _pre_qa = pre.get("qa")
-        pq: List[Any] = _pre_qa if isinstance(_pre_qa, list) else []
-        max_pre = max(max_pre, len(pq))
-        post = ss.get("post") or {}
-        _post_qa = post.get("qa")
-        poq: List[Any] = _post_qa if isinstance(_post_qa, list) else []
-        max_post = max(max_post, len(poq))
+        for kind, slots in pp_max.items():
+            block = ss.get(kind) or {}
+            by_problem = [e for e in block.get("by_problem") or [] if isinstance(e, dict)]
+            entries = [(e.get("problem_index"), e.get("qa")) for e in by_problem] or [(None, block.get("qa"))]
+            for pi, qa in entries:
+                if isinstance(qa, list) and qa:
+                    slots[pi] = max(slots.get(pi, 0), len(qa))
         per = ss.get("periodic") or {}
         _occs = per.get("occurrences")
         occs: List[Any] = _occs if isinstance(_occs, list) else []
@@ -1987,16 +2004,21 @@ def _survey_csv_layout(per_session: List[Dict[str, Any]]) -> Tuple[List[str], Li
             occ_max[ni] = max(occ_max.get(ni, 0), len(qa))
 
     specs: List[SurveySlot] = []
-    for i in range(max_pre):
-        specs.append(("pre", None, i))
-    for i in range(max_post):
-        specs.append(("post", None, i))
+    prefixed: set = set()  # specs whose header names the problem (more than one survey of that kind)
+    for kind, slots in pp_max.items():
+        keys = sorted(slots, key=lambda k: -1 if k is None else k)
+        for pi in keys:
+            for i in range(slots[pi]):
+                specs.append((kind, pi, i))
+                if pi is not None and len(keys) > 1:
+                    prefixed.add(len(specs) - 1)
     for occ_key in sorted(occ_max.keys()):
         m = occ_max[occ_key]
         for i in range(m):
             specs.append(("periodic", occ_key, i))
 
-    raw_headers = [_question_text_for_slot(per_session, k, o, i) for (k, o, i) in specs]
+    raw_headers = [(f"P{o + 1} {k} · " if n in prefixed and o is not None else "") + _question_text_for_slot(per_session, k, o, i)
+                   for n, (k, o, i) in enumerate(specs)]
     headers = _dedupe_csv_headers(raw_headers)
     return headers, specs
 
@@ -2271,18 +2293,28 @@ def _pair_outcome(rec: Dict[str, Any], bug_oid: Optional[str] = None) -> Tuple[b
 
 def bug_pair_stats(db, quiz_id: str, bug_skills: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Per bug type and condition: pairs generated, shown, and whether students accepted the buggy or
-    the correct option. Selected bug types with no pairs yet are listed with zeros."""
+    the correct option. Selected bug types with no pairs yet are listed with zeros. Also the time each
+    suggestion took to generate (first request until its options were ready), per condition and problem."""
     q = str(quiz_id or "").strip()
     needle = f"_quiz_{q[:8]}_"
     keys = db.reference("bug_injections").get(shallow=True) or {}
     # (pair record, one planted bug, that bug's option id or None for the older one-bug records)
     records: List[Tuple[Dict[str, Any], Dict[str, Any], Optional[str]]] = []
+    # condition -> {"total": [seconds], "per_problem": {problem index: [seconds]}}
+    gen_times: Dict[str, Dict[str, Any]] = {}
     for sid in keys if isinstance(keys, dict) else []:
         if needle not in sid:
             continue
         for rec in (db.reference(f"bug_injections/{sid}").get() or {}).values():
             if not isinstance(rec, dict) or rec.get("quiz_id", q) != q:
                 continue
+            ms = _safe_float(rec.get("generation_ms"))
+            if ms is not None and ms >= 0:
+                cell = gen_times.setdefault(str(rec.get("condition") or "unknown"), {"total": [], "per_problem": {}})
+                cell["total"].append(round(ms / 1000, 2))
+                pi = _int_pi(rec.get("problem_index"))
+                if pi is not None:
+                    cell["per_problem"].setdefault(str(pi), []).append(round(ms / 1000, 2))
             if rec.get("requested_bug"):  # one buggy option, before quiz.bug_options existed
                 records.append((rec, rec, None))
             for bug in _firebase_to_list(rec.get("bugs")):
@@ -2315,4 +2347,5 @@ def bug_pair_stats(db, quiz_id: str, bug_skills: List[Dict[str, Any]]) -> Dict[s
     rows = sorted(by_type.values(), key=lambda r: (-r["generated"], r["name"].lower()))
     totals = {k: sum(r[k] for r in rows) for k in ("generated", "shown", "accepted_buggy", "accepted_correct")}
     conditions = sorted({c for r in rows for c in r["by_condition"]})
-    return sanitize_for_json({"types": rows, "totals": totals, "conditions": conditions})
+    return sanitize_for_json({"types": rows, "totals": totals, "conditions": conditions,
+                              "generation_seconds": gen_times})

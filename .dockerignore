@@ -92,6 +92,7 @@ tests/
 test_*.py
 *_test.py
 .pytest_cache/
+.ruff_cache/
 .coverage
 .tox/
 htmlcov/

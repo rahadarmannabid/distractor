@@ -501,6 +501,13 @@ async def logout(request: Request):
 
 # ─── Dashboard ──────────────────────────────────────────────────────────────
 
+@router.get("", include_in_schema=False)
+@router.get("/", include_in_schema=False)
+async def instructor_root():
+    """/instructor (the address in the docs) opens the dashboard, or the sign-in page."""
+    return RedirectResponse(url="/instructor/dashboard", status_code=303)
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
     email = _require_instructor(request)

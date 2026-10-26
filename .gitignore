@@ -66,7 +66,6 @@ desktop.ini
 # ============================================
 .git/
 .gitignore
-.gitattributes
 .gitmodules
 
 # ============================================
@@ -81,6 +80,7 @@ desktop.ini
 !README.md
 !readme.md
 !DOCKER.md
+!HOSTING.md
 !bug_skills/*.md
 frontend.txt
 docs/
