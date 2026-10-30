@@ -307,14 +307,35 @@ def _submission_code_str(row: Dict[str, Any]) -> str:
     return str(raw)
 
 
-def _final_code_per_problem(meta: Dict[str, Any], num_problems: int) -> List[Optional[str]]:
+def _submission_files(row: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Every file of a submission ({filename, content}); one unnamed file for the older rows that
+    kept only the editor's code."""
+    files = [
+        {"filename": str(f.get("filename")), "content": "" if f.get("content") is None else str(f.get("content"))}
+        for f in _firebase_to_list(row.get("files"))
+        if isinstance(f, dict) and f.get("filename")
+    ]
+    if files:
+        return files
+    code = _submission_code_str(row)
+    return [{"filename": "", "content": code}] if code.strip() else []
+
+
+def files_code_text(files: List[Dict[str, str]]) -> str:
+    """A submission's files as one text: a lone file as it is, several each under a header line."""
+    if len(files) == 1:
+        return files[0]["content"]
+    return "\n\n".join(f"===== {f['filename'] or 'file'} =====\n{f['content']}" for f in files)
+
+
+def _final_files_per_problem(meta: Dict[str, Any], num_problems: int) -> List[List[Dict[str, str]]]:
     """
-    Latest code per problem from session_metadata.per_problem_submissions (by timestamp),
-    then override with rows marked final_submit=True. Falls back to submitted_code for
-    single-problem sessions when no per-row code exists.
+    Every file of each problem's final code: the latest submission per problem from
+    session_metadata.per_problem_submissions (by timestamp), then the rows marked final_submit=True.
+    Falls back to submitted_files / submitted_code for single-problem sessions with no per-row code.
     """
     rows = _firebase_to_list(meta.get("per_problem_submissions"))
-    best: Dict[int, Tuple[Optional[datetime], str]] = {}
+    best: Dict[int, Tuple[Optional[datetime], List[Dict[str, str]]]] = {}
 
     for row in rows:
         if not isinstance(row, dict):
@@ -322,27 +343,23 @@ def _final_code_per_problem(meta: Dict[str, Any], num_problems: int) -> List[Opt
         pi = _int_pi(row.get("problem_index"))
         if pi is None or pi < 0 or pi >= num_problems:
             continue
-        code = _submission_code_str(row)
+        files = _submission_files(row)
         ts = _parse_iso(row.get("timestamp"))
         tzu = _utc_for_delta(ts) if ts else None
         cur = best.get(pi)
         if cur is None:
-            best[pi] = (tzu, code)
+            best[pi] = (tzu, files)
             continue
-        cur_t, _cur_c = cur
+        cur_t, _cur_f = cur
         if tzu is None:
             if cur_t is None:
-                best[pi] = (None, code)
+                best[pi] = (None, files)
         elif cur_t is None or tzu >= cur_t:
-            best[pi] = (tzu, code)
+            best[pi] = (tzu, files)
 
-    out: List[Optional[str]] = []
-    for i in range(num_problems):
-        if i in best:
-            c = best[i][1]
-            out.append(c if c.strip() else None)
-        else:
-            out.append(None)
+    out: List[List[Dict[str, str]]] = [
+        best[i][1] if i in best and any(f["content"].strip() for f in best[i][1]) else [] for i in range(num_problems)
+    ]
 
     for row in rows:
         if not isinstance(row, dict) or row.get("final_submit") is not True:
@@ -350,14 +367,14 @@ def _final_code_per_problem(meta: Dict[str, Any], num_problems: int) -> List[Opt
         pi = _int_pi(row.get("problem_index"))
         if pi is None or pi < 0 or pi >= num_problems:
             continue
-        code = _submission_code_str(row)
-        if code.strip():
-            out[pi] = code
+        files = _submission_files(row)
+        if any(f["content"].strip() for f in files):
+            out[pi] = files
 
-    sub = meta.get("submitted_code")
-    if isinstance(sub, str) and sub.strip():
-        if num_problems == 1 and (len(out) < 1 or out[0] is None or not str(out[0]).strip()):
-            out[0] = sub
+    if num_problems == 1 and not out[0]:
+        files = _submission_files({"files": meta.get("submitted_files"), "code": meta.get("submitted_code")})
+        if any(f["content"].strip() for f in files):
+            out[0] = files
 
     return out
 
@@ -473,6 +490,31 @@ def _summarize_survey_payload(user_data: Dict[str, Any]) -> Dict[str, Any]:
         out["post"] = {"qa": post_qa, "by_problem": post_by_problem}
     if periodic_rows:
         out["periodic"] = {"occurrences": periodic_rows}
+    return out
+
+
+def _merge_logged_surveys(summary: Dict[str, Any], logged: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """The session's surveys (_summarize_survey_payload) with the study log's added: a pre/post survey of
+    a problem the session did not keep, and the periodic surveys of every problem (the session keeps
+    only the last problem's) when the log has at least as many."""
+    out = dict(summary)
+    for kind in ("pre", "post"):
+        block = dict(out.get(kind) or {})
+        by_problem = {e["problem_index"]: e for e in block.get("by_problem") or [] if isinstance(e, dict)}
+        for e in logged.get(kind) or []:
+            if e["qa"] and e["problem_index"] not in by_problem:
+                by_problem[e["problem_index"]] = {"problem_index": e["problem_index"], "qa": e["qa"]}
+        if not by_problem:
+            continue
+        block["by_problem"] = [by_problem[pi] for pi in sorted(by_problem)]
+        block["qa"] = block.get("qa") or block["by_problem"][-1]["qa"]
+        out[kind] = block
+    periodic = [e for e in logged.get("periodic") or [] if e["qa"]]
+    stored = (out.get("periodic") or {}).get("occurrences") or []
+    if periodic and len(periodic) >= len(stored):
+        out["periodic"] = {"occurrences": [
+            {"occurrence_number": e["occurrence_number"], "problem_index": e["problem_index"],
+             "is_final": e.get("is_final", False), "qa": e["qa"]} for e in periodic]}
     return out
 
 
@@ -738,7 +780,8 @@ def derive_session_metrics(
         if cnt > 0:
             avg_suggestion_time_seconds_by_pi[pi] = (total_ms / 1000.0) / cnt
 
-    final_code_per_problem = _final_code_per_problem(meta, num_problems)
+    final_files_per_problem = _final_files_per_problem(meta, num_problems)
+    final_code_per_problem = [files_code_text(f) if f else None for f in final_files_per_problem]
     programming_language = str(meta.get("programming_language") or "").strip()
 
     survey_summary = _summarize_survey_payload(user_data)
@@ -757,6 +800,7 @@ def derive_session_metrics(
         "total_time_seconds": total_time_seconds,
         "focus_time_seconds": focus_time_seconds,
         "final_code_per_problem": final_code_per_problem,
+        "final_files_per_problem": final_files_per_problem,
         "programming_language": programming_language,
         "time_per_problem_seconds": time_per_problem_seconds,
         "ai_generations_total": ai_gen_total,
@@ -1474,11 +1518,14 @@ def aggregate_quiz_analytics(
     quiz_id: str,
     problem_labels: List[str],
     ai_counts: Optional[Dict[str, Dict[str, Any]]] = None,
+    survey_logs: Optional[Dict[str, Dict[str, List[Dict[str, Any]]]]] = None,
 ) -> Dict[str, Any]:
     """
     sessions: list of user_data dicts from Firebase (session_metadata + activity_log, ...).
     ai_counts: per session id, AI numbers from the study log (study_log.session_ai_counts) that replace
     the ones counted from activity events (inline suggestions and the agent do not log those).
+    survey_logs: per session id, every survey from the study log (study_log.session_surveys), for the
+    problems the stored session has no survey of (see _merge_logged_surveys).
     """
     n = len(problem_labels)
     if n < 1:
@@ -1494,6 +1541,8 @@ def aggregate_quiz_analytics(
         if m is not None:
             if ai_counts and m.get("session_id") in ai_counts:
                 m.update(ai_counts[m["session_id"]])
+            if survey_logs and m.get("session_id") in survey_logs:
+                m["survey_summary"] = _merge_logged_surveys(m.get("survey_summary") or {}, survey_logs[m["session_id"]])
             derived.append(m)
             raw_matched.append(ud)
 
@@ -1585,6 +1634,8 @@ def aggregate_quiz_analytics(
         completed_prob = d.get("completed_problem") or [False] * n
         _raw_fc = d.get("final_code_per_problem") or []
         final_codes = [_raw_fc[i] if i < len(_raw_fc) else None for i in range(n)]
+        _raw_ff = d.get("final_files_per_problem") or []
+        final_files = [_raw_ff[i] if i < len(_raw_ff) else [] for i in range(n)]
 
         per_session_rows.append(
             {
@@ -1617,6 +1668,7 @@ def aggregate_quiz_analytics(
                 "paste_attempt_total": int(d.get("paste_attempt_total") or 0),
                 "completed_problem": [bool(x) for x in completed_prob[:n]],
                 "final_code_per_problem": final_codes,
+                "final_files_per_problem": final_files,
                 "programming_language": d.get("programming_language") or "",
                 "survey_summary": d.get("survey_summary") or {},
             }
@@ -2017,8 +2069,8 @@ def _survey_csv_layout(per_session: List[Dict[str, Any]]) -> Tuple[List[str], Li
         for i in range(m):
             specs.append(("periodic", occ_key, i))
 
-    raw_headers = [(f"P{o + 1} {k} · " if n in prefixed and o is not None else "") + _question_text_for_slot(per_session, k, o, i)
-                   for n, (k, o, i) in enumerate(specs)]
+    raw_headers = [(f"P{o + 1} {k} · " if n in prefixed and o is not None else f"Periodic {o} · " if k == "periodic" else "")
+                   + _question_text_for_slot(per_session, k, o, i) for n, (k, o, i) in enumerate(specs)]
     headers = _dedupe_csv_headers(raw_headers)
     return headers, specs
 
@@ -2056,6 +2108,25 @@ def _csv_int_cell(v: Any, default: int = 0) -> int:
         return int(round(float(v)))
     except (TypeError, ValueError):
         return default
+
+
+# Excel keeps at most 32,767 characters in a cell.
+_CSV_CELL_MAX = 32000
+
+
+def _final_code_cells(row: Dict[str, Any], idx: int) -> List[str]:
+    """The file names and the code (every file) of one problem's final submission."""
+    files_li = row.get("final_files_per_problem")
+    files = files_li[idx] if isinstance(files_li, list) and idx < len(files_li) and isinstance(files_li[idx], list) else []
+    if files:
+        names = ", ".join(f.get("filename") or "" for f in files if isinstance(f, dict))
+        code = files_code_text(files)
+    else:  # rows cached before final_files_per_problem existed
+        codes = row.get("final_code_per_problem")
+        names, code = "", (codes[idx] if isinstance(codes, list) and idx < len(codes) and codes[idx] else "")
+    if len(code) > _CSV_CELL_MAX:
+        code = code[:_CSV_CELL_MAX] + "\n… (cut: too long for one spreadsheet cell)"
+    return [names, code]
 
 
 def export_per_session_csv(problem_labels: List[str], per_session: List[Dict[str, Any]]) -> str:
@@ -2114,6 +2185,8 @@ def export_per_session_csv(problem_labels: List[str], per_session: List[Dict[str
                 f"{lab}_tabs",
                 f"{lab}_paste",
                 f"{lab}_done",
+                f"{lab}_final_files",
+                f"{lab}_final_code",
             ]
         )
     header.extend(survey_headers)
@@ -2170,6 +2243,7 @@ def export_per_session_csv(problem_labels: List[str], per_session: List[Dict[str
                     _csv_int_cell(_pv("per_problem_tab_switches", i), 0),
                     _csv_int_cell(_pv("per_problem_paste_attempts", i), 0),
                     done_s,
+                    *_final_code_cells(row, i),
                 ]
             )
         out.extend(_survey_csv_answers_for_row(row.get("survey_summary"), survey_specs))

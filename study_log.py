@@ -957,3 +957,31 @@ def session_ai_counts(collected: Dict[str, List[Dict[str, Any]]]) -> Dict[str, D
                 by.setdefault(pi, []).append(v)
         m["avg_suggestion_time_seconds_by_problem"] = {pi: sum(v) / len(v) / 1000 for pi, v in by.items()}
     return out
+
+
+def session_surveys(collected: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
+    """Per session, every survey answered, from the study log's surveys table (which keeps the problem of
+    each survey; the stored session keeps only the last problem's periodic surveys, and older sessions
+    only the last pre/post survey): {"pre"|"post": [{"problem_index", "qa"}], "periodic": [{"problem_index",
+    "occurrence_number", "is_final", "qa"}]}, with qa as [{"q", "a"}] in question order."""
+    groups: Dict[Tuple[str, str, int, str], List[Dict[str, Any]]] = {}
+    for r in collected.get("surveys", []):
+        sid, kind, pi = str(r.get("session_id") or ""), str(r.get("survey_type") or ""), _int(r.get("problem_index"))
+        if not sid or pi is None or kind not in ("pre", "post", "periodic", "final"):
+            continue
+        groups.setdefault((sid, kind, pi, str(r.get("survey_round") or "")), []).append(r)
+    out: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+    for (sid, kind, pi, _round), rows in groups.items():
+        rows.sort(key=lambda r: _int(r.get("question_index")) or 0)
+        qa = [{"q": str(r.get("question_text") or "").strip() or "(question)",
+               "a": "" if r.get("answer") is None else str(r.get("answer"))} for r in rows]
+        entry = {"problem_index": pi, "qa": qa, "at": min(str(r.get("timestamp") or "") for r in rows)}
+        if kind in ("periodic", "final"):
+            entry["is_final"] = kind == "final"
+        out.setdefault(sid, {}).setdefault("periodic" if kind in ("periodic", "final") else kind, []).append(entry)
+    for by_kind in out.values():
+        for kind, entries in by_kind.items():
+            entries.sort(key=lambda e: (e["problem_index"], e["at"]))
+        for n, e in enumerate(by_kind.get("periodic", []), 1):
+            e["occurrence_number"] = n
+    return out

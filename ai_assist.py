@@ -176,10 +176,12 @@ def clean_completion(completion: str, prefix: str, suffix: str, max_lines: int) 
         if text.endswith(line_tail.strip()):
             text = text[: -len(line_tail.strip())]
 
-    # Drop any trailing overlap with the code after the cursor.
+    # Drop any trailing overlap with the code after the cursor. When that code starts on a new line,
+    # the overlap must too: a deeper "        }" ends with the outer loop's "    }" but is not it.
     tail = suffix.lstrip("\n")
+    whole_lines = not line_tail.strip()
     for k in range(min(len(text), len(tail)), 3, -1):
-        if text.endswith(tail[:k]):
+        if text.endswith(tail[:k]) and (not whole_lines or not text[:-k] or text[:-k].endswith("\n")):
             text = text[:-k]
             break
 

@@ -5868,29 +5868,31 @@ function collectDownloadEntriesForIde(userId, assignmentKey, timestampSeg, ext) 
 
     var entries = [];
 
+    // The current problem comes from the open editor below (fresher than a stored copy).
     stored.forEach(function(p) {
-        var problemNum = p.problemIndex + 1;
-        var stem = buildDownloadStemForProblem(userId, assignmentKey, quizId, problemNum, timestampSeg);
-        entries.push({ filename: stem + ext, content: (p.code || '').trim() });
+        if (p.problemIndex === currentProbIdx) return;
+        var stem = buildDownloadStemForProblem(userId, assignmentKey, quizId, p.problemIndex + 1, timestampSeg);
+        pushDownloadEntries(entries, stem, ext, p.files, p.code);
     });
 
-    var problemNum = currentProbIdx + 1;
-    var stem = buildDownloadStemForProblem(userId, assignmentKey, quizId, problemNum, timestampSeg);
-    var allFiles = getAllFileContents();
-    if (allFiles && allFiles.length > 0) {
-        if (allFiles.length === 1) {
-            entries.push({ filename: stem + ext, content: allFiles[0].content || '' });
-        } else {
-            for (var i = 0; i < allFiles.length; i++) {
-                entries.push({ filename: stem + '_' + (i + 1) + ext, content: allFiles[i].content || '' });
-            }
-        }
-    } else {
-        var code = window.editor ? window.editor.getValue() : '';
-        entries.push({ filename: stem + ext, content: (code || '').trim() });
-    }
+    var stem = buildDownloadStemForProblem(userId, assignmentKey, quizId, currentProbIdx + 1, timestampSeg);
+    pushDownloadEntries(entries, stem, ext, window.WS ? WS.list() : null, window.editor ? window.editor.getValue() : '');
 
     return entries;
+}
+
+/** One problem's code: a lone file as stem.ext, several files under a stem/ folder with their own names. */
+function pushDownloadEntries(entries, stem, ext, files, code) {
+    files = Array.isArray(files) ? files.filter(function(f) { return f && f.filename; }) : [];
+    if (files.length > 1) {
+        files.forEach(function(f) {
+            entries.push({ filename: stem + '/' + f.filename, content: f.content || '' });
+        });
+    } else if (files.length === 1) {
+        entries.push({ filename: stem + ext, content: files[0].content || '' });
+    } else {
+        entries.push({ filename: stem + ext, content: (code || '').trim() });
+    }
 }
 
 function triggerBlobDownload(blob, fileName) {
@@ -6722,10 +6724,14 @@ async function checkAndShowPostSurvey() {
                     const raw = localStorage.getItem(perProblemKey);
                     if (raw) stored = JSON.parse(raw);
                 } catch (e) {}
+                stored = stored.filter((x) => x && x.problemIndex !== currentProbIdx);
+                const doneFiles = window.WS ? WS.list() : [];
                 stored.push({
                     problemIndex: currentProbIdx,
                     title: nextData.completed_problem_title || `Problem ${currentProbIdx + 1}`,
-                    code: code
+                    code: code,
+                    // Every file of the workspace, so the final ZIP has the whole solution.
+                    files: doneFiles.length ? doneFiles : undefined
                 });
                 localStorage.setItem(perProblemKey, JSON.stringify(stored));
 

@@ -4301,6 +4301,8 @@ async def submit_survey(request: SurveySubmission):
                 "assignment_key": request.assignment_key,
                 "responses": [r.dict() for r in request.responses],
             }
+            if request.session_id in active_sessions:
+                fb_payload["problem_index"] = int(active_sessions[request.session_id].current_problem_index or 0)
             if ai_ctx:
                 fb_payload["ai_history_context"] = ai_ctx
             if await asyncio.to_thread(append_periodic_survey_to_firebase, request.session_id, fb_payload):

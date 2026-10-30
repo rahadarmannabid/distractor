@@ -64,6 +64,64 @@
     }
     .nav-actions button.nav-refresh:hover { color: var(--text); border-color: #475569; }
 
+    /* "New data" notice: appears when the pulse sees sessions the page does not show yet. */
+    .nav-actions button.new-data-pill {
+      display: inline-flex; align-items: center; gap: 8px;
+      font: 600 0.78rem/1 inherit; padding: 7px 12px; border-radius: 999px; cursor: pointer;
+      color: #bbf7d0; background: rgba(22, 101, 52, 0.35); border: 1px solid rgba(74, 222, 128, 0.55);
+      animation: pill-in 0.45s cubic-bezier(.2,.9,.3,1.3) both, pill-glow 2.2s ease-in-out 0.45s infinite;
+    }
+    .nav-actions button.new-data-pill[hidden] { display: none; }
+    .nav-actions button.new-data-pill:hover { background: rgba(22, 101, 52, 0.55); color: #fff; }
+    .new-data-dot { width: 8px; height: 8px; border-radius: 50%; background: #4ade80; position: relative; }
+    .new-data-dot::after {
+      content: ""; position: absolute; inset: 0; border-radius: 50%; background: #4ade80;
+      animation: dot-ping 1.6s cubic-bezier(0,0,.2,1) infinite;
+    }
+    @keyframes pill-in { from { opacity: 0; transform: translateY(-8px) scale(.9); } to { opacity: 1; transform: none; } }
+    @keyframes pill-glow { 0%,100% { box-shadow: 0 0 0 0 rgba(74,222,128,0); } 50% { box-shadow: 0 0 14px 2px rgba(74,222,128,.35); } }
+    @keyframes dot-ping { 0% { transform: scale(1); opacity: .8; } 80%,100% { transform: scale(2.6); opacity: 0; } }
+
+    /* Rows: flash red and slide away when deleted; glow green when new since the last look. */
+    .student-table tbody tr.row-deleting td { animation: row-delete 0.75s ease-in forwards; pointer-events: none; }
+    @keyframes row-delete {
+      0% { background: rgba(127, 29, 29, 0.18); }
+      25% { background: rgba(220, 38, 38, 0.45); opacity: 1; transform: none; }
+      100% { background: rgba(220, 38, 38, 0); opacity: 0; transform: translateX(40px); }
+    }
+    .student-table tbody tr.row-new td { animation: row-new 3.2s ease-out both; }
+    .student-table tbody tr.row-new td:first-child { box-shadow: inset 3px 0 0 #4ade80; }
+    @keyframes row-new {
+      0% { background: rgba(74, 222, 128, 0.35); }
+      100% { background: rgba(74, 222, 128, 0); }
+    }
+
+    /* Toasts (bottom right). */
+    .toast-stack { position: fixed; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 1000; }
+    .toast {
+      display: flex; align-items: center; gap: 10px; min-width: 240px; max-width: 420px;
+      padding: 11px 14px; border-radius: 10px; font-size: 0.85rem; color: #e2e8f0;
+      background: #0f172a; border: 1px solid #334155; box-shadow: 0 10px 30px rgba(0,0,0,.45);
+      animation: toast-in 0.35s cubic-bezier(.2,.9,.3,1.2) both;
+    }
+    .toast.leaving { animation: toast-out 0.3s ease-in forwards; }
+    .toast-icon { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; }
+    .toast-icon svg { width: 13px; height: 13px; }
+    .toast-icon path { stroke-dasharray: 20; stroke-dashoffset: 20; animation: check-draw 0.4s 0.2s ease-out forwards; }
+    .toast--deleted { border-color: rgba(248, 113, 113, 0.5); }
+    .toast--deleted .toast-icon { background: rgba(220, 38, 38, 0.25); color: #fca5a5; }
+    .toast--new { border-color: rgba(74, 222, 128, 0.5); }
+    .toast--new .toast-icon { background: rgba(22, 163, 74, 0.25); color: #86efac; }
+    .toast--error { border-color: rgba(248, 113, 113, 0.7); }
+    .toast--error .toast-icon { background: rgba(220, 38, 38, 0.35); color: #fecaca; }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(16px) scale(.96); } to { opacity: 1; transform: none; } }
+    @keyframes toast-out { to { opacity: 0; transform: translateX(30px); } }
+    @keyframes check-draw { to { stroke-dashoffset: 0; } }
+    @media (prefers-reduced-motion: reduce) {
+      .new-data-pill, .new-data-dot::after, .toast, .toast-icon path,
+      .student-table tbody tr.row-deleting td, .student-table tbody tr.row-new td { animation-duration: 0.01s !important; animation-iteration-count: 1 !important; }
+    }
+
     .wrap { max-width: 1320px; margin: 0 auto; padding: 20px 16px 48px; }
 
     .banner {
@@ -320,6 +378,17 @@
       color: #fecaca;
     }
     .btn-delete-user:hover { background: rgba(153, 27, 27, 0.5); color: #fff; }
+    .final-code-file-name {
+      margin: 8px 0 4px;
+      font: 600 0.72rem ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #7dd3fc;
+    }
+    .btn-delete-user:disabled { opacity: 0.45; cursor: not-allowed; }
+    .table-controls .btn-delete-user { margin-left: auto; }
+    .student-table th.col-select,
+    .student-table td.col-select { width: 32px; padding-left: 12px; padding-right: 4px; }
+    .student-table .col-select input { accent-color: #f87171; cursor: pointer; width: 15px; height: 15px; }
+    .student-table tr.row-selected td { background: rgba(127, 29, 29, 0.18); }
     .student-table td.col-user,
     .student-table td.col-time,
     .student-table .col-num,
@@ -539,6 +608,7 @@
     <div class="nav-actions">
       <span style="font-size:0.75rem;color:var(--muted);">{{ instructor_email }}</span>
       {% if firebase_available %}
+      <button type="button" class="new-data-pill" id="new-data-pill" hidden><span class="new-data-dot"></span><span id="new-data-text">New data</span></button>
       <button type="button" class="nav-refresh" id="analytics-refresh-btn" title="Reload submission aggregates from Firebase (bypasses server cache)">Refresh data</button>
       <a class="nav-export" href="/instructor/quiz/{{ quiz_id }}/analytics-export?fmt=csv">Download sessions (CSV)</a>
       {% endif %}
@@ -751,11 +821,13 @@
               <input type="checkbox" id="onlyCompletedSessions"/>
               Only completed
             </label>
+            <button type="button" class="btn-delete-user" id="deleteSelectedBtn" disabled>Delete selected</button>
           </div>
           <div class="student-table-wrap">
             <table class="student-table" id="student-sessions-table">
               <thead>
                 <tr>
+                  <th class="col-select"><input type="checkbox" id="selectAllSessions" title="Select all shown"/></th>
                   <th class="col-user">User</th>
                   <th class="col-status">Status</th>
                   <th class="col-condition">Condition</th>
@@ -1004,6 +1076,95 @@
         window.location.href = window.location.pathname + '?refresh=1';
       });
     }
+
+    // ── Toasts ──
+    var TOAST_ICONS = {
+      deleted: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>',
+      new: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>',
+      error: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>'
+    };
+    function showToast(message, kind, ms) {
+      var stack = document.querySelector('.toast-stack');
+      if (!stack) {
+        stack = document.createElement('div');
+        stack.className = 'toast-stack';
+        stack.setAttribute('role', 'status');
+        stack.setAttribute('aria-live', 'polite');
+        document.body.appendChild(stack);
+      }
+      var el = document.createElement('div');
+      el.className = 'toast toast--' + kind;
+      el.innerHTML = '<span class="toast-icon">' + (TOAST_ICONS[kind] || '') + '</span><span></span>';
+      el.lastChild.textContent = message;
+      stack.appendChild(el);
+      setTimeout(function() {
+        el.classList.add('leaving');
+        setTimeout(function() { el.remove(); }, 320);
+      }, ms || 3500);
+    }
+
+    // After a reload: say what was deleted, and which sessions to highlight as new.
+    var FLASH_KEY = 'analyticsFlash_' + quizId;
+    var flash = null;
+    try { flash = JSON.parse(sessionStorage.getItem(FLASH_KEY) || 'null'); } catch (e) { flash = null; }
+    sessionStorage.removeItem(FLASH_KEY);
+    if (flash && flash.deleted) {
+      showToast('Deleted ' + flash.deleted + ' user' + (flash.deleted === 1 ? '' : 's') + ' — dashboard updated', 'deleted');
+    }
+    var highlightSessions = {};
+    (flash && flash.highlight || []).forEach(function(sid) { highlightSessions[sid] = true; });
+    if (flash && flash.newSummary) showToast(flash.newSummary, 'new');
+
+    // Reloads the page with fresh data; `note` is shown once it has loaded.
+    function reloadWithFlash(note) {
+      try { sessionStorage.setItem(FLASH_KEY, JSON.stringify(note || {})); } catch (e) { /* ignore */ }
+      window.location.href = window.location.pathname + '?refresh=1';
+    }
+
+    // ── New data: poll the quiz's session list (keys only) and offer to update when it changes ──
+    (function watchForNewData() {
+      var pill = document.getElementById('new-data-pill');
+      var pillText = document.getElementById('new-data-text');
+      if (!pill) return;
+      var POLL_MS = 20000;
+      var baseline = null, changed = [];
+      function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+      function poll() {
+        if (document.hidden) return;
+        fetch('/instructor/quiz/' + encodeURIComponent(quizId) + '/analytics-pulse', { credentials: 'same-origin', cache: 'no-store' })
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .then(function(j) {
+            if (!j || !j.sessions) return;
+            if (!baseline) { baseline = j.sessions; return; }
+            var added = [], submitted = [], removed = 0;
+            Object.keys(j.sessions).forEach(function(sid) {
+              if (!(sid in baseline)) added.push(sid);
+              else if (baseline[sid] !== 'submitted' && j.sessions[sid] === 'submitted') submitted.push(sid);
+            });
+            Object.keys(baseline).forEach(function(sid) { if (!(sid in j.sessions)) removed++; });
+            var parts = [];
+            if (added.length) parts.push(plural(added.length, 'new session'));
+            if (submitted.length) parts.push(submitted.length + ' just submitted');
+            if (removed) parts.push(removed + ' removed');
+            if (!parts.length) return;
+            var wasHidden = pill.hidden;
+            changed = added.concat(submitted);
+            pillText.textContent = parts.join(' · ') + ' — Update';
+            pill.title = 'New data since this page loaded. Click to load it.';
+            if (wasHidden) {
+              pill.hidden = false;
+              showToast(parts.join(', ') + ' since you opened this page', 'new');
+            }
+          })
+          .catch(function() { /* offline or server busy: try again next time */ });
+      }
+      pill.addEventListener('click', function() {
+        reloadWithFlash({ highlight: changed, newSummary: changed.length ? plural(changed.length, 'session') + ' updated — highlighted below' : '' });
+      });
+      poll();
+      setInterval(poll, POLL_MS);
+      document.addEventListener('visibilitychange', function() { if (!document.hidden) poll(); });
+    })();
 
     fetchAnalyticsData(initialForceRefresh)
       .then(function(r) {
@@ -1858,21 +2019,33 @@
           }
 
           function renderFinalCodeCell(row) {
-            var codes = row.final_code_per_problem;
+            var codes = row.final_code_per_problem || [];
+            // Every file of each problem's final code (older cached rows only have the joined text).
+            var fileSets = row.final_files_per_problem || [];
             var lang = normalizeLangLabel(row.programming_language);
-            if (!codes || !codes.length) return '—';
+            var n = Math.max(codes.length, fileSets.length);
+            if (!n) return '—';
             var blocks = [];
-            for (var i = 0; i < codes.length; i++) {
-              if (codes[i] == null || String(codes[i]).trim() === '') continue;
+            for (var i = 0; i < n; i++) {
+              var files = (fileSets[i] || []).filter(function(f) { return f && String(f.content || '').trim() !== ''; });
+              if (!files.length && codes[i] != null && String(codes[i]).trim() !== '') {
+                files = [{ filename: '', content: String(codes[i]) }];
+              }
+              if (!files.length) continue;
               var title = 'P' + (i + 1);
               if (labels && labels[i]) title += ' — ' + String(labels[i]);
+              var many = files.length > 1;
               blocks.push(
                 '<div class="final-code-block">' +
                   '<div class="final-code-block-meta">' +
                   '<span class="final-code-problem-label">' + escHtml(title) + '</span>' +
+                  (many ? '<span class="final-code-lang-badge">' + files.length + ' files</span>' : '') +
                   '<span class="final-code-lang-badge">' + escHtml(lang) + '</span>' +
                   '</div>' +
-                  '<pre class="final-code-pre"><code>' + escHtml(String(codes[i])) + '</code></pre>' +
+                  files.map(function(f) {
+                    return (f.filename && many ? '<div class="final-code-file-name">' + escHtml(f.filename) + '</div>' : '') +
+                      '<pre class="final-code-pre"><code>' + escHtml(String(f.content || '')) + '</code></pre>';
+                  }).join('') +
                 '</div>'
               );
             }
@@ -1929,8 +2102,9 @@
               } else {
                 for (var k = 0; k < occs.length; k++) {
                   var occ = occs[k];
-                  out +=
-                    '<div class="survey-occ-label">Occurrence ' + escHtml(String(occ.occurrence_number)) + '</div>';
+                  var occLabel = (occ.problem_index != null ? 'P' + (Number(occ.problem_index) + 1) + ' · ' : '') +
+                    (occ.is_final ? 'Final' : 'Occurrence ' + String(occ.occurrence_number));
+                  out += '<div class="survey-occ-label">' + escHtml(occLabel) + '</div>';
                   out += surveyQaTableHtml(occ.qa || []);
                 }
               }
@@ -2036,7 +2210,17 @@
             for (var i = 0; i < slice.length; i++) {
               var cols = renderRow(slice[i]);
               var tr = document.createElement('tr');
+              var rowUid = String(slice[i].user_id || '');
+              var rowSid = String(slice[i].session_id || '');
+              tr.setAttribute('data-sid', rowSid);
+              if (selected[rowUid]) tr.className = 'row-selected';
+              if (highlightSessions[rowSid]) {
+                tr.classList.add('row-new');
+                delete highlightSessions[rowSid];  // once: not again on search or "Show more"
+              }
               tr.innerHTML =
+                '<td class="col-select"><input type="checkbox" class="select-user" data-user-id="' +
+                  encodeURIComponent(rowUid) + '"' + (selected[rowUid] ? ' checked' : '') + '/></td>' +
                 '<td class="col-user">' + cols.user + '</td>' +
                 '<td class="col-status">' + cols.status + '</td>' +
                 '<td class="col-condition">' + cols.condition + '</td>' +
@@ -2057,6 +2241,95 @@
             var remaining = filtered.length - shownCount;
             showMoreBtn.disabled = remaining <= 0;
             showMoreBtn.textContent = remaining <= 0 ? 'All shown' : 'Show more (' + Math.min(pageSize, remaining) + ')';
+            updateSelectionUi();
+          }
+
+          // Users ticked for "Delete selected" (kept while searching and filtering).
+          var selected = {};
+          var selectAllEl = document.getElementById('selectAllSessions');
+          var deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
+          function selectedIds() { return Object.keys(selected).filter(function(k) { return selected[k]; }); }
+          function shownBoxes() { return Array.prototype.slice.call(tbody.querySelectorAll('input.select-user')); }
+          function updateSelectionUi() {
+            var n = selectedIds().length;
+            deleteSelectedBtn.disabled = n === 0;
+            deleteSelectedBtn.textContent = n ? 'Delete selected (' + n + ')' : 'Delete selected';
+            var boxes = shownBoxes();
+            var ticked = boxes.filter(function(b) { return b.checked; }).length;
+            selectAllEl.checked = boxes.length > 0 && ticked === boxes.length;
+            selectAllEl.indeterminate = ticked > 0 && ticked < boxes.length;
+          }
+          function setSelected(box, on) {
+            var uid = decodeURIComponent(box.getAttribute('data-user-id') || '');
+            if (!uid) return;
+            box.checked = on;
+            selected[uid] = on;
+            var tr = box.closest('tr');
+            if (tr) tr.classList.toggle('row-selected', on);
+          }
+          tbody.addEventListener('change', function(ev) {
+            var t = ev.target;
+            if (!t || !t.classList || !t.classList.contains('select-user')) return;
+            setSelected(t, t.checked);
+            updateSelectionUi();
+          });
+          selectAllEl.addEventListener('change', function() {
+            var on = this.checked;
+            shownBoxes().forEach(function(b) { setSelected(b, on); });
+            updateSelectionUi();
+          });
+          deleteSelectedBtn.addEventListener('click', function() {
+            var ids = selectedIds();
+            if (!ids.length) return;
+            var list = ids.slice(0, 15).join(', ') + (ids.length > 15 ? ', … (' + (ids.length - 15) + ' more)' : '');
+            if (!confirm('Delete all stored Firebase data for ' + ids.length + ' user(s) in this quiz?\n\n' + list +
+                '\n\nThis cannot be undone.')) return;
+            deleteSelectedBtn.disabled = true;
+            deleteSelectedBtn.textContent = 'Deleting ' + ids.length + '…';
+            fetch('/instructor/quiz/' + encodeURIComponent(quizId) + '/analytics-delete-user', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ user_ids: ids }),
+            })
+              .then(function(r) {
+                return r.json().then(function(j) {
+                  return { ok: r.ok, j: j };
+                });
+              })
+              .then(function(x) {
+                if (!x.ok || !x.j.success) {
+                  showToast(x.j && x.j.error ? x.j.error : 'Delete failed', 'error', 6000);
+                  updateSelectionUi();
+                  return;
+                }
+                var failed = x.j.failed || [];
+                if (failed.length) {
+                  showToast('Could not delete: ' + failed.map(function(f) { return f.user_id + ' (' + f.error + ')'; }).join(', '), 'error', 8000);
+                }
+                var gone = (x.j.deleted || []).map(function(d) { return d.user_id; });
+                animateDeleted(gone, failed.length ? 2600 : 0);
+              })
+              .catch(function() {
+                showToast('Delete failed', 'error', 6000);
+                updateSelectionUi();
+              });
+          });
+
+          // Deleted users' rows flash red and slide away, a toast confirms, then the page reloads so the
+          // charts and totals no longer count them (the reloaded page repeats the confirmation).
+          function animateDeleted(uids, extraDelay) {
+            var gone = {};
+            uids.forEach(function(u) { gone[u] = true; delete selected[u]; });
+            Array.prototype.forEach.call(tbody.querySelectorAll('input.select-user'), function(b) {
+              if (gone[decodeURIComponent(b.getAttribute('data-user-id') || '')]) {
+                var tr = b.closest('tr');
+                if (tr) tr.classList.add('row-deleting');
+              }
+            });
+            var n = uids.length;
+            if (n) showToast('Deleted ' + n + ' user' + (n === 1 ? '' : 's') + ' · updating dashboard…', 'deleted', 2000);
+            setTimeout(function() { reloadWithFlash({ deleted: n }); }, 1300 + (extraDelay || 0));
           }
 
           searchEl.addEventListener('input', function() {
@@ -2086,6 +2359,7 @@
               var uid = enc ? decodeURIComponent(enc) : '';
               if (!uid) return;
               if (!confirm('Delete all stored Firebase data for user "' + uid + '" in this quiz? This cannot be undone.')) return;
+              t.disabled = true;
               fetch('/instructor/quiz/' + encodeURIComponent(quizId) + '/analytics-delete-user', {
                 method: 'POST',
                 credentials: 'same-origin',
@@ -2099,13 +2373,15 @@
                 })
                 .then(function(x) {
                   if (!x.ok || !x.j.success) {
-                    alert(x.j && x.j.error ? x.j.error : 'Delete failed');
+                    showToast(x.j && x.j.error ? x.j.error : 'Delete failed', 'error', 6000);
+                    t.disabled = false;
                     return;
                   }
-                  location.reload();
+                  animateDeleted([uid], 0);
                 })
                 .catch(function() {
-                  alert('Delete failed');
+                  showToast('Delete failed', 'error', 6000);
+                  t.disabled = false;
                 });
             });
           }

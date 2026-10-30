@@ -474,6 +474,7 @@
             background: linear-gradient(135deg, #2d1b1b, #3d2222);
             border: 2px solid #ef4444;
             border-radius: 8px;
+            white-space: pre-line;
             animation: shake 0.5s ease-in-out;
         }
 
@@ -2243,6 +2244,8 @@
                             try {
                                 const cachedData = this.retrieveCachedSubmissionData();
                                 const code = (cachedData && cachedData.code) ? cachedData.code : '';
+                                // Every file of the workspace (the snapshot keeps them only when there are several).
+                                const doneFiles = (cachedData && Array.isArray(cachedData.files)) ? cachedData.files : [];
 
                                 const nextFetchInit = {
                                     method: 'POST',
@@ -2250,6 +2253,7 @@
                                     body: JSON.stringify({
                                         session_id: authData.sessionId,
                                         code: code,
+                                        files: doneFiles,
                                         programming_language: authData.programmingLanguage || 'python',
                                         current_problem_index: currentProbIdx,
                                     })
@@ -2277,10 +2281,12 @@
                                     const raw = localStorage.getItem(perProblemKey);
                                     if (raw) stored = JSON.parse(raw);
                                 } catch (e) {}
+                                stored = stored.filter((x) => x && x.problemIndex !== currentProbIdx);
                                 stored.push({
                                     problemIndex: currentProbIdx,
                                     title: nextData.completed_problem_title || `Problem ${currentProbIdx + 1}`,
-                                    code: code
+                                    code: code,
+                                    files: doneFiles.length ? doneFiles : undefined
                                 });
                                 localStorage.setItem(perProblemKey, JSON.stringify(stored));
 
@@ -2393,8 +2399,14 @@
                                 this.clearPeriodicSurveysFromStorage();
                                 sessionStorage.removeItem('authData');
 
-                                submitBtn.textContent = '✅ All Data Submitted!';
-                                this.showError(`Survey and code submitted successfully!\n\nSubmission ID: ${result.submission_id}\nDatabase Status: ${result.firebase_status}`, 'success');
+                                // "skipped" means a duplicate submit of a session that was already saved
+                                const saved = ['success', 'skipped'].includes(result.firebase_status);
+                                submitBtn.textContent = saved ? '✅ All Data Submitted!' : '⚠️ Saved locally only';
+                                this.showError(
+                                    saved
+                                        ? `Survey and code submitted successfully!\n\nSubmission ID: ${result.submission_id}\nDatabase Status: ${result.firebase_status}`
+                                        : `Submission was not saved to the database. Please tell your instructor.\n\nSubmission ID: ${result.submission_id}\nDatabase Status: ${result.firebase_status}`,
+                                    saved ? 'success' : 'error');
 
                                 await new Promise(resolve => setTimeout(resolve, 3000));
 
@@ -2551,21 +2563,20 @@
 
                     const entries = [];
 
-                    function pushStoredProblem(p) {
-                        const problemNum = p.problemIndex + 1;
-                        const stem = surveyBuildStemForProblem(uid, akey, quizId, problemNum, timestampSeg);
-                        if (p.files && Array.isArray(p.files) && p.files.length > 1) {
-                            for (let i = 0; i < p.files.length; i++) {
-                                entries.push({
-                                    filename: `${stem}_${i + 1}${ext}`,
-                                    content: (p.files[i] && p.files[i].content) ? p.files[i].content : ''
-                                });
-                            }
-                        } else if (p.files && p.files.length === 1) {
-                            entries.push({ filename: `${stem}${ext}`, content: (p.files[0].content || '').trim() });
+                    // One problem's code: a lone file as stem.ext, several files under a stem/ folder with their own names.
+                    function pushProblemEntries(stem, files, code) {
+                        files = Array.isArray(files) ? files.filter((f) => f && f.filename) : [];
+                        if (files.length > 1) {
+                            files.forEach((f) => entries.push({ filename: `${stem}/${f.filename}`, content: f.content || '' }));
+                        } else if (files.length === 1) {
+                            entries.push({ filename: `${stem}${ext}`, content: files[0].content || '' });
                         } else {
-                            entries.push({ filename: `${stem}${ext}`, content: (p.code || '').trim() });
+                            entries.push({ filename: `${stem}${ext}`, content: (code || '').trim() });
                         }
+                    }
+                    function pushStoredProblem(p) {
+                        const stem = surveyBuildStemForProblem(uid, akey, quizId, p.problemIndex + 1, timestampSeg);
+                        pushProblemEntries(stem, p.files, p.code);
                     }
 
                     for (const p of stored) {
@@ -2576,20 +2587,7 @@
                     if (!hasStoredForCurrent) {
                         const problemNum = currentProbIdx + 1;
                         const stem = surveyBuildStemForProblem(uid, akey, quizId, problemNum, timestampSeg);
-                        if (cachedData.files && Array.isArray(cachedData.files) && cachedData.files.length > 0) {
-                            if (cachedData.files.length === 1) {
-                                entries.push({ filename: `${stem}${ext}`, content: cachedData.files[0].content || '' });
-                            } else {
-                                for (let i = 0; i < cachedData.files.length; i++) {
-                                    entries.push({
-                                        filename: `${stem}_${i + 1}${ext}`,
-                                        content: cachedData.files[i].content || ''
-                                    });
-                                }
-                            }
-                        } else {
-                            entries.push({ filename: `${stem}${ext}`, content: (cachedData.code || '').trim() });
-                        }
+                        pushProblemEntries(stem, cachedData.files, cachedData.code);
                     }
 
                     const totalChars = entries.reduce((s, e) => s + (e.content || '').length, 0);

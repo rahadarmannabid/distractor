@@ -682,6 +682,14 @@
         var hoverTimer = null; // a hovered option about to be put in the editor
         // Hovering an option card shows it in the editor after this delay (passing over a card does not).
         var HOVER_PREVIEW_MS = 120;
+        // Where the participant dragged the box (offset from its default spot) and the size they gave
+        // it; kept for later suggestions and reloads. Double-clicking the header puts it back.
+        var LAYOUT_KEY = 'pairBoxLayout';
+        var layout = {};
+        try { layout = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}') || {}; } catch (e) { layout = {}; }
+        function saveLayout() {
+            try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch (e) { /* ignore */ }
+        }
 
         function ghostVisible() {
             return !!root.querySelector('.ghost-text-decoration, .ghost-text-decoration-preview, .ghost-text');
@@ -735,21 +743,27 @@
                 lines = lines.map(function (l) { return l.slice(Math.min(common, l.match(/^\s*/)[0].length)); });
                 var more = lines.length > STRIP_MAX_LINES ? '\n…' : '';
                 return '<div class="pair-alt pair-alt-' + (i + 1) + (i === idx ? ' is-active' : '') +
-                    '" data-steps="' + ((i - idx + items.length) % items.length) + '" data-oid="' + esc(String(it._meta.option_id)) +
-                    '" title="Hover to see it in the editor, click to accept Option ' + PAIR_LETTERS[i] + '">' +
+                    '" data-steps="' + ((i - idx + items.length) % items.length) + '" data-oid="' + esc(String(it._meta.option_id)) + '">' +
                     '<div class="pair-alt-label">Option ' + PAIR_LETTERS[i] +
                     (i === idx ? '<span class="pair-alt-tag">in editor</span>' : '') + '</div>' +
                     '<pre>' + esc(lines.slice(0, STRIP_MAX_LINES).join('\n') + more) + '</pre></div>';
             }).join('');
             node.innerHTML =
-                '<div class="pair-head">' + chips + '<span class="pair-hint"><kbd>' + ALT_KEY +
-                '</kbd><kbd>←</kbd><kbd>→</kbd> switch · hover to preview · <kbd>Tab</kbd> or click accept · <kbd>Esc</kbd> dismiss</span></div>' +
-                options;
+                '<div class="pair-head"><span class="pair-grip" aria-label="Drag to move">⠿</span>' + chips +
+                '<span class="pair-hint"><span><kbd>' + ALT_KEY + '</kbd><kbd>←</kbd><kbd>→</kbd> switch ·</span>' +
+                '<span>hover to preview ·</span><span><kbd>Tab</kbd> or click accept ·</span><span><kbd>Esc</kbd> dismiss</span></span></div>' +
+                '<div class="pair-body">' + options + '</div>' +
+                '<div class="pair-resize" aria-label="Drag to resize"></div>';
             // Clicks must not reach Monaco: a click in the editor moves the cursor and drops the suggestion.
             ['mousedown', 'pointerdown'].forEach(function (evt) {
                 node.addEventListener(evt, function (e) {
                     e.preventDefault();
                     e.stopPropagation();
+                    if (e.target.closest('.pair-resize')) { if (evt === 'pointerdown') startDrag(e, 'resize'); return; }
+                    if (e.target.closest('.pair-head') && !e.target.closest('.pair-chip')) {
+                        if (evt === 'pointerdown') startDrag(e, 'move');
+                        return;
+                    }
                     var target = e.target.closest && e.target.closest('[data-steps]');
                     if (!target) return;
                     var steps = Number(target.getAttribute('data-steps'));
@@ -765,22 +779,81 @@
             // Hovering an option card puts it in the editor as the ghost text, so it can be read in place.
             node.addEventListener('mouseover', function (e) {
                 var card = e.target.closest && e.target.closest('.pair-alt');
-                if (!card) return;
+                if (!card || node.classList.contains('pair-moving') || node.classList.contains('pair-resizing')) return;
                 var steps = Number(card.getAttribute('data-steps'));
                 clearTimeout(hoverTimer);
                 if (steps) hoverTimer = setTimeout(function () { switchTo(steps); }, HOVER_PREVIEW_MS);
             });
             node.addEventListener('mouseleave', function () { clearTimeout(hoverTimer); });
+            // Double-clicking the header puts the box back at its default spot and size.
+            node.addEventListener('dblclick', function (e) {
+                if (!e.target.closest('.pair-head') || e.target.closest('.pair-chip')) return;
+                layout = {};
+                saveLayout();
+                place();
+            });
             node.style.setProperty('--pair-font', editor.getOption(monaco.editor.EditorOption.fontInfo).fontFamily);
             node.style.setProperty('--pair-size', editor.getOption(monaco.editor.EditorOption.fontSize) + 'px');
 
+            // Moving shifts the box from its spot at the editor's right edge; resizing keeps its
+            // left edge where it is (the box is anchored on the right, so the offset absorbs the change).
+            function startDrag(e, kind) {
+                clearTimeout(hoverTimer);
+                var sx = e.clientX, sy = e.clientY;
+                var start = { dx: layout.dx || 0, dy: layout.dy || 0, w: node.offsetWidth, h: node.offsetHeight };
+                if (kind === 'move' && layout.dx == null) start.dy = node.offsetTop;
+                node.classList.add(kind === 'move' ? 'pair-moving' : 'pair-resizing');
+                function onMove(ev) {
+                    var mx = ev.clientX - sx, my = ev.clientY - sy;
+                    if (kind === 'move') {
+                        layout.dx = start.dx + mx;
+                        layout.dy = start.dy + my;
+                    } else {
+                        if (layout.dx == null) { layout.dx = 0; layout.dy = node.offsetTop; }
+                        var w = clampW(start.w + mx);
+                        layout.w = w;
+                        layout.h = clampH(start.h + my);
+                        layout.dx = start.dx + (w - start.w);
+                    }
+                    place();
+                }
+                function onUp() {
+                    window.removeEventListener('pointermove', onMove);
+                    window.removeEventListener('pointerup', onUp);
+                    node.classList.remove('pair-moving', 'pair-resizing');
+                    saveLayout();
+                }
+                window.addEventListener('pointermove', onMove);
+                window.addEventListener('pointerup', onUp);
+            }
+            function clampW(w) { return Math.max(220, Math.min(w, editor.getLayoutInfo().width - 16)); }
+            function clampH(h) { return Math.max(90, Math.min(h, editor.getLayoutInfo().height - 8)); }
+
             function place() {
-                var layout = editor.getLayoutInfo();
-                node.style.maxWidth = Math.max(220, Math.min(460, Math.round(layout.contentWidth * 0.45))) + 'px';
-                // Top of the suggestion's line, kept inside the editor.
-                var top = editor.getTopForLineNumber(meta.line) - editor.getScrollTop();
-                var room = layout.height - node.offsetHeight - 8;
-                node.style.marginTop = Math.max(4, Math.min(top, room)) + 'px';
+                var info = editor.getLayoutInfo();
+                if (layout.w) {
+                    node.style.maxWidth = 'none';
+                    node.style.width = clampW(layout.w) + 'px';
+                    node.style.height = clampH(layout.h) + 'px';
+                } else {
+                    node.style.width = node.style.height = '';
+                    node.style.maxWidth = Math.max(220, Math.min(460, Math.round(info.contentWidth * 0.45))) + 'px';
+                }
+                node.style.maxHeight = (info.height - 8) + 'px';
+                if (layout.dx == null) {
+                    // Top of the suggestion's line, kept inside the editor.
+                    node.style.transform = '';
+                    var top = editor.getTopForLineNumber(meta.line) - editor.getScrollTop();
+                    var room = info.height - node.offsetHeight - 8;
+                    node.style.marginTop = Math.max(4, Math.min(top, room)) + 'px';
+                    return;
+                }
+                // Where the participant put it, kept inside the editor.
+                node.style.marginTop = '0px';
+                node.style.transform = '';
+                layout.dx = Math.max(-node.offsetLeft, Math.min(layout.dx, 0));
+                layout.dy = Math.max(0, Math.min(layout.dy, info.height - node.offsetHeight));
+                node.style.transform = 'translate(' + layout.dx + 'px,' + layout.dy + 'px)';
             }
             widget = {
                 getId: function () { return 'pair.options.box'; },
@@ -809,15 +882,21 @@
         '.pair-opt-2 .ghost-text-decoration,.pair-opt-2 .ghost-text-decoration-preview,.pair-opt-2 .suggest-preview-text .ghost-text,.pair-opt-2 .ghost-text{color:#e0a3ff!important;opacity:.9;}',
         '.pair-opt-3 .ghost-text-decoration,.pair-opt-3 .ghost-text-decoration-preview,.pair-opt-3 .suggest-preview-text .ghost-text,.pair-opt-3 .ghost-text{color:#7ee2b8!important;opacity:.9;}',
         '.pair-opt-4 .ghost-text-decoration,.pair-opt-4 .ghost-text-decoration-preview,.pair-opt-4 .suggest-preview-text .ghost-text,.pair-opt-4 .ghost-text{color:#ffc46b!important;opacity:.9;}',
-        '.pair-strip{box-sizing:border-box;margin-right:8px;padding:6px 8px 8px;border:1px solid #454a54;border-radius:8px;background:#252526;box-shadow:0 6px 18px rgba(0,0,0,.45);font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#9da5b4;pointer-events:auto;z-index:10;}',
-        '.pair-head{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;}',
+        '.pair-strip{box-sizing:border-box;display:flex;flex-direction:column;min-width:220px;min-height:90px;margin-right:8px;padding:6px 8px 8px;border:1px solid #454a54;border-radius:8px;background:#252526;box-shadow:0 6px 18px rgba(0,0,0,.45);font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#9da5b4;pointer-events:auto;z-index:10;}',
+        '.pair-head{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;flex:none;cursor:move;user-select:none;}',
+        '.pair-grip{font-size:13px;line-height:18px;color:#6b7280;}',
+        '.pair-head:hover .pair-grip,.pair-moving .pair-grip{color:#c5cad3;}',
+        '.pair-moving,.pair-resizing{user-select:none;box-shadow:0 10px 28px rgba(0,0,0,.6);}',
+        '.pair-body{flex:1 1 auto;min-height:0;overflow:auto;}',
+        '.pair-resize{position:absolute;right:0;bottom:0;width:14px;height:14px;cursor:nwse-resize;border-bottom-right-radius:8px;background:linear-gradient(135deg,transparent 50%,#5c6370 50%,#5c6370 60%,transparent 60%,transparent 72%,#5c6370 72%,#5c6370 82%,transparent 82%);}',
         '.pair-chip{border:1px solid transparent;border-radius:4px;padding:0 7px;height:18px;font:600 11px/16px inherit;cursor:pointer;opacity:.55;}',
         '.pair-chip.active{opacity:1;box-shadow:0 0 0 1px rgba(255,255,255,.35);}',
         '.pair-chip-1{background:rgba(108,182,255,.2);color:#6cb6ff;border-color:rgba(108,182,255,.5);}',
         '.pair-chip-2{background:rgba(224,163,255,.2);color:#e0a3ff;border-color:rgba(224,163,255,.5);}',
         '.pair-chip-3{background:rgba(126,226,184,.2);color:#7ee2b8;border-color:rgba(126,226,184,.5);}',
         '.pair-chip-4{background:rgba(255,196,107,.2);color:#ffc46b;border-color:rgba(255,196,107,.5);}',
-        '.pair-hint{margin-left:2px;font-size:11px;white-space:nowrap;}',
+        '.pair-hint{display:flex;flex-wrap:wrap;gap:2px 4px;margin-left:2px;font-size:11px;}',
+        '.pair-hint>span{white-space:nowrap;}',
         '.pair-hint kbd{font:inherit;font-size:10px;padding:0 4px;border:1px solid #555;border-radius:3px;background:#2a2a2a;color:#ccc;}',
         '.pair-hint kbd+kbd{margin-left:2px;}',
         '.pair-alt{margin-top:6px;padding:4px 8px;border-radius:6px;border:1px solid transparent;background:rgba(255,255,255,.03);cursor:pointer;}',
@@ -828,7 +907,7 @@
         '.pair-alt-4.is-active{border-color:rgba(255,196,107,.55);}',
         '.pair-alt-label{font-weight:600;font-size:11px;line-height:18px;}',
         '.pair-alt-tag{margin-left:6px;font-weight:400;color:#9da5b4;}',
-        '.pair-alt pre{margin:0;font-family:var(--pair-font);font-size:var(--pair-size);line-height:1.45;white-space:pre;overflow:hidden;text-overflow:ellipsis;}',
+        '.pair-alt pre{margin:0;font-family:var(--pair-font);font-size:var(--pair-size);line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;}',
         '.pair-alt-1{color:#6cb6ff;}',
         '.pair-alt-2{color:#e0a3ff;}',
         '.pair-alt-3{color:#7ee2b8;}',

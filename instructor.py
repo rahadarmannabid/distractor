@@ -120,11 +120,14 @@ def _compute_analytics_aggregate(db, quiz_id: str, labels: List[str]) -> dict:
     try:
         # AI suggestions, accepts and rejects per session from the study log (conditions 2-4 do not log
         # the activity events these numbers used to be counted from).
-        ai_counts = study_log.session_ai_counts(study_log.collect_all(db.reference(), quiz_id, labels, sessions))
+        # Also every survey with its problem (the stored session keeps only some of them).
+        collected = study_log.collect_all(db.reference(), quiz_id, labels, sessions)
+        ai_counts = study_log.session_ai_counts(collected)
+        survey_logs = study_log.session_surveys(collected)
     except Exception as e:
         logger.warning("Study log counts for analytics failed: %s", e)
-        ai_counts = None
-    return aggregate_quiz_analytics(sessions, quiz_id, labels, ai_counts)
+        ai_counts = survey_logs = None
+    return aggregate_quiz_analytics(sessions, quiz_id, labels, ai_counts, survey_logs)
 
 
 def _attach_live_now_to_analytics(data: dict, quiz_id: str, labels: List[str]) -> None:
@@ -1267,6 +1270,46 @@ async def quiz_analytics_data(
         return JSONResponse({"error": f"Server error: {e!s}"}, status_code=500)
 
 
+def _quiz_session_states(db, quiz_id: str) -> Dict[str, str]:
+    """Every stored session of the quiz: "submitted" once it has a final submit, else "active".
+    Reads only keys (shallow), so the analytics page can poll it for new data."""
+    needle = f"_quiz_{quiz_id[:8]}_"
+    out: Dict[str, str] = {}
+    for sid in db.reference("sessions").get(shallow=True) or {}:
+        if isinstance(sid, str) and needle in sid:
+            keys = db.reference(f"sessions/{sid}").get(shallow=True) or {}
+            done = "final_submit" in keys or (
+                "checkpoint" in keys and bool(db.reference(f"sessions/{sid}/checkpoint/session/code_submit_timestamp").get()))
+            out[sid] = "submitted" if done else "active"
+    return out
+
+
+@router.get("/quiz/{quiz_id}/analytics-pulse")
+async def quiz_analytics_pulse(request: Request, quiz_id: str):
+    """The quiz's sessions and whether each is submitted, for the analytics page's "new data" notice."""
+    email = _require_instructor(request)
+    if not email:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    fb = _get_firebase()
+    if not fb:
+        return JSONResponse({"error": "Database unavailable"}, status_code=503)
+
+    from firebase_admin import db
+
+    try:
+        quiz = fb_dict(db.reference(f"quizzes/{quiz_id}").get())
+        if not quiz:
+            return JSONResponse({"error": "Quiz not found"}, status_code=404)
+        if quiz.get("created_by") != email:
+            return JSONResponse({"error": "Not authorised"}, status_code=403)
+        states = await asyncio.to_thread(_quiz_session_states, db, quiz_id)
+        return JSONResponse(content={"sessions": states}, headers=_ANALYTICS_JSON_NO_CACHE)
+    except Exception as e:
+        logger.exception("quiz_analytics_pulse failed for quiz_id=%s", quiz_id)
+        return JSONResponse({"error": f"Server error: {e!s}"}, status_code=500)
+
+
 @router.get("/quiz/{quiz_id}/bug-stats")
 async def quiz_bug_stats(request: Request, quiz_id: str):
     """Correct/buggy pair counts per bug type for the analytics page."""
@@ -1305,8 +1348,14 @@ async def quiz_analytics_delete_user(
 
     from firebase_admin import db
 
+    # One user ("user_id") or several at once ("user_ids", from "Delete selected").
     user_id = (body or {}).get("user_id")
-    if not user_id or not isinstance(user_id, str):
+    user_ids = (body or {}).get("user_ids")
+    many = isinstance(user_ids, list)
+    if not many:
+        user_ids = [user_id]
+    user_ids = list(dict.fromkeys(u for u in user_ids if u and isinstance(u, str)))
+    if not user_ids:
         return JSONResponse({"success": False, "error": "user_id required"}, status_code=400)
 
     try:
@@ -1316,12 +1365,22 @@ async def quiz_analytics_delete_user(
         if quiz.get("created_by") != email:
             return JSONResponse({"success": False, "error": "Not authorised"}, status_code=403)
 
-        result = delete_user_data_for_quiz(db, quiz_id, user_id)
         from main import forget_active_sessions_for_quiz_user
 
-        result["cleared_active_sessions"] = forget_active_sessions_for_quiz_user(quiz_id, user_id)
+        results, failed = [], []
+        for uid in user_ids:
+            try:
+                result = delete_user_data_for_quiz(db, quiz_id, uid)
+                result["cleared_active_sessions"] = forget_active_sessions_for_quiz_user(quiz_id, uid)
+                results.append({"user_id": uid, **result})
+            except Exception as e:
+                if not many:
+                    raise
+                logger.exception("quiz_analytics_delete_user failed for %s", uid)
+                failed.append({"user_id": uid, "error": str(e)})
         invalidate_quiz_analytics_cache(quiz_id)
-        return JSONResponse(content={"success": True, **result}, headers=_ANALYTICS_JSON_NO_CACHE)
+        content = {"success": True, "deleted": results, "failed": failed} if many else {"success": True, **results[0]}
+        return JSONResponse(content=content, headers=_ANALYTICS_JSON_NO_CACHE)
     except ValueError as ve:
         return JSONResponse({"success": False, "error": str(ve)}, status_code=400)
     except Exception as e:
