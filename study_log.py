@@ -56,7 +56,11 @@ COLUMNS: Dict[str, List[str]] = {
         "explanation_clicked", "corrected_code", "reverted", "bug_in_final_code", "next_compilation_id",
         "response_time_ms", "time_to_first_token_ms"],
     "suggestions": ["participant_id", "timestamp", "condition_name", "problem_id", "problem_title", "interaction_index",
-                    "suggestion_position", "correct_suggestion_code", "bug_types", "buggy_code_suggestions",
+                    "suggestion_position",
+                    "bug_1_sequence", "bug_type_1", "bug_1",
+                    "bug_2_sequence", "bug_type_2", "bug_2",
+                    "bug_3_sequence", "bug_type_3", "bug_3",
+                    "correct_sequence", "correct_suggestion",
                     "time_to_accept_ms", "time_to_generate_ms", "suggestion_status", "accepted_code_suggestion",
                     "accepted_suggestion_correct", "explanation", "explanation_clicked", "code_snapshot", "code_run",
                     "code_edit_before_next", "code_edit_detail", "status_detail", "accept_method", "bug_type_accepted", "feedback_shown", "options_in_set",
@@ -74,8 +78,10 @@ COLUMNS: Dict[str, List[str]] = {
                     "compilation_error", "compilation_time_ms", "run_status", "exit_code", "runtime_error",
                     "output_excerpt", "run_time_ms", "total_time_ms", "stdin_lines", "input_wait_count"],
     "submissions": ["participant_id", "session_id", "assignment_id", "condition_name", "problem_id", "problem_title",
-                    "submission_index", "timestamp", "final_submit", "language", "file_count", "files", "code_lines",
-                    "submitted_code"],
+                    "submission_index", "timestamp", "final_submit",
+                    "time_on_problem_min", "suggestions_generated", "suggestions_accepted", "suggestions_rejected",
+                    "correctly_accepted", "compiles",
+                    "language", "file_count", "files", "code_lines", "submitted_code"],
     "surveys": ["participant_id", "session_id", "assignment_id", "condition_name", "problem_id", "problem_title",
                 "survey_type", "survey_round", "question_index", "question_id", "question_text", "question_type",
                 "answer", "completion_time_seconds", "timestamp"],
@@ -493,6 +499,7 @@ def collect_all(root: Any, quiz_id: str, labels: List[str], sessions: Optional[L
         rows.sort(key=lambda r: (str(r.get("participant_id")), str(r.get("timestamp") or ""), _int(r.get("question_index")) or 0))
     out["suggestions"] = build_suggestions(out["autocomplete"], out["compilation"])
     out["responses"] = build_responses(out["agent"], out["compilation"])
+    _enrich_submissions(out, sessions, labels)
     return out
 
 
@@ -635,10 +642,25 @@ def _clicked(chosen: Optional[Dict[str, Any]]) -> str:
     return "not recorded" if chosen.get("source") == "server_record" else "No"
 
 
+def _option_sequence(option: Optional[Dict[str, Any]]) -> str:
+    """Display slot 1..4 from option_label A/B/C/D (or a numeric label)."""
+    if not option:
+        return ""
+    label = str(option.get("option_label") or "").strip().upper()
+    if len(label) == 1 and label in "ABCD":
+        return str("ABCD".index(label) + 1)
+    try:
+        n = int(label)
+        return str(n) if n >= 1 else ""
+    except (TypeError, ValueError):
+        return ""
+
+
 def build_suggestions(options: List[Dict[str, Any]], runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """The autocomplete log for conditions 2 and 4: one row per suggestion the participant saw (its
-    options grouped), with the correct and buggy code, what they accepted and the first run after it.
-    Suggestions written ahead and never shown are left out (they stay in the option rows)."""
+    options grouped), with each buggy option's sequence/type/code, the correct option's sequence/code,
+    what they accepted and the first run after it. Suggestions written ahead and never shown are left
+    out (they stay in the option rows)."""
     groups: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
     for r in options:
         groups.setdefault((str(r.get("session_id")), str(r.get("suggestion_set_id"))), []).append(r)
@@ -649,21 +671,21 @@ def build_suggestions(options: List[Dict[str, Any]], runs: List[Dict[str, Any]])
         opts.sort(key=lambda o: str(o.get("option_label") or ""))
         correct = next((o for o in opts if o.get("suggestion_correctness") == "correct"), None)
         buggy = [o for o in opts if o.get("suggestion_correctness") == "buggy"]
+        buggy.sort(key=lambda o: (_option_sequence(o) or "9", str(o.get("option_label") or "")))
         chosen = next((o for o in opts if o.get("suggestion_status") == "accepted"), None)
         first = min(opts, key=lambda o: str(o.get("timestamp") or ""))
         detail = "accepted" if chosen else next((o.get("suggestion_status") for o in opts
                                                 if o.get("suggestion_status") in ("rejected", "ignored", "not_accepted")), "not_accepted")
         gen = [o.get("generation_latency_ms") for o in opts if str(o.get("generation_latency_ms") or "").strip() != ""]
-        rows.append({
+        row: Dict[str, Any] = {
             "table": "suggestions", "source": first.get("source"), "participant_id": first.get("participant_id"),
             "session_id": sid, "condition": first.get("condition"), "condition_name": first.get("condition_name"),
             "problem_index": first.get("problem_index"), "problem_id": first.get("problem_id"),
             "problem_title": first.get("problem_title"), "timestamp": first.get("timestamp"),
             "interaction_index": first.get("interaction_index"), "suggestion_set_id": set_id,
             "suggestion_position": first.get("suggestion_position") or "",
-            "correct_suggestion_code": (correct or {}).get("suggestion_code", ""),
-            "bug_types": ", ".join(str(o.get("bug_types") or "") for o in buggy if o.get("bug_types")),
-            "buggy_code_suggestions": "\n---\n".join(str(o.get("suggestion_code") or "") for o in buggy),
+            "correct_sequence": _option_sequence(correct),
+            "correct_suggestion": (correct or {}).get("suggestion_code", ""),
             "time_to_accept_ms": (chosen or {}).get("time_to_accept_ms", ""),
             "time_to_generate_ms": max((int(float(g)) for g in gen), default=""),
             "suggestion_status": "accepted" if chosen else "rejected", "status_detail": detail,
@@ -683,7 +705,15 @@ def build_suggestions(options: List[Dict[str, Any]], runs: List[Dict[str, Any]])
             "_inserted": ((correct or {}).get("suggestion_code", "") if chosen and chosen.get("feedback_shown") == "corrected"
                           else (chosen or {}).get("suggestion_code", "")) or "",
             "options_in_set": len(opts),
-        })
+        }
+        # Up to MAX_BUG_OPTIONS (3) buggy slots; unused slots stay blank when fewer bugs were shown.
+        for i in range(3):
+            n = i + 1
+            b = buggy[i] if i < len(buggy) else None
+            row[f"bug_{n}_sequence"] = _option_sequence(b)
+            row[f"bug_type_{n}"] = (b or {}).get("bug_types", "") if b else ""
+            row[f"bug_{n}"] = (b or {}).get("suggestion_code", "") if b else ""
+        rows.append(row)
     # Interaction number (where the browser did not record it) and the first run after each suggestion.
     rows.sort(key=lambda r: (str(r["participant_id"]), str(r["session_id"]), _ts(r["timestamp"]) or 0))
     by_person: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
@@ -736,6 +766,119 @@ def _edit_before_next(r: Dict[str, Any], nxt: Optional[Dict[str, Any]]) -> Tuple
         if op in ("insert", "replace"):
             added += b2 - b1
     return "Yes", f"+{added} −{removed} chars{approx}"
+
+
+def _empty_problem_stats() -> Dict[str, Any]:
+    return {"suggestions_generated": 0, "suggestions_accepted": 0, "suggestions_rejected": 0,
+            "correctly_accepted": 0, "compiles": 0, "timestamps": []}
+
+
+def _submission_problem_stats(collected: Dict[str, List[Dict[str, Any]]]
+                              ) -> Dict[str, Dict[int, Dict[str, Any]]]:
+    """Per session and problem_index: AI gen/accept/reject/correct-accept counts, compile count, and
+    timestamps of interactions (for a fallback time-on-problem span)."""
+    out: Dict[str, Dict[int, Dict[str, Any]]] = {}
+
+    def bucket(sid: str, pi: Optional[int]) -> Optional[Dict[str, Any]]:
+        if not sid or pi is None:
+            return None
+        return out.setdefault(sid, {}).setdefault(pi, _empty_problem_stats())
+
+    def note_time(b: Dict[str, Any], row: Dict[str, Any]) -> None:
+        t = _ts(row.get("timestamp"))
+        if t is not None:
+            b["timestamps"].append(t)
+
+    for r in collected.get("suggestions", []):
+        b = bucket(str(r.get("session_id") or ""), _int(r.get("problem_index")))
+        if not b:
+            continue
+        b["suggestions_generated"] += 1
+        status = r.get("suggestion_status")
+        if status == "accepted":
+            b["suggestions_accepted"] += 1
+            if r.get("accepted_suggestion_correct") == "Yes":
+                b["correctly_accepted"] += 1
+        elif status == "rejected":
+            b["suggestions_rejected"] += 1
+        note_time(b, r)
+    for r in collected.get("responses", []):
+        b = bucket(str(r.get("session_id") or ""), _int(r.get("problem_index")))
+        if not b:
+            continue
+        b["suggestions_generated"] += 1
+        status = r.get("user_selected_status")
+        if status == "accepted":
+            b["suggestions_accepted"] += 1
+            if r.get("is_option_correct") == "Yes":
+                b["correctly_accepted"] += 1
+        elif status == "rejected":
+            b["suggestions_rejected"] += 1
+        note_time(b, r)
+    for r in collected.get("compilation", []):
+        b = bucket(str(r.get("session_id") or ""), _int(r.get("problem_index")))
+        if not b:
+            continue
+        b["compiles"] += 1
+        note_time(b, r)
+    for r in collected.get("submissions", []):
+        b = bucket(str(r.get("session_id") or ""), _int(r.get("problem_index")))
+        if b:
+            note_time(b, r)
+    return out
+
+
+def _time_on_problem_minutes(sessions: Optional[List[Dict[str, Any]]], labels: List[str]
+                             ) -> Dict[str, Dict[int, float]]:
+    """time_per_problem_seconds from quiz analytics, converted to minutes (2 dp), keyed by session id."""
+    if not sessions:
+        return {}
+    try:
+        from quiz_analytics import derive_session_metrics
+    except ImportError:
+        return {}
+    n = max(len(labels), 1)
+    out: Dict[str, Dict[int, float]] = {}
+    for payload in sessions:
+        if not isinstance(payload, dict):
+            continue
+        try:
+            m = derive_session_metrics(payload, str((payload.get("session_metadata") or {}).get("quiz_id") or ""), n)
+        except Exception:
+            m = None
+        if not m:
+            continue
+        sid = str(m.get("session_id") or "")
+        if not sid:
+            continue
+        by_pi: Dict[int, float] = {}
+        for pi, secs in (m.get("time_per_problem_seconds") or {}).items():
+            try:
+                by_pi[int(pi)] = round(float(secs) / 60.0, 2)
+            except (TypeError, ValueError):
+                continue
+        out[sid] = by_pi
+    return out
+
+
+def _enrich_submissions(collected: Dict[str, List[Dict[str, Any]]],
+                        sessions: Optional[List[Dict[str, Any]]], labels: List[str]) -> None:
+    """Attach per-problem time / AI / compile stats to each code-submission row."""
+    stats = _submission_problem_stats(collected)
+    times = _time_on_problem_minutes(sessions, labels)
+    for r in collected.get("submissions", []):
+        sid = str(r.get("session_id") or "")
+        pi = _int(r.get("problem_index"))
+        b = (stats.get(sid) or {}).get(pi) if pi is not None else None
+        t_min = (times.get(sid) or {}).get(pi) if pi is not None else None
+        if t_min is None and b and len(b["timestamps"]) >= 2:
+            t_min = round((max(b["timestamps"]) - min(b["timestamps"])) / 60.0, 2)
+        r["time_on_problem_min"] = "" if t_min is None else t_min
+        r["suggestions_generated"] = 0 if not b else b["suggestions_generated"]
+        r["suggestions_accepted"] = 0 if not b else b["suggestions_accepted"]
+        r["suggestions_rejected"] = 0 if not b else b["suggestions_rejected"]
+        r["correctly_accepted"] = 0 if not b else b["correctly_accepted"]
+        r["compiles"] = 0 if not b else b["compiles"]
 
 
 def export_rows(root: Any, quiz_id: str, table: str, condition: int, labels: List[str],
@@ -807,6 +950,9 @@ def export_filename(slug: str, condition: int, table: str, participant: Optional
 # Columns shown in the per-participant tables (the CSV has them all).
 VIEW_COLUMNS: Dict[str, List[Tuple[str, str]]] = {
     "submissions": [("timestamp", "Time"), ("problem_id", "Problem"), ("submission_index", "#"), ("final_submit", "Final"),
+                    ("time_on_problem_min", "Time (min)"), ("suggestions_generated", "AI gen"),
+                    ("suggestions_accepted", "Accept"), ("suggestions_rejected", "Reject"),
+                    ("correctly_accepted", "Correct accept"), ("compiles", "Runs"),
                     ("files", "Files"), ("code_lines", "Lines"), ("submitted_code", "Code")],
     "responses": [("timestamp", "Time"), ("problem_id", "Problem"), ("interaction_index", "#"), ("user_prompt", "Prompt"),
                   ("agent_correct_response", "Correct response"), ("agent_correct_code", "Correct code"),
@@ -818,8 +964,11 @@ VIEW_COLUMNS: Dict[str, List[Tuple[str, str]]] = {
                   ("code_snapshot", "Code snapshot"), ("code_run", "Code run"),
                   ("code_edit_before_next", "Code edit (before next)"), ("code_edit_detail", "Edit size")],
     "suggestions": [("timestamp", "Time"), ("problem_id", "Problem"), ("interaction_index", "#"),
-                    ("suggestion_position", "Position"), ("correct_suggestion_code", "Correct suggestion"),
-                    ("bug_types", "Bug types"), ("buggy_code_suggestions", "Buggy suggestion(s)"),
+                    ("suggestion_position", "Position"),
+                    ("bug_1_sequence", "Bug 1 #"), ("bug_type_1", "Bug type 1"), ("bug_1", "Bug 1"),
+                    ("bug_2_sequence", "Bug 2 #"), ("bug_type_2", "Bug type 2"), ("bug_2", "Bug 2"),
+                    ("bug_3_sequence", "Bug 3 #"), ("bug_type_3", "Bug type 3"), ("bug_3", "Bug 3"),
+                    ("correct_sequence", "Correct #"), ("correct_suggestion", "Correct suggestion"),
                     ("time_to_accept_ms", "Accept ms"), ("time_to_generate_ms", "Generate ms"),
                     ("suggestion_status", "Status"), ("accepted_code_suggestion", "Accepted code"),
                     ("accepted_suggestion_correct", "Accepted correct?"), ("explanation", "Explanation"),
@@ -885,7 +1034,7 @@ def timeline(rows: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
         if r.get("suggestion_status") == "accepted":
             ok = r.get("accepted_suggestion_correct") != "No"
             events.append((t + ms(r.get("time_to_accept_ms")), "accepted_correct" if ok else "accepted_buggy",
-                           "" if ok else f"bug: {r.get('bug_types') or '?'}", p))
+                           "" if ok else f"bug: {r.get('bug_type_accepted') or '?'}", p))
         else:
             events.append((t + 0.001, "rejected", str(r.get("status_detail") or ""), p))
     for r in rows.get("responses", []):

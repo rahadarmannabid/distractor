@@ -24,6 +24,7 @@ from urllib.parse import quote
 from pathlib import Path
 
 import bug_injection
+import llm_client
 from firebase_utils import fb_dict
 from quiz_analytics import (
     aggregate_quiz_analytics,
@@ -561,6 +562,8 @@ async def create_quiz_page(request: Request):
         "quiz": None,
         "bug_skills": bug_injection.default_bug_skills(),
         "default_bug_skills": bug_injection.default_bug_skills(),
+        "available_llm_models": llm_client.models_for_instructor(),
+        "default_llm_model": llm_client.DEFAULT_QUIZ_LLM_MODEL,
         "edit_mode": False,
         "draft_upload_id": str(uuid.uuid4()),
     })
@@ -620,6 +623,7 @@ async def save_quiz(request: Request, payload: dict = Body(...)):
         "allowed_languages": payload.get("allowed_languages", ["python", "javascript", "c", "cpp", "java"]),
         "time_limit_minutes": int(payload.get("time_limit_minutes", 0)),
         "conditions": conditions,
+        "llm_model": llm_client.clean_llm_model(payload.get("llm_model")),
         "agent_skills": _clean_agent_skills(payload.get("agent_skills")),
         "bug_skills": bug_injection.clean_bug_skills(payload.get("bug_skills")),
         "bug_skills_configured": True,
@@ -718,6 +722,7 @@ async def duplicate_quiz(request: Request, quiz_id: str):
         "allowed_languages": src_quiz.get("allowed_languages", ["python", "javascript", "c", "cpp", "java"]),
         "time_limit_minutes": int(src_quiz.get("time_limit_minutes", 0)),
         "conditions": conditions,
+        "llm_model": llm_client.clean_llm_model(src_quiz.get("llm_model")),
         "agent_skills": copy.deepcopy(src_quiz.get("agent_skills", [])),
         "bug_skills": bug_injection.quiz_bug_skills(src_quiz),
         "bug_skills_configured": True,
@@ -773,6 +778,8 @@ async def edit_quiz_page(request: Request, quiz_id: str):
         "quiz": quiz,
         "bug_skills": bug_injection.quiz_bug_skills(quiz),
         "default_bug_skills": bug_injection.default_bug_skills(),
+        "available_llm_models": llm_client.models_for_instructor(),
+        "default_llm_model": llm_client.DEFAULT_QUIZ_LLM_MODEL,
         "edit_mode": True,
         "draft_upload_id": None,
     })
@@ -826,6 +833,8 @@ async def update_quiz(request: Request, quiz_id: str, payload: dict = Body(...))
         "paste_allowed", "tab_tracking_enabled",
     ]
     updates = {k: payload[k] for k in updatable_fields if k in payload}
+    if "llm_model" in payload:
+        updates["llm_model"] = llm_client.clean_llm_model(payload.get("llm_model"))
     if "agent_skills" in payload:
         updates["agent_skills"] = _clean_agent_skills(payload.get("agent_skills"))
     if "bug_skills" in payload:

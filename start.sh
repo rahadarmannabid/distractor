@@ -107,12 +107,14 @@ PY
 }
 
 LOCAL_REDIS_URL="redis://localhost:6379/0"
-if [[ -z "$REDIS_URL" ]]; then
+
+ensure_local_redis() {
   if redis_up "$LOCAL_REDIS_URL"; then
-    info "Using Redis already running on localhost:6379"
-  elif command -v redis-server >/dev/null; then
+    return 0
+  fi
+  if command -v redis-server >/dev/null; then
     info "Starting local redis-server"
-    redis-server --daemonize yes --port 6379 --dir "$PWD/logs" --logfile "$PWD/logs/redis.log" >/dev/null
+    redis-server --daemonize yes --port 6379 --dir "$PWD/logs" --logfile "$PWD/logs/redis.log" >/dev/null || true
   elif command -v docker >/dev/null && docker info >/dev/null 2>&1; then
     info "Starting Redis in Docker (container: codeoracle_redis_local)"
     docker start codeoracle_redis_local >/dev/null 2>&1 \
@@ -120,15 +122,34 @@ if [[ -z "$REDIS_URL" ]]; then
   elif command -v brew >/dev/null; then
     info "Installing Redis with Homebrew"
     brew install redis >/dev/null
-    redis-server --daemonize yes --port 6379 --dir "$PWD/logs" --logfile "$PWD/logs/redis.log" >/dev/null
+    redis-server --daemonize yes --port 6379 --dir "$PWD/logs" --logfile "$PWD/logs/redis.log" >/dev/null || true
   fi
-  for _ in {1..10}; do redis_up "$LOCAL_REDIS_URL" && break; sleep 1; done
-  if redis_up "$LOCAL_REDIS_URL"; then
+  for _ in {1..10}; do redis_up "$LOCAL_REDIS_URL" && return 0; sleep 1; done
+  return 1
+}
+
+if [[ -n "$REDIS_URL" ]] && redis_up "$REDIS_URL"; then
+  info "Using configured REDIS_URL"
+elif [[ -n "$REDIS_URL" ]]; then
+  warn "Configured REDIS_URL unreachable; falling back to local Redis"
+  if ensure_local_redis; then
     export REDIS_URL="$LOCAL_REDIS_URL"
+    info "Using Redis on localhost:6379"
+  else
+    unset REDIS_URL
+  fi
+else
+  if ensure_local_redis; then
+    export REDIS_URL="$LOCAL_REDIS_URL"
+    info "Using Redis on localhost:6379"
   fi
 fi
 
-if [[ -n "$REDIS_URL" ]] && redis_up "$REDIS_URL"; then
+# Pin the URL start.sh chose so main.py's load_dotenv(override=True) cannot
+# re-apply a dead Upstash/cloud URL from .env and leave 4 workers without Redis.
+export CODEORACLE_REDIS_LOCKED=1
+
+if [[ -n "${REDIS_URL:-}" ]] && redis_up "$REDIS_URL"; then
   WORKERS="${WEB_CONCURRENCY:-4}"
   info "Redis OK, running ${WORKERS} workers"
 else
@@ -136,6 +157,10 @@ else
   unset REDIS_URL
   WORKERS=1
 fi
+
+# Avoid a stale macOS control socket that can log "Operation not permitted".
+rm -f "${HOME}/.gunicorn/gunicorn.ctl" 2>/dev/null || true
+mkdir -p "${HOME}/.gunicorn" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # 5. Launch

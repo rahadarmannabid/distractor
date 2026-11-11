@@ -19,6 +19,7 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional
 from openai import AsyncOpenAI
 
 import bug_injection
+from llm_client import get_active_model, uses_responses_api
 from llm_params import chat_args, is_reasoning_model
 
 logger = logging.getLogger(__name__)
@@ -28,12 +29,22 @@ logger = logging.getLogger(__name__)
 # (int overflow at the constraint limit, a filter that drops digits). gpt-4.1 (~1.6 s) and
 # gpt-4.1-mini (~1.5 s) are faster but often plant unrealistic or harmless bugs; gpt-6.1-sol is as
 # good but takes 4-12 s, since its reasoning cannot be turned off.
-COMPLETION_MODEL = os.getenv("COMPLETION_MODEL", "gpt-6-sol")
+# When a quiz sets llm_model, get_active_model() overrides these defaults for that request.
+COMPLETION_MODEL = os.getenv("COMPLETION_MODEL", "gpt-6-luna")
 # gpt-6-luna at low effort answers in ~1.8 s where gpt-5-nano at low effort takes ~3 s.
 AGENT_MODEL = os.getenv("AGENT_MODEL", "gpt-6-luna")
 # The agent plans multi-step edits, so it gets a little more reasoning than the inline calls. It runs on
 # the Responses API, since Chat Completions rejects function tools with reasoning for gpt-6 models.
+# OpenRouter / non-reasoning models use Chat Completions with tools instead (see AgentTurn._steps).
 AGENT_REASONING_EFFORT = os.getenv("AGENT_REASONING_EFFORT", "low")
+
+
+def _completion_model() -> str:
+    return get_active_model(COMPLETION_MODEL)
+
+
+def _agent_model() -> str:
+    return get_active_model(AGENT_MODEL)
 
 AGENT_MODES = ("ask", "agent", "plan", "debug")
 AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "15"))
@@ -223,7 +234,7 @@ async def problem_tests(client: AsyncOpenAI, problem: str, images: List[str]) ->
         return _tests_cache[key]
     try:
         resp = await client.chat.completions.create(
-            **chat_args(COMPLETION_MODEL, temperature=0, max_tokens=2000),
+            **chat_args(_completion_model(), temperature=0, max_tokens=2000),
             response_format={"type": "json_object"},
             messages=[{"role": "system", "content": _TESTS_SYSTEM},
                       {"role": "user", "content": _completion_user_content(_problem_block(problem), images, "")}],
@@ -279,7 +290,7 @@ async def _write_insert(
     """The look-ahead: the next lines of code at the cursor."""
     code = f"File: {filename}\n{prefix[-8000:]}<CURSOR>{suffix[:3000]}"
     resp = await client.chat.completions.create(
-        **chat_args(COMPLETION_MODEL, temperature=0, max_tokens=60 * LOOKAHEAD_LINES,
+        **chat_args(_completion_model(), temperature=0, max_tokens=60 * LOOKAHEAD_LINES,
                     reasoning_effort=LOOKAHEAD_REASONING_EFFORT),
         messages=[
             {"role": "system", "content": _SOLUTION_SYSTEM.format(language=language, lines=LOOKAHEAD_LINES)},
@@ -490,6 +501,9 @@ def _step_key(max_lines: int, prefix: str, insert: str) -> Tuple[int, int]:
     return max_lines, len(prefix) + len(insert) - len(insert.lstrip())
 
 
+_uniform_deck_locks: Dict[str, asyncio.Lock] = {}
+
+
 async def _make_pair(
     client: AsyncOpenAI, sol: Dict[str, Any], ctx: Dict[str, Any], prefix: str, suffix: str, insert: str,
     max_lines: int,
@@ -499,11 +513,24 @@ async def _make_pair(
     if not ctx["skills"] or not correct:
         return pair
     try:
-        pair["bug"] = await bug_injection.make_buggy_completions(
-            client, language=sol["language"], prefix=prefix, suffix=suffix, correct=correct,
-            skills=ctx["skills"], count=ctx["bug_count"], recent=ctx["recent"], problem=ctx["problem"],
-            clean=lambda t: _drop_new_comments(clean_completion(t, prefix, suffix, max_lines), correct),
-        )
+        async def _plant() -> Dict[str, Any]:
+            deck = ctx["deck_get"]() if ctx.get("uniform") and ctx.get("deck_get") else None
+            result = await bug_injection.make_buggy_completions(
+                client, language=sol["language"], prefix=prefix, suffix=suffix, correct=correct,
+                skills=ctx["skills"], count=ctx["bug_count"], recent=ctx["recent"],
+                problem=ctx["problem"], uniform=bool(ctx.get("uniform")), deck=deck,
+                clean=lambda t: _drop_new_comments(clean_completion(t, prefix, suffix, max_lines), correct),
+            )
+            if deck is not None and ctx.get("deck_set"):
+                ctx["deck_set"](deck)
+            return result
+
+        if ctx.get("uniform") and ctx.get("cache_key"):
+            lock = _uniform_deck_locks.setdefault(ctx["cache_key"], asyncio.Lock())
+            async with lock:
+                pair["bug"] = await _plant()
+        else:
+            pair["bug"] = await _plant()
     except Exception as e:
         logger.warning("Buggy suggestion failed: %s", e)
         pair["bug"] = {"no_bug": "error"}
@@ -591,31 +618,33 @@ async def inline_completion(
     cache_key: str = "",
     session_skills: Optional[List[Dict[str, Any]]] = None,
     branch_prefetch: bool = False,
+    bug_uniform: bool = False,
+    deck_get: Optional[Any] = None,
+    deck_set: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """{"correct", "bugs": [{"buggy", "bug_skill", "bug_plan"}], "check", ...}. The correct suggestion is
     cut from a look-ahead (see above); with selected bug skills up to `bug_count` buggy versions are
     written from it (each a different bug type), or taken from the pairs written ahead (see "Pairs
     ahead of time"). `problem` is the task as plain text and `problem_images` its images (data URLs for
     its "[Image N]" markers). `cache_key` (the session) lets later keystrokes reuse the look-ahead.
-    `recent_bugs` are the session's latest bug type ids (newest first), so the bug types vary; the
-    result's "choice" records how they were chosen. `session_skills` are the bug skills pairs written
-    ahead use (default `bug_skills`; they differ for single-option suggestions, which draw per request
-    whether to be buggy). `branch_prefetch` also writes ahead for a student who accepts a buggy option
-    and keeps it (no correcting feedback)."""
+    `recent_bugs` are the session's latest bug type ids (newest first). With `bug_uniform`, types are
+    dealt from a shuffled deck via `deck_get`/`deck_set` instead of free model picks. `session_skills`
+    are the bug skills pairs written ahead use (default `bug_skills`; they differ for single-option
+    suggestions, which draw per request whether to be buggy). `branch_prefetch` also writes ahead for
+    a student who accepts a buggy option and keeps it (no correcting feedback)."""
     images = problem_images or []
     ctx = {"skills": session_skills if session_skills is not None else (bug_skills or []),
-           "bug_count": bug_count, "recent": list(recent_bugs or []), "problem": problem, "filename": filename}
+           "bug_count": bug_count, "recent": list(recent_bugs or []), "problem": problem,
+           "filename": filename, "uniform": bool(bug_uniform), "cache_key": cache_key,
+           "deck_get": deck_get, "deck_set": deck_set}
     sol, insert, reused = await _solution_for(
         client, cache_key=cache_key, language=language, filename=filename, prefix=prefix, suffix=suffix,
         problem=problem, images=images)
     task = _pair_task(client, sol, ctx, prefix, suffix, insert, max_lines)
     _prefetch_steps(client, sol, ctx, prefix, insert, max_lines, cache_key=cache_key, images=images)
     pair = await asyncio.shield(task)
-    if ctx["skills"] and len((pair["bug"] or {}).get("bugs", [])) < min(ctx["bug_count"], len(ctx["skills"])):
-        # Fewer buggy options than the problem asks for: not kept, so the next request here writes them again.
-        key = _step_key(max_lines, prefix, insert)
-        if sol["steps"].get(key) is task:
-            del sol["steps"][key]
+    # Keep whatever the plant finished with (full, partial, or no_bug). Retries already happened
+    # inside make_buggy_completions; discarding here would re-spin on every pending poll.
     correct = _suggestion(insert, prefix, suffix, max_lines)
     if pair["correct"].strip() != correct.strip():
         # Stored for a cursor where the step is cut differently: write this cursor's own pair.
@@ -627,8 +656,7 @@ async def inline_completion(
     if not bug:
         return result
     if bug.get("no_bug"):
-        if bug["no_bug"] != "none_fits":
-            logger.info("Completion without a buggy option (%s)", bug["no_bug"])
+        logger.info("Completion without a buggy option (%s); showing correct", bug["no_bug"])
         return {**result, "no_bug": bug["no_bug"], "choice": bug.get("choice")}
     bugs = [{**b, "buggy": _adapt(pair["correct"], b["buggy"], correct)} for b in bug["bugs"]]
     if branch_prefetch and cache_key:
@@ -836,7 +864,7 @@ class AgentTurn:
             "turn_id": uuid.uuid4().hex[:12],
             "timestamp": datetime.now().isoformat(),
             "mode": self.mode,
-            "model": AGENT_MODEL,
+            "model": _agent_model(),
             "message": message,
             "skills": [s.get("name", "") for s in skills],
             "response": "",
@@ -941,9 +969,21 @@ class AgentTurn:
         model_args: Dict[str, Any], usage: Dict[str, int], max_steps: int,
     ) -> AsyncIterator[Dict[str, Any]]:
         """Model steps (with their tool calls) until the model stops calling tools or max_steps."""
+        model = _agent_model()
+        if uses_responses_api(model):
+            async for ev in self._steps_responses(model, items, tools, instructions, model_args, usage, max_steps):
+                yield ev
+        else:
+            async for ev in self._steps_chat(model, items, tools, instructions, model_args, usage, max_steps):
+                yield ev
+
+    async def _steps_responses(
+        self, model: str, items: List[Dict[str, Any]], tools: List[Dict[str, Any]], instructions: str,
+        model_args: Dict[str, Any], usage: Dict[str, int], max_steps: int,
+    ) -> AsyncIterator[Dict[str, Any]]:
         for _step in range(max_steps):
             stream = await self.client.responses.create(
-                model=AGENT_MODEL, instructions=instructions, input=items,  # pyright: ignore[reportArgumentType]
+                model=model, instructions=instructions, input=items,  # pyright: ignore[reportArgumentType]
                 tools=tools, store=False, stream=True, **model_args,  # pyright: ignore[reportArgumentType]
             )
             text, output = "", []
@@ -993,6 +1033,108 @@ class AgentTurn:
         self.record["response"] += note
         yield {"type": "text", "delta": note}
 
+    def _chat_content(self, content: Any) -> str:
+        if isinstance(content, list):
+            text_parts = []
+            for part in content:
+                if isinstance(part, dict) and part.get("type") in ("input_text", "text"):
+                    text_parts.append(str(part.get("text") or ""))
+                elif isinstance(part, dict) and part.get("type") in ("input_image", "image_url"):
+                    text_parts.append("[image omitted]")
+                elif isinstance(part, str):
+                    text_parts.append(part)
+            return "\n".join(p for p in text_parts if p)
+        return str(content or "")
+
+    async def _steps_chat(
+        self, model: str, items: List[Dict[str, Any]], tools: List[Dict[str, Any]], instructions: str,
+        model_args: Dict[str, Any], usage: Dict[str, int], max_steps: int,
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """Chat Completions tool loop for OpenRouter / non-Responses models."""
+        chat_tools = []
+        for t in tools:
+            name = t.get("name") or ""
+            chat_tools.append({
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": t.get("description") or "",
+                    "parameters": t.get("parameters") or {"type": "object", "properties": {}},
+                },
+            })
+        messages: List[Dict[str, Any]] = getattr(self, "_chat_messages", None) or []
+        if not messages:
+            messages = [{"role": "system", "content": instructions}]
+            for it in items:
+                role = it.get("role")
+                content = it.get("content")
+                if role in ("user", "assistant") and content is not None:
+                    messages.append({"role": role, "content": self._chat_content(content)[:12000]})
+        else:
+            # Fix-up turn: append only the newest user message (e.g. failing test feedback).
+            for it in reversed(items):
+                if it.get("role") == "user" and it.get("content") is not None:
+                    messages.append({"role": "user", "content": self._chat_content(it["content"])[:12000]})
+                    break
+        self._chat_messages = messages
+
+        create_kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "tools": chat_tools or None,
+            "temperature": model_args.get("temperature", 0.2),
+            "max_tokens": 4096,
+        }
+        # OpenRouter Nemotron burns the whole budget on hidden reasoning unless disabled.
+        if model.endswith(":free") or model.startswith(
+            ("nvidia/", "meta-llama/", "google/", "qwen/", "deepseek/", "anthropic/")
+        ):
+            create_kwargs["extra_body"] = {"reasoning": {"enabled": False}}
+
+        for _step in range(max_steps):
+            create_kwargs["messages"] = messages
+            resp = await self.client.chat.completions.create(**create_kwargs)
+            if resp.usage:
+                usage["prompt_tokens"] += getattr(resp.usage, "prompt_tokens", 0) or 0
+                usage["completion_tokens"] += getattr(resp.usage, "completion_tokens", 0) or 0
+            choice = resp.choices[0].message
+            text = choice.content or ""
+            hold = bool(self.record["edits"])
+            if text:
+                self.record["response"] += ("\n\n" if self.record["response"] else "") + text
+                if not hold:
+                    yield {"type": "text", "delta": text}
+            tool_calls = list(choice.tool_calls or [])
+            if not tool_calls:
+                if hold:
+                    self.final_text = text
+                return
+            if hold and text:
+                yield {"type": "text", "delta": text}
+            assistant_msg: Dict[str, Any] = {"role": "assistant", "content": text or None, "tool_calls": []}
+            for c in tool_calls:
+                assistant_msg["tool_calls"].append({
+                    "id": c.id,
+                    "type": "function",
+                    "function": {"name": c.function.name, "arguments": c.function.arguments or "{}"},
+                })
+            messages.append(assistant_msg)
+            for c in tool_calls:
+                try:
+                    args = json.loads(c.function.arguments or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                label = args.get("filename") or ""
+                yield {"type": "tool", "name": c.function.name, "filename": label}
+                result, event = await self._tool(c.function.name, args)
+                self.record["tool_calls"].append({"name": c.function.name, "filename": label, "result": result[:500]})
+                if event:
+                    yield event
+                messages.append({"role": "tool", "tool_call_id": c.id, "content": result})
+        note = "\n\n_(Stopped after the maximum number of steps.)_"
+        self.record["response"] += note
+        yield {"type": "text", "delta": note}
+
     def _changed(self) -> List[str]:
         return sorted(n for n in set(self.initial) | set(self.ws) if self.initial.get(n) != self.ws.get(n))
 
@@ -1034,7 +1176,7 @@ class AgentTurn:
                 items.append({"role": h["role"], "content": str(h["content"])[:8000]})
         items.append({"role": "user", "content": _workspace_context(self.ws, self.terminal_output)
                       + "\n\n" + self.message})
-        if is_reasoning_model(AGENT_MODEL):
+        if uses_responses_api(_agent_model()) and is_reasoning_model(_agent_model()):
             model_args: Dict[str, Any] = {"reasoning": {"effort": AGENT_REASONING_EFFORT},
                                           "include": ["reasoning.encrypted_content"]}
         else:

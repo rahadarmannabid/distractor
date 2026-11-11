@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
   <title>{% if edit_mode %}Edit{% else %}Create{% endif %} Quiz</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -251,6 +254,11 @@
     }
     .code-tab:hover { color: var(--text); }
     .code-tab.active { background: var(--input-bg); color: var(--primary); border-color: var(--border); }
+    .code-tab .code-tab-dot {
+      display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-left: 8px;
+      background: var(--border); vertical-align: middle;
+    }
+    .code-tab .code-tab-dot.filled { background: #34d399; }
     .starter-files-wrap { background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
     
     .starter-file-card {
@@ -517,6 +525,37 @@
     <h2>Experimental Conditions</h2>
     <p class="subtitle">Select the AI assistance conditions you want to test. If multiple are chosen, students will be randomly assigned to one.</p>
 
+    <div class="fg" style="margin-bottom: 24px;">
+      <label for="llm_model">AI model for this quiz</label>
+      <select id="llm_model" style="width:100%; max-width:640px;">
+        {% set selected_model = quiz.llm_model if quiz and quiz.llm_model else default_llm_model %}
+        {% for m in available_llm_models %}
+        <option value="{{ m.id }}" {% if m.id == selected_model %}selected{% endif %}>{{ m.option_label }}</option>
+        {% endfor %}
+      </select>
+      <p class="hint">One model is used for ghost-text suggestions, the agent, and buggy options. Prices are USD per 1M tokens (input / output). OpenRouter free models are rate-limited.</p>
+      <div class="llm-price-table-wrap" style="margin-top:12px; max-width:640px; overflow-x:auto;">
+        <table class="llm-price-table" style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead>
+            <tr style="text-align:left; border-bottom:1px solid var(--border, #333);">
+              <th style="padding:6px 8px;">Model</th>
+              <th style="padding:6px 8px;">Input / 1M</th>
+              <th style="padding:6px 8px;">Output / 1M</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in available_llm_models %}
+            <tr style="border-bottom:1px solid var(--border, #333);">
+              <td style="padding:6px 8px;">{{ m.label }}</td>
+              <td style="padding:6px 8px;">{% if m.input_per_mtok == 0 and m.output_per_mtok == 0 %}<strong>Free</strong>{% else %}${{ '%.2f'|format(m.input_per_mtok) }}{% endif %}</td>
+              <td style="padding:6px 8px;">{% if m.input_per_mtok == 0 and m.output_per_mtok == 0 %}<strong>Free</strong>{% else %}${{ '%.2f'|format(m.output_per_mtok) }}{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     {% set current_conds = quiz.conditions if quiz and quiz.conditions else [1] %}
     <div class="cond-grid">
       <div class="cond-card {% if 1 in current_conds %}selected{% endif %}" onclick="toggleCondition(1, this)">
@@ -603,9 +642,10 @@
 
     <div class="card">
       <h2>Starter Code (Boilerplate)</h2>
-      <p class="subtitle">Provide the initial files for each allowed language.</p>
+      <p class="subtitle">Students pick one of the quiz’s allowed languages when they join. Use the tabs below to give <strong>each language its own boilerplate</strong> (different files and code). A student who selects Python gets only the Python tab; Java gets only the Java tab.</p>
       <div class="code-tabs" id="codeTabs"></div>
       <div class="starter-files-wrap">
+        <p class="hint" id="starterLangHint" style="margin-bottom:12px;"></p>
         <div id="starterFilesContainer"></div>
         <button class="add-btn" id="addFileBtn" onclick="addStarterFile()" style="margin-top:16px;">+ Add File</button>
       </div>
@@ -621,6 +661,16 @@
           <option value="1">1 buggy + 1 correct</option><option value="2">2 buggy + 1 correct</option><option value="3">3 buggy + 1 correct</option>
         </select>
         <p class="hint">How many buggy options students see next to the correct one, each with a different bug type (e.g. option B has an API error, option C an off-by-one). Needs at least that many bug types selected in the Bug skills step; with fewer, students get one buggy option per selected type. <strong>1 option: randomly correct or buggy:</strong> students see a single suggestion, like a plain code assistant, which is the correct one or one with a bug, at random (half the time each).</p>
+      </div>
+      <div class="fg">
+        <div class="toggle-item">
+          <label class="toggle-switch">
+            <input type="checkbox" id="prob_bug_uniform">
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="active-label">Uniform</span>
+        </div>
+        <p class="hint"><strong>On:</strong> bug types are dealt from a shuffled deck so each selected type appears about equally often over a session (not whatever the model prefers). <strong>Off:</strong> the model picks the most plausible bug type for each suggestion (can repeat types like misinterpretation).</p>
       </div>
       <div class="fg">
         <div class="toggle-item">
@@ -717,6 +767,10 @@
     <p class="subtitle">Double-check settings before saving to the database.</p>
     <div style="background:var(--input-bg); border:1px solid var(--border); border-radius:8px; padding:24px;">
       <dl class="review-grid" id="reviewContent"></dl>
+    </div>
+    <div style="margin-top:20px; display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+      <button type="button" class="btn btn-secondary" onclick="downloadProblemDescriptions()">Download problem descriptions</button>
+      <span class="hint" style="margin:0;">Saves all problem titles and descriptions as a plain text file.</span>
     </div>
   </div>
 </div>
@@ -949,6 +1003,42 @@ function htmlPlainPreview(html, maxLen) {
   return t.substring(0, maxLen);
 }
 
+function htmlToPlainText(html) {
+  if (!html) return '';
+  var d = document.createElement('div');
+  d.innerHTML = html;
+  return (d.textContent || '').replace(/\u200b/g, '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function downloadProblemDescriptions() {
+  saveCurrentProblem();
+  if (!problemsData.length) {
+    showToast('No problems to download.', 'error');
+    return;
+  }
+  const parts = problemsData.map((p, i) => {
+    const title = (p.title || '').trim() || ('Problem ' + (i + 1));
+    const statement = htmlToPlainText(p.problem_statement || '');
+    const constraints = htmlToPlainText(p.constraints || '');
+    const tests = htmlToPlainText(p.test_cases || '');
+    let block = '='.repeat(60) + '\n'
+      + 'Problem ' + (i + 1) + ': ' + title + '\n'
+      + '='.repeat(60) + '\n\n'
+      + (statement || '(No description)') + '\n';
+    if (constraints) block += '\nConstraints:\n' + constraints + '\n';
+    if (tests) block += '\nTest cases:\n' + tests + '\n';
+    return block;
+  });
+  const blob = new Blob([parts.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const teaser = slugify((document.getElementById('teaser') || {}).value || '');
+  a.download = (teaser ? teaser + '_' : '') + 'problem_descriptions.txt';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  showToast('Downloaded problem descriptions.', 'success');
+}
+
 function isProblemStatementEmpty(stmt) {
   if (!stmt || !String(stmt).trim()) return true;
   var d = document.createElement('div');
@@ -956,9 +1046,46 @@ function isProblemStatementEmpty(stmt) {
   return !d.textContent.replace(/\u200b/g, '').trim() && !d.querySelector('img');
 }
 
-// Starter code storage
+// Starter code storage: { python: [{filename, content}, ...], java: [...], ... }
 let starterCodeStore = {};
 let activeCodeLang = null;
+const LANG_LABELS = { python: 'Python', javascript: 'JavaScript', c: 'C', cpp: 'C++', java: 'Java' };
+const LANG_EXT = { python: 'py', javascript: 'js', c: 'c', cpp: 'cpp', java: 'java' };
+
+function langLabel(lang) {
+  return LANG_LABELS[lang] || (lang ? lang.charAt(0).toUpperCase() + lang.slice(1) : '');
+}
+
+function defaultStarterFilename(lang) {
+  const ext = LANG_EXT[lang] || 'txt';
+  return (lang === 'java' ? 'Main.' : 'main.') + ext;
+}
+
+/** Always an array of {filename, content} for one language. */
+function normalizeStarterFiles(lang, val) {
+  if (Array.isArray(val)) {
+    return val
+      .filter(f => f && typeof f === 'object')
+      .map(f => ({ filename: String(f.filename || '').trim(), content: String(f.content || '') }))
+      .filter(f => f.filename);
+  }
+  if (typeof val === 'string' && val.trim()) {
+    return [{ filename: defaultStarterFilename(lang), content: val }];
+  }
+  return [];
+}
+
+function starterHasContent(files) {
+  return (files || []).some(f => String(f.content || '').trim().length > 0);
+}
+
+function deepCopyStarterMap(map) {
+  const out = {};
+  for (const [lang, val] of Object.entries(map || {})) {
+    out[lang] = normalizeStarterFiles(lang, val).map(f => ({ ...f }));
+  }
+  return out;
+}
 
 // ─── Default survey templates: loaded from `surveys/instructor_default_*.json` via API ───
 let DEFAULT_PRE_SURVEY = [];
@@ -1154,7 +1281,7 @@ function bugOptionsLabel(n) {
 
 // Helper: wrong-pick feedback and buggy options for a new problem
 function defaultBugFields() {
-  return { bug_options: 1, bug_feedback: false, bug_reveal: false };
+  return { bug_options: 1, bug_feedback: false, bug_reveal: false, bug_uniform: false };
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -1179,12 +1306,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const sc = prob.starter_code || {};
     const normalizedSC = {};
     for (const [lang, val] of Object.entries(sc)) {
-      if (typeof val === 'string') {
-        const extMap = { python: 'py', javascript: 'js', c: 'c', cpp: 'cpp', java: 'java' };
-        normalizedSC[lang] = [{ filename: 'main.' + (extMap[lang] || 'txt'), content: val }];
-      } else if (Array.isArray(val)) {
-        normalizedSC[lang] = val;
-      }
+      normalizedSC[lang] = normalizeStarterFiles(lang, val);
     }
     const hasSurveys = prob._has_surveys === true
       || (Array.isArray(prob.pre_survey) && prob.pre_survey.length > 0)
@@ -1207,6 +1329,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       recurrent_survey_start: hasSurveys ? (prob.recurrent_survey_start || 5) : (quizRec.length ? quizRecStart : defaults.recurrent_survey_start),
       bug_options: bugOptionsValue(prob.bug_options),
       bug_feedback: !!prob.bug_feedback,
+      bug_uniform: !!prob.bug_uniform,
       bug_reveal: !!prob.bug_reveal,
     });
   });
@@ -1412,12 +1535,19 @@ function renderProblemTabs() {
 
 function saveCurrentProblem() {
   saveCurrentFiles();
+  // Persist every allowed language so students who pick any of them get that language's files.
+  const starter = deepCopyStarterMap(starterCodeStore);
+  getSelectedLanguages().forEach(lang => {
+    if (!starter[lang] || !starter[lang].length) {
+      starter[lang] = [{ filename: defaultStarterFilename(lang), content: '' }];
+    }
+  });
   problemsData[currentProblemIndex] = {
     title: (document.getElementById('currentProblemTitle').value || '').trim(),
     problem_statement: getQuillHtml(window._quillProblemStatement),
     constraints: getQuillHtml(window._quillConstraints),
     test_cases: getQuillHtml(window._quillTestCases),
-    starter_code: { ...starterCodeStore },
+    starter_code: starter,
     _has_surveys: true,  // sentinel: survives Firebase even if arrays are empty
     pre_survey_enabled: document.getElementById('togglePreSurvey').checked,
     pre_survey: collectSurvey('probPreSurveyList'),
@@ -1429,6 +1559,7 @@ function saveCurrentProblem() {
     recurrent_survey_start: parseInt(document.getElementById('probRecurrentStart').value) || 5,
     bug_options: bugOptionsValue(document.getElementById('prob_bug_options').value),
     bug_feedback: document.getElementById('prob_bug_feedback').checked,
+    bug_uniform: document.getElementById('prob_bug_uniform').checked,
     // Only applies while "Correct wrong picks" is off.
     bug_reveal: document.getElementById('prob_bug_reveal').checked,
   };
@@ -1447,12 +1578,7 @@ function switchProblem(idx) {
   document.getElementById('currentProblemTitle').value = prob.title || '';
   document.getElementById('problemCardTitle').textContent = (prob.title || '').trim() || ('Problem ' + (idx + 1));
 
-  starterCodeStore = {};
-  if (prob.starter_code) {
-    for (const [lang, val] of Object.entries(prob.starter_code)) {
-      starterCodeStore[lang] = Array.isArray(val) ? [...val.map(f => ({...f}))] : val;
-    }
-  }
+  starterCodeStore = deepCopyStarterMap(prob.starter_code || {});
   activeCodeLang = null;
   updateCodeTabs();
 
@@ -1460,6 +1586,7 @@ function switchProblem(idx) {
   document.getElementById('bugCardTitle').textContent = 'AI bugs for ' + ((prob.title || '').trim() || ('Problem ' + (idx + 1)));
   document.getElementById('prob_bug_options').value = String(bugOptionsValue(prob.bug_options));
   document.getElementById('prob_bug_feedback').checked = !!prob.bug_feedback;
+  document.getElementById('prob_bug_uniform').checked = !!prob.bug_uniform;
   document.getElementById('prob_bug_reveal').checked = !!prob.bug_reveal;
   syncBugReveal();
   renderBugSkills();
@@ -1506,22 +1633,35 @@ function removeCurrentProblem() {
   switchProblem(newIdx);
 }
 
-// Starter Code
+// Starter Code — one tab per allowed language; each tab keeps its own file list.
 function updateCodeTabs() {
   const langs = getSelectedLanguages();
   const tabBar = document.getElementById('codeTabs');
   tabBar.innerHTML = '';
+  if (!langs.length) {
+    tabBar.innerHTML = '<span class="hint">Select at least one allowed language in Configuration to edit boilerplate.</span>';
+    document.getElementById('starterFilesContainer').innerHTML = '';
+    const hint = document.getElementById('starterLangHint');
+    if (hint) hint.textContent = '';
+    activeCodeLang = null;
+    return;
+  }
   langs.forEach((lang, i) => {
+    if (!starterCodeStore[lang] || !starterCodeStore[lang].length) {
+      starterCodeStore[lang] = [{ filename: defaultStarterFilename(lang), content: '' }];
+    }
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'code-tab' + ((activeCodeLang === lang || (!activeCodeLang && i === 0)) ? ' active' : '');
-    btn.textContent = ({ cpp: 'C++', javascript: 'JavaScript', c: 'C' })[lang] || (lang.charAt(0).toUpperCase() + lang.slice(1));
+    btn.dataset.lang = lang;
+    const filled = starterHasContent(starterCodeStore[lang]);
+    btn.innerHTML = `${escHtml(langLabel(lang))}<span class="code-tab-dot${filled ? ' filled' : ''}" title="${filled ? 'Has boilerplate' : 'Empty boilerplate'}"></span>`;
     btn.onclick = () => switchCodeTab(lang, btn);
     tabBar.appendChild(btn);
   });
-  if (langs.length > 0 && (!activeCodeLang || !langs.includes(activeCodeLang))) {
-    switchCodeTab(langs[0], tabBar.firstChild);
-  } else if (activeCodeLang) {
+  if (!activeCodeLang || !langs.includes(activeCodeLang)) {
+    switchCodeTab(langs[0], tabBar.querySelector('.code-tab'));
+  } else {
     renderStarterFiles();
   }
 }
@@ -1531,12 +1671,17 @@ function switchCodeTab(lang, btn) {
   activeCodeLang = lang;
   document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
   if (btn) btn.classList.add('active');
+  else {
+    const match = document.querySelector(`.code-tab[data-lang="${lang}"]`);
+    if (match) match.classList.add('active');
+  }
   renderStarterFiles();
 }
 
 function saveCurrentFiles() {
   if (!activeCodeLang) return;
   const container = document.getElementById('starterFilesContainer');
+  if (!container) return;
   const cards = container.querySelectorAll('.starter-file-card');
   const files = [];
   cards.forEach(card => {
@@ -1544,19 +1689,30 @@ function saveCurrentFiles() {
     const content = card.querySelector('.starter-file-content').value;
     if (fn) files.push({ filename: fn, content: content });
   });
-  starterCodeStore[activeCodeLang] = files;
+  starterCodeStore[activeCodeLang] = files.length
+    ? files
+    : [{ filename: defaultStarterFilename(activeCodeLang), content: '' }];
+  // Refresh the green/empty dot on the active tab without rebuilding the editor.
+  const tab = document.querySelector(`.code-tab[data-lang="${activeCodeLang}"]`);
+  if (tab) {
+    const dot = tab.querySelector('.code-tab-dot');
+    if (dot) dot.classList.toggle('filled', starterHasContent(starterCodeStore[activeCodeLang]));
+  }
 }
 
 function renderStarterFiles() {
   const container = document.getElementById('starterFilesContainer');
+  const hint = document.getElementById('starterLangHint');
   container.innerHTML = '';
-  const files = starterCodeStore[activeCodeLang] || [];
-  if (files.length === 0) {
-    const extMap = { python: 'py', javascript: 'js', c: 'c', cpp: 'cpp', java: 'java' };
-    const ext = extMap[activeCodeLang] || 'txt';
-    files.push({ filename: (activeCodeLang === 'java' ? 'Main.' : 'main.') + ext, content: '' });
-    starterCodeStore[activeCodeLang] = files;
+  if (!activeCodeLang) return;
+  if (hint) {
+    hint.textContent = `Editing ${langLabel(activeCodeLang)} boilerplate — students who select ${langLabel(activeCodeLang)} will start with these files.`;
   }
+  let files = normalizeStarterFiles(activeCodeLang, starterCodeStore[activeCodeLang]);
+  if (files.length === 0) {
+    files = [{ filename: defaultStarterFilename(activeCodeLang), content: '' }];
+  }
+  starterCodeStore[activeCodeLang] = files;
   files.forEach((f, i) => {
     container.appendChild(createFileCard(f, i));
   });
@@ -1568,20 +1724,22 @@ function createFileCard(file, idx) {
   card.innerHTML = `
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
       <input type="text" class="starter-filename" value="${escHtml(file.filename || '')}" placeholder="filename.ext" style="flex:1;font-family:'Fira Code',monospace;">
-      <button class="remove-btn" onclick="this.closest('.starter-file-card').remove()" title="Remove file">✕</button>
+      <button class="remove-btn" onclick="this.closest('.starter-file-card').remove(); saveCurrentFiles();" title="Remove file">✕</button>
     </div>
-    <textarea class="starter-file-content code-area" placeholder="// Write starter code here...">${escHtml(file.content || '')}</textarea>
+    <textarea class="starter-file-content code-area" placeholder="// Write starter code for this language..." oninput="saveCurrentFiles()">${escHtml(file.content || '')}</textarea>
   `;
+  const nameInput = card.querySelector('.starter-filename');
+  if (nameInput) nameInput.addEventListener('change', saveCurrentFiles);
   return card;
 }
 
 function addStarterFile() {
   if (!activeCodeLang) return;
-  const extMap = { python: 'py', javascript: 'js', c: 'c' };
-  const ext = extMap[activeCodeLang] || 'txt';
+  const ext = LANG_EXT[activeCodeLang] || 'txt';
   const container = document.getElementById('starterFilesContainer');
   const idx = container.children.length;
   container.appendChild(createFileCard({ filename: 'file' + (idx + 1) + '.' + ext, content: '' }, idx));
+  saveCurrentFiles();
 }
 
 function getSelectedLanguages() {
@@ -1860,10 +2018,18 @@ function buildReview() {
     if (p.post_survey_enabled && (p.post_survey || []).length) surveys.push('Post');
     if (p.recurrent_survey_enabled && (p.recurrent_survey || []).length) surveys.push(`Recurrent (start: ${p.recurrent_survey_start}, every: ${p.recurrent_survey_interval})`);
     const surveyStr = surveys.length ? surveys.join(', ') : '<span style="color:var(--muted)">No surveys</span>';
+    const sc = p.starter_code || {};
+    const boiler = langs.map(lang => {
+      const files = normalizeStarterFiles(lang, sc[lang]);
+      const n = files.length;
+      const filled = starterHasContent(files);
+      return `${langLabel(lang)}: ${filled ? `${n} file${n === 1 ? '' : 's'}` : 'empty'}`;
+    }).join(' · ') || 'none';
     const wrongPick = p.bug_feedback ? 'correct wrong picks' : (p.bug_reveal ? 'show correct answer' : 'no feedback');
+    const uniform = p.bug_uniform ? ', uniform types' : '';
     const bugStr = selectedConditions.some(c => c !== 1)
-      ? `<br><span style="font-size:0.85rem;color:var(--muted);">AI bugs: ${bugOptionsLabel(bugOptionsValue(p.bug_options))}, ${wrongPick}</span>` : '';
-    return `<div style="margin-bottom:8px;"><span style="color:var(--primary);font-weight:600;">${escHtml(probLabel)}:</span> ${escHtml(stmt)}${stmt.length >= 60 ? '...' : ''}<br><span style="font-size:0.85rem;color:var(--muted);">Surveys: ${surveyStr}</span>${bugStr}</div>`;
+      ? `<br><span style="font-size:0.85rem;color:var(--muted);">AI bugs: ${bugOptionsLabel(bugOptionsValue(p.bug_options))}, ${wrongPick}${uniform}</span>` : '';
+    return `<div style="margin-bottom:8px;"><span style="color:var(--primary);font-weight:600;">${escHtml(probLabel)}:</span> ${escHtml(stmt)}${stmt.length >= 60 ? '...' : ''}<br><span style="font-size:0.85rem;color:var(--muted);">Surveys: ${surveyStr}</span><br><span style="font-size:0.85rem;color:var(--muted);">Boilerplate: ${escHtml(boiler)}</span>${bugStr}</div>`;
   }).join('');
 
   document.getElementById('reviewContent').innerHTML = `
@@ -1905,6 +2071,7 @@ async function saveQuiz() {
     allowed_languages: getSelectedLanguages(),
     time_limit_minutes: parseInt(document.getElementById('time_limit').value) || 0,
     conditions: selectedConditions,
+    llm_model: (document.getElementById('llm_model') || {}).value || '',
     agent_skills: agentSkills.filter(s => s.name.trim() && s.instructions.trim()),
     bug_skills: bugSkills
       .filter(s => (s.name || '').trim() && (s.instructions || '').trim())

@@ -14,7 +14,10 @@ REASONING_EFFORT = os.getenv("REASONING_EFFORT", "minimal")
 
 
 def is_reasoning_model(model: str) -> bool:
+    """OpenAI reasoning-family models (gpt-5/6, o-series). OpenRouter ids are excluded."""
     m = model.lower()
+    if "/" in m or m.endswith(":free"):
+        return False
     return m.startswith(("gpt-5", "gpt-6", "o1", "o3", "o4"))
 
 
@@ -41,6 +44,28 @@ def chat_args(
     else:
         if temperature is not None:
             args["temperature"] = temperature
-        if max_tokens:
+        # OpenRouter Nemotron (and similar) reason by default and can burn the entire
+        # max_tokens budget on hidden reasoning. Do not apply this to Groq / OpenAI.
+        openrouter = model.endswith(":free") or model.startswith(
+            ("nvidia/", "meta-llama/", "google/", "deepseek/", "anthropic/")
+        )
+        groq_reasoning = model.startswith("openai/gpt-oss")
+        if openrouter:
+            effort = (reasoning_effort or REASONING_EFFORT or "minimal").lower()
+            if effort in ("none", "minimal", "low", ""):
+                args["extra_body"] = {"reasoning": {"enabled": False}}
+                if max_tokens:
+                    args["max_tokens"] = max(int(max_tokens), 256)
+            else:
+                args["extra_body"] = {"reasoning": {"effort": effort}}
+                if max_tokens:
+                    args["max_tokens"] = max(int(max_tokens) + 1500, 2048)
+        elif groq_reasoning:
+            # Groq GPT-OSS uses reasoning tokens that share the max_tokens budget.
+            effort = (reasoning_effort or "low").lower()
+            args["extra_body"] = {"reasoning_effort": effort if effort != "minimal" else "low"}
+            if max_tokens:
+                args["max_tokens"] = max(int(max_tokens) + 256, 512)
+        elif max_tokens:
             args["max_tokens"] = max_tokens
     return args

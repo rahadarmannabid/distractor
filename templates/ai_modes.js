@@ -7,8 +7,9 @@
 
     var CONDITION = { NO_AI: 1, SUGGESTION: 2, AGENT: 3, MULTILINE_SUGGESTION: 4 };
     var GHOST_DEBOUNCE_MS = 100;
-    // The server answers within ~2 s; a suggestion still being written is asked for again this often.
-    var PENDING_RETRIES = 6;
+    // Server may return pending while OpenRouter free models finish; retry this many times.
+    var PENDING_RETRIES = 12;
+    var PENDING_RETRY_MS = 400;
     // Text after the cursor on its line that still allows a suggestion (as in Copilot).
     var MID_LINE_OK = /^[\s)\]}"'`;,:]*$/;
 
@@ -405,7 +406,7 @@
                 var at = cursorText();
                 if (!pendingRetry || pendingRetry.key !== key || !at || cacheKey(at.prefix, at.suffix) !== key) return;
                 editor.trigger('pending-retry', 'editor.action.inlineSuggest.trigger', {});
-            }, 150);
+            }, PENDING_RETRY_MS);
         }
 
         // Has the server write the program and first suggestions for the cursor before the student

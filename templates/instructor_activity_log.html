@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
   <title>Activity log{% if quiz_teaser %} — {{ quiz_teaser[:48] }}{% endif %}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -381,7 +384,7 @@
                 <td>
                   {% if key == 'timestamp' %}<span class="cell-mono">{{ (v|string)[11:19] or '—' }}</span>
                   {% elif key in ['code_snapshot', 'submitted_code'] and (v|string)|length > 0 %}<details class="final-code-details"><summary>Snapshot</summary><pre class="log-pre study-pre study-pre--wide">{{ v }}</pre></details>
-                  {% elif key in ['suggestion_code', 'correct_suggestion_code', 'buggy_code_suggestions', 'accepted_code_suggestion', 'agent_correct_response', 'agent_correct_code', 'agent_buggy_response', 'agent_buggy_code', 'explanation', 'user_prompt', 'compilation_error', 'runtime_error', 'answer', 'question_text'] and (v|string)|length > 0 %}<pre class="log-pre study-pre">{{ v }}</pre>
+                  {% elif key in ['suggestion_code', 'correct_suggestion', 'bug_1', 'bug_2', 'bug_3', 'accepted_code_suggestion', 'agent_correct_response', 'agent_correct_code', 'agent_buggy_response', 'agent_buggy_code', 'explanation', 'user_prompt', 'compilation_error', 'runtime_error', 'answer', 'question_text'] and (v|string)|length > 0 %}<pre class="log-pre study-pre">{{ v }}</pre>
                   {% elif key in ['accepted_suggestion_correct', 'is_option_correct'] and v %}<span class="verdict {{ 'accepted' if v == 'Yes' else 'rejected' }}">{{ v }}</span>
                   {% elif key == 'suggestion_correctness' and v %}<span class="verdict {{ 'rejected' if v == 'buggy' else 'accepted' }}">{{ v }}</span>
                   {% elif key in ['suggestion_status', 'user_selected_status'] and v %}<span class="status-pill status-{{ v }}">{{ v|replace('_', ' ') }}</span>

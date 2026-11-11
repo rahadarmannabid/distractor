@@ -34,7 +34,8 @@ body { background: var(--ui-page); color: var(--ui-text); font: var(--fs-md)/var
 
 /* ── Layout: nav bar on top, problem card left, code + terminal cards right ── */
 #application {
-    --problem-w: min(44vw, 640px);
+    /* Default: description ~25%, IDE gets the rest (user can still drag-resize). */
+    --problem-w: min(25vw, 420px);
     display: grid !important; grid-template-columns: var(--problem-w) 8px minmax(0, 1fr) !important;
     grid-template-rows: var(--h-nav) minmax(0, 1fr) !important;
     padding: 0 8px 8px; box-sizing: border-box; background: var(--ui-page);
@@ -45,7 +46,7 @@ body { background: var(--ui-page); color: var(--ui-text); font: var(--fs-md)/var
 #application > #resize-problem { grid-column: 2 !important; grid-row: 2 !important; }
 /* Agent condition: problem | code | agent */
 #application.has-agent {
-    --problem-w: min(30vw, 480px); --agent-w: min(28vw, 440px);
+    --problem-w: min(22vw, 360px); --agent-w: min(28vw, 440px);
     grid-template-columns: var(--problem-w) 8px minmax(0, 1fr) 8px var(--agent-w) !important;
 }
 #application > #resize-agent { grid-column: 4; grid-row: 2; position: relative; cursor: ew-resize; }

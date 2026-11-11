@@ -4,14 +4,26 @@ from fastapi.templating import Jinja2Templates
 from starlette.datastructures import Headers
 from starlette.middleware.gzip import GZipResponder
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 import os
 from pathlib import Path
 from dotenv import load_dotenv
 
 # Load project .env first; override=True so repo config wins over stale shell/IDE env (e.g. old FIREBASE_*).
+# start.sh may lock REDIS_URL after picking local Redis when the .env cloud URL is unreachable.
+_redis_locked = os.environ.get("CODEORACLE_REDIS_LOCKED") == "1"
+_pre_redis = os.environ.get("REDIS_URL") if _redis_locked else None
+_pre_redis_was_set = _redis_locked and ("REDIS_URL" in os.environ)
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=True)
-from openai import AsyncOpenAI, OpenAI
+if _redis_locked:
+    if _pre_redis_was_set:
+        if _pre_redis is None:
+            os.environ.pop("REDIS_URL", None)
+        else:
+            os.environ["REDIS_URL"] = _pre_redis
+    else:
+        os.environ.pop("REDIS_URL", None)
 import random
 import re
 import sys
@@ -27,6 +39,7 @@ import firebase_admin
 from firebase_admin import credentials, db
 import asyncio
 import threading
+from contextlib import contextmanager
 from contextvars import ContextVar
 import smtplib
 from email.message import EmailMessage
@@ -39,6 +52,7 @@ import ai_assist
 import bug_injection
 import study_log
 import problem_images
+import llm_client
 from llm_params import DEFAULT_MODEL, chat_args
 import httpx
 import sandbox
@@ -325,6 +339,48 @@ def get_starter_code(prefix, language):
     
     logger.info(f"No starter code found for prefix '{prefix}' with language '{language}'")
     return None
+
+
+def resolve_problem_starter(
+    problem: Optional[Dict[str, Any]],
+    programming_language: str,
+    *,
+    fallback_prefix: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[List[Dict[str, str]]]]:
+    """Starter boilerplate for one student language: (starter_code, starter_files).
+
+    Instructors store per-language files on the problem as
+    ``starter_code = { "python": [{filename, content}, ...], "java": [...], ... }``.
+    The student's chosen language selects which list they get.
+    """
+    lang = (programming_language or "").strip().lower()
+    quiz_starter = (problem or {}).get("starter_code") or {}
+    lang_starter = None
+    if isinstance(quiz_starter, dict) and lang:
+        lang_starter = quiz_starter.get(lang)
+        if lang_starter is None:
+            for key, val in quiz_starter.items():
+                if str(key).strip().lower() == lang:
+                    lang_starter = val
+                    break
+
+    starter_files: Optional[List[Dict[str, str]]] = None
+    starter_code: Optional[str] = None
+    if isinstance(lang_starter, list) and lang_starter:
+        starter_files = [
+            {"filename": str(f.get("filename") or "").strip(), "content": str(f.get("content") or "")}
+            for f in lang_starter
+            if isinstance(f, dict) and str(f.get("filename") or "").strip()
+        ] or None
+        if starter_files:
+            starter_code = starter_files[0].get("content", "")
+    elif isinstance(lang_starter, str) and lang_starter:
+        starter_code = lang_starter
+    elif fallback_prefix:
+        starter_code = get_starter_code(fallback_prefix, programming_language)
+    else:
+        starter_code = ""
+    return starter_code, starter_files
 
 
 def get_side_panel_hidden_assignment_keys():
@@ -959,10 +1015,13 @@ _completion_semaphore: asyncio.Semaphore = asyncio.Semaphore(
 )
 # Upper bound on writing one suggestion in the background (see SUGGESTION_WAIT_SEC for how long the
 # student waits); a slower one is dropped.
-COMPLETION_TIMEOUT_SEC = float(os.getenv("COMPLETION_TIMEOUT_SEC", "25"))
+COMPLETION_TIMEOUT_SEC = float(os.getenv("COMPLETION_TIMEOUT_SEC", "60"))
 # Longest a student waits for a suggestion, like Copilot. A pair that is not ready by then is still
 # written and cached; the reply says "pending" and the editor asks again, finding it ready.
-SUGGESTION_WAIT_SEC = float(os.getenv("SUGGESTION_WAIT_SEC", "2"))
+# Default 5s: OpenRouter free models need several sequential calls (look-ahead + bug options).
+SUGGESTION_WAIT_SEC = float(os.getenv("SUGGESTION_WAIT_SEC", "5"))
+# OpenRouter / slower models: hold the HTTP response open longer before returning pending.
+SUGGESTION_WAIT_OPENROUTER_SEC = float(os.getenv("SUGGESTION_WAIT_OPENROUTER_SEC", "12"))
 
 # Prevent duplicate /submit for the same session (double-click, retries, multiple tabs).
 _submit_gate = asyncio.Lock()
@@ -1196,6 +1255,21 @@ async def persist_session_mutations(request: Request, call_next):
 
 
 app.include_router(instructor_router)
+
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+_STATIC_DIR.mkdir(exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    ico = _STATIC_DIR / "favicon.ico"
+    if ico.exists():
+        return FileResponse(ico, media_type="image/x-icon")
+    svg = _STATIC_DIR / "favicon.svg"
+    if svg.exists():
+        return FileResponse(svg, media_type="image/svg+xml")
+    raise HTTPException(status_code=404, detail="Favicon not found")
 
 
 def save_session_to_local(session_log: SessionLog):
@@ -1563,13 +1637,10 @@ def checkpoint_pre_post_survey_file_payload_to_firebase(
         return False
 
 
-# OpenAI Configuration
-API_KEY = os.getenv("OPENAI_API_KEY")
-if not API_KEY:
-    raise ValueError("OPENAI_API_KEY not found in environment variables")
-
-client = OpenAI(api_key=API_KEY)
-async_client = AsyncOpenAI(api_key=API_KEY)
+# OpenAI / OpenRouter clients (quiz llm_model picks which one per request)
+llm_client.init_clients()
+client = llm_client.get_sync_client(llm_client.DEFAULT_QUIZ_LLM_MODEL)
+async_client = llm_client.get_async_client(llm_client.DEFAULT_QUIZ_LLM_MODEL)
 
 # Sidebar hidden prefixes
 SIDE_PANEL_HIDDEN = os.getenv("SIDE_PANEL_HIDDEN", "").lower().split(",")
@@ -2647,10 +2718,10 @@ def _bug_feedback_mode(quiz: Optional[Dict[str, Any]], settings: Dict[str, Any])
     return "reveal" if settings["bug_reveal"] else ""
 
 
-async def _session_bug_settings(session_id: str) -> Tuple[List[Dict[str, Any]], str, Any]:
-    """(bug skills, wrong-pick feedback mode, problem.bug_options: buggy options per suggestion)."""
+async def _session_bug_settings(session_id: str) -> Tuple[List[Dict[str, Any]], str, Any, bool]:
+    """(bug skills, wrong-pick feedback mode, problem.bug_options, bug_uniform)."""
     ctx = await _session_ai_context(session_id)
-    return ctx["skills"], ctx["feedback"], ctx["bug_options"]
+    return ctx["skills"], ctx["feedback"], ctx["bug_options"], bool(ctx.get("bug_uniform"))
 
 
 async def _session_bug_skills(session_id: str) -> List[Dict[str, Any]]:
@@ -2669,6 +2740,11 @@ async def _session_selected_bug_skills(session_id: str) -> List[Dict[str, Any]]:
 async def _session_bug_count(session_id: str, skills: List[Dict[str, Any]]) -> int:
     """How many buggy options to offer with each correct one (each a different selected bug type)."""
     return bug_injection.bug_option_count((await _session_bug_settings(session_id))[2], skills)
+
+
+async def _session_bug_uniform(session_id: str) -> bool:
+    """True when the problem's Uniform toggle is on (shuffle-deck bug types)."""
+    return (await _session_bug_settings(session_id))[3]
 
 
 # problem.bug_options 0 ("1 option, randomly correct or buggy"): the student sees a single suggestion,
@@ -2763,8 +2839,11 @@ async def _load_ai_context(sl: Optional[SessionLog], idx: int) -> Dict[str, Any]
     if not plain:
         with_images = plain = _problem_field_text(sl.problem_description) if sl else ""
         images = []
+    llm_model = llm_client.clean_llm_model((quiz or {}).get("llm_model"))
     return {"skills": skills, "feedback": _bug_feedback_mode(quiz, settings),
             "bug_options": settings["bug_options"],
+            "bug_uniform": settings["bug_uniform"],
+            "llm_model": llm_model,
             "problem": plain, "problem_with_images": with_images, "images": images}
 
 
@@ -2916,6 +2995,10 @@ _BUG_HISTORY_LEN = 20
 _BUG_HISTORY_KEY_PREFIX = "autosuggest:bughistory:"
 _local_bug_history: Dict[str, List[str]] = {}
 
+# Uniform (shuffle-deck) remaining skill ids for a session. Reshuffled when empty.
+_BUG_DECK_KEY_PREFIX = "autosuggest:bugdeck:"
+_local_bug_deck: Dict[str, List[str]] = {}
+
 
 def _bug_history(session_id: str) -> List[str]:
     r = active_sessions.redis
@@ -2946,6 +3029,36 @@ def _bug_history_add(session_id: str, bug_types: List[str]) -> None:
     if len(_local_bug_history) > 5000:
         _local_bug_history.clear()
     _local_bug_history[session_id] = (list(bug_types) + _local_bug_history.get(session_id, []))[:_BUG_HISTORY_LEN]
+
+
+def _bug_deck_get(session_id: str) -> List[str]:
+    r = active_sessions.redis
+    if r is not None:
+        try:
+            raw = r.lrange(f"{_BUG_DECK_KEY_PREFIX}{session_id}", 0, -1)
+            return [x.decode() if isinstance(x, bytes) else str(x) for x in raw]
+        except Exception as e:
+            logger.warning("Bug deck read failed: %s", e)
+    return list(_local_bug_deck.get(session_id, []))
+
+
+def _bug_deck_set(session_id: str, deck: List[str]) -> None:
+    r = active_sessions.redis
+    if r is not None:
+        try:
+            key = f"{_BUG_DECK_KEY_PREFIX}{session_id}"
+            pipe = r.pipeline()
+            pipe.delete(key)
+            if deck:
+                pipe.rpush(key, *deck)
+                pipe.expire(key, _PAIR_TTL_SEC)
+            pipe.execute()
+            return
+        except Exception as e:
+            logger.warning("Bug deck write failed: %s", e)
+    if len(_local_bug_deck) > 5000:
+        _local_bug_deck.clear()
+    _local_bug_deck[session_id] = list(deck)
 
 
 def _pair_add_explanation(session_id: str, pair_id: str, oid: str, classification: Dict[str, Any],
@@ -3099,6 +3212,22 @@ class CompletionRequest(BaseModel):
     suffix: str = ""
 
 
+async def _session_llm_model(session_id: str) -> str:
+    """The quiz's selected generation model (OpenAI or OpenRouter id)."""
+    ctx = await _session_ai_context(session_id)
+    return llm_client.clean_llm_model(ctx.get("llm_model"))
+
+
+@contextmanager
+def _use_llm_model(model: str):
+    """Bind the quiz model for this task (and asyncio.create_task children)."""
+    token = llm_client.set_active_model(model)
+    try:
+        yield llm_client.get_async_client(model)
+    finally:
+        llm_client.reset_active_model(token)
+
+
 async def _completion_args(request: CompletionRequest) -> Dict[str, Any]:
     """ai_assist.inline_completion's arguments for this session and cursor, without the bug skills."""
     condition = await _session_condition(request.session_id)
@@ -3106,6 +3235,8 @@ async def _completion_args(request: CompletionRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=403, detail="Inline suggestions are not enabled for this session")
     skills = await _session_selected_bug_skills(request.session_id)
     problem, images = await _session_problem_context(request.session_id)
+    uniform = await _session_bug_uniform(request.session_id) if skills else False
+    sid = request.session_id
     return dict(
         language=request.language,
         filename=request.filename,
@@ -3118,6 +3249,10 @@ async def _completion_args(request: CompletionRequest) -> Dict[str, Any]:
         problem=problem,
         problem_images=images,
         cache_key=request.session_id,
+        llm_model=await _session_llm_model(request.session_id),
+        bug_uniform=uniform,
+        deck_get=(lambda: _bug_deck_get(sid)) if uniform else None,
+        deck_set=(lambda d: _bug_deck_set(sid, d)) if uniform else None,
     )
 
 
@@ -3128,26 +3263,37 @@ async def inline_complete_warm(request: CompletionRequest):
     if not request.prefix.strip():
         return {"status": "ok"}
     args = await _completion_args(request)
-    _spawn(ai_assist.warm_up(async_client, bug_skills=args["session_skills"], **args))
+    model = args.pop("llm_model")
+
+    async def _warm():
+        with _use_llm_model(model) as aclient:
+            await ai_assist.warm_up(aclient, bug_skills=args["session_skills"], **args)
+
+    _spawn(_warm())
     return {"status": "ok"}
 
 
 # When a spot first got "pending" (session, editor text) -> monotonic time, so the time to generate a
 # suggestion counts from the student's first request there, not from the editor's retry.
 _pending_since: Dict[Tuple[str, str], float] = {}
+# One in-flight generation per cursor spot so pending retries wait on the same work instead of
+# stacking duplicate OpenRouter calls.
+_completion_inflight: Dict[Tuple[str, str], "asyncio.Task[Any]"] = {}
 
 
 @app.post("/complete")
 async def inline_complete(request: CompletionRequest, http_request: Request):
     """Copilot-style ghost-text completion, one line (condition 2) or a multi-line block (condition 4),
     offered as options in random order: one correct, and problem.bug_options buggy ones, each with a
-    single bug of a different bug type. Replies within SUGGESTION_WAIT_SEC: {"pending": true} when the
-    suggestion is still being written."""
+    single bug of a different bug type. Bug planting tries once and retries once; if it still fails,
+    the correct suggestion is shown alone. Replies within SUGGESTION_WAIT_SEC: {"pending": true} only
+    while generation is still in flight (not when buggy options are missing)."""
     if not request.prefix.strip():
         return {"id": "", "options": []}
     started = time.monotonic()
     spot = (request.session_id, hashlib.sha1((request.prefix[-3000:] + "\0" + request.suffix[:500]).encode("utf-8", "replace")).hexdigest())
     args = await _completion_args(request)
+    model = args.pop("llm_model")
     skills = args["session_skills"]
     bug_count = args["bug_count"]
     max_lines = args["max_lines"]
@@ -3157,18 +3303,37 @@ async def inline_complete(request: CompletionRequest, http_request: Request):
         skills = _single_option_skills(skills)
     # Write ahead for a student who keeps a buggy pick, unless the pick is corrected for them.
     branch = await _session_bug_feedback(request.session_id) != "correct"
+    wait_sec = (
+        SUGGESTION_WAIT_OPENROUTER_SEC
+        if llm_client.is_openrouter_model(model)
+        else SUGGESTION_WAIT_SEC
+    )
     async with _completion_semaphore:
         # The editor cancels the request when the student types on; skip the OpenAI call then.
         if await http_request.is_disconnected():
             return {"id": "", "options": []}
         # Shielded: past the wait the suggestion is still finished (and cached) in the background.
-        task = asyncio.create_task(asyncio.wait_for(ai_assist.inline_completion(
-            async_client, bug_skills=skills, branch_prefetch=branch, **args), COMPLETION_TIMEOUT_SEC))
-        _background_tasks.add(task)
-        task.add_done_callback(_background_tasks.discard)
-        task.add_done_callback(lambda t: t.cancelled() or t.exception())  # retrieved: no "never retrieved" log
+        task = _completion_inflight.get(spot)
+        if task is None or task.done():
+            async def _run_completion():
+                with _use_llm_model(model) as aclient:
+                    return await ai_assist.inline_completion(
+                        aclient, bug_skills=skills, branch_prefetch=branch, **args)
+
+            task = asyncio.create_task(asyncio.wait_for(_run_completion(), COMPLETION_TIMEOUT_SEC))
+            _completion_inflight[spot] = task
+            _background_tasks.add(task)
+
+            def _clear(t, key=spot):
+                _background_tasks.discard(t)
+                if _completion_inflight.get(key) is t:
+                    _completion_inflight.pop(key, None)
+                # retrieved: no "never retrieved" log
+                t.cancelled() or t.exception()
+
+            task.add_done_callback(_clear)
         try:
-            pair = await asyncio.wait_for(asyncio.shield(task), SUGGESTION_WAIT_SEC)
+            pair = await asyncio.wait_for(asyncio.shield(task), wait_sec)
         except asyncio.TimeoutError:
             if len(_pending_since) > 5000:
                 _pending_since.clear()
@@ -3180,23 +3345,29 @@ async def inline_complete(request: CompletionRequest, http_request: Request):
     if not pair["correct"]:
         return {"id": "", "options": []}
     bugs = pair["bugs"]
-    if skills and not single and len(bugs) < bug_count:
-        # Shown only with every buggy option the problem asks for; the editor asks again (written anew).
-        logger.info("Suggestion held back: %d of %d buggy options (%s)", len(bugs), bug_count, pair.get("no_bug", ""))
-        _pending_since.setdefault(spot, started)
-        return {"id": "", "options": [], "pending": True}
+    # Plant already did first try + one retry. Never hold forever: show correct (+ any bugs planted).
+    if skills and len(bugs) < bug_count:
+        logger.info(
+            "Suggestion fallback to correct%s: %d of %d buggy options (%s)",
+            " + partial" if bugs else "",
+            len(bugs),
+            bug_count,
+            pair.get("no_bug", "") or ",".join((pair.get("choice") or {}).get("dropped") or []) or "short",
+        )
     generation_ms = int((time.monotonic() - _pending_since.pop(spot, started)) * 1000)
     pair_id = uuid.uuid4().hex[:12]
     options = _shuffled_options({"text": pair["correct"]}, [{"text": b["buggy"]} for b in bugs])
     # A single-option suggestion that got a buggy version shows only that one.
     shown = [o for o in options if o["variant"] == "buggy"][:1] if single and bugs else options
-    if single and not bugs:
-        # Recorded too, so the single-option suggestions shown correct can be told from the buggy ones.
+    if not bugs:
+        # Correct-only ghost text: single-option chose correct, or plant failed after retries.
         _spawn(_record_bug(
             request.session_id, "completion", pair_id,
             {"language": request.language, "filename": request.filename, "correct": pair["correct"],
-             "max_lines": max_lines, "single_option": True, "no_bug": pair.get("no_bug", "") or "chose_correct",
-             "generation_ms": generation_ms,
+             "max_lines": max_lines, "single_option": single,
+             "no_bug": pair.get("no_bug", "") or ("chose_correct" if single else "fallback_correct"),
+             "bug_options_requested": bug_count, "generation_ms": generation_ms, "llm_model": model,
+             "bug_choice": pair.get("choice") or {},
              "options": [{"oid": o["oid"], "variant": o["variant"], "offered": True} for o in options]},
             []))
     if bugs:
@@ -3211,27 +3382,28 @@ async def inline_complete(request: CompletionRequest, http_request: Request):
                     "buggy_oid": buggy_oids[i], "correct_oid": correct_oid,
                     "correct": pair["correct"], "buggy": b["buggy"], "bug_type": b["bug_skill"]["name"],
                 })
-        _spawn(_record_bug(
-            request.session_id, "completion", pair_id,
-            {"language": request.language, "filename": request.filename, "prefix": prefix, "suffix": suffix,
-             "correct": pair["correct"], "max_lines": max_lines, "bug_options_requested": bug_count,
-             "generation_ms": generation_ms,
-             "single_option": single, "bug_choice": pair.get("choice") or {},
-             # The look-ahead the correct suggestion was cut from, and whether it was reused.
-             "program_insert": pair.get("program_insert", ""), "solution_check": pair.get("check", {}),
-             "options": [{"oid": o["oid"], "variant": o["variant"], "offered": o in shown} for o in options]},
-            [({"oid": buggy_oids[i], "buggy": b["buggy"], "explanation": b.get("bug_plan", ""),
-               **_requested_bug(b["bug_skill"])},
-              bug_injection.classify_pair(
-                  async_client, language=request.language, filename=request.filename,
-                  context=f"{prefix}<CURSOR>{suffix}", correct=pair["correct"], buggy=b["buggy"], skills=skills,
-              ),
-              bug_injection.write_lesson(
-                  async_client, language=request.language, filename=request.filename,
-                  context=f"{prefix}<CURSOR>{suffix}", correct=pair["correct"], buggy=b["buggy"],
-                  bug_name=b["bug_skill"]["name"], bug_plan=b.get("bug_plan", ""), problem=problem,
-              )) for i, b in enumerate(bugs)],
-        ))
+        with _use_llm_model(model) as aclient:
+            _spawn(_record_bug(
+                request.session_id, "completion", pair_id,
+                {"language": request.language, "filename": request.filename, "prefix": prefix, "suffix": suffix,
+                 "correct": pair["correct"], "max_lines": max_lines, "bug_options_requested": bug_count,
+                 "generation_ms": generation_ms, "llm_model": model,
+                 "single_option": single, "bug_choice": pair.get("choice") or {},
+                 # The look-ahead the correct suggestion was cut from, and whether it was reused.
+                 "program_insert": pair.get("program_insert", ""), "solution_check": pair.get("check", {}),
+                 "options": [{"oid": o["oid"], "variant": o["variant"], "offered": o in shown} for o in options]},
+                [({"oid": buggy_oids[i], "buggy": b["buggy"], "explanation": b.get("bug_plan", ""),
+                   **_requested_bug(b["bug_skill"])},
+                  bug_injection.classify_pair(
+                      aclient, language=request.language, filename=request.filename,
+                      context=f"{prefix}<CURSOR>{suffix}", correct=pair["correct"], buggy=b["buggy"], skills=skills,
+                  ),
+                  bug_injection.write_lesson(
+                      aclient, language=request.language, filename=request.filename,
+                      context=f"{prefix}<CURSOR>{suffix}", correct=pair["correct"], buggy=b["buggy"],
+                      bug_name=b["bug_skill"]["name"], bug_plan=b.get("bug_plan", ""), problem=problem,
+                  )) for i, b in enumerate(bugs)],
+            ))
     return {"id": pair_id, "options": [{"oid": o["oid"], "text": o["text"]} for o in shown],
             "no_bug": pair.get("no_bug", "")}
 
@@ -3261,7 +3433,8 @@ def _record_files(files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 async def _agent_versions(turn: "ai_assist.AgentTurn", request: AgentChatRequest,
-                          started: Optional[float] = None) -> Optional[Dict[str, Any]]:
+                          started: Optional[float] = None,
+                          model: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """After an agent turn that changed files: the "versions" event offering the correct changes and
     problem.bug_options copies with one bug each (of different bug types), in random order, each with
     its description (the agent's summary; a buggy one's may contain a wrong claim too), and the
@@ -3277,15 +3450,22 @@ async def _agent_versions(turn: "ai_assist.AgentTurn", request: AgentChatRequest
     if single:
         skills = _single_option_skills(skills)
     agent_problem = await _session_problem(request.session_id)
+    model = llm_client.clean_llm_model(model or await _session_llm_model(request.session_id))
     bugs: List[Dict[str, Any]] = []
     if skills and files_after and bug_count:
         try:
-            bugs = await bug_injection.make_buggy_agent_versions(
-                async_client, language=request.language, message=request.message,
-                diffs={c["filename"]: c["diff"] for c in changes}, files_after=files_after, skills=skills,
-                count=bug_count, problem=agent_problem, description=turn.final_text,
-                recent=await asyncio.to_thread(_bug_history, request.session_id),
-            )
+            uniform = await _session_bug_uniform(request.session_id)
+            deck = _bug_deck_get(request.session_id) if uniform else None
+            with _use_llm_model(model) as aclient:
+                bugs = await bug_injection.make_buggy_agent_versions(
+                    aclient, language=request.language, message=request.message,
+                    diffs={c["filename"]: c["diff"] for c in changes}, files_after=files_after, skills=skills,
+                    count=bug_count, problem=agent_problem, description=turn.final_text,
+                    recent=await asyncio.to_thread(_bug_history, request.session_id),
+                    uniform=uniform, deck=deck,
+                )
+            if uniform and deck is not None:
+                _bug_deck_set(request.session_id, deck)
         except Exception as e:
             logger.warning("Buggy agent versions failed: %s", e)
     options = _shuffled_options(
@@ -3326,26 +3506,27 @@ async def _agent_versions(turn: "ai_assist.AgentTurn", request: AgentChatRequest
                     # The correct version is not among the options the student saw: send its files with the fix.
                     **({"correct_files": correct_files} if single else {}),
                 })
-        _spawn(_record_bug(
-            request.session_id, "agent", pair_id,
-            {"language": request.language, "mode": turn.mode, "message": turn.message[:3000],
-             "files_changed": [c["filename"] for c in changes], "description_correct": turn.final_text,
-             "description_offered": bugs[0]["description_offered"], "bug_options_requested": bug_count,
-             "single_option": single, "bug_choice": bugs[0].get("choice") or {},
-             "options": turn.record["pair_options"], "solution_check": turn.record.get("solution_check", {}), **study},
-            [({"oid": buggy_oids[i], "filename": b["filename"], "correct": b["old"], "buggy": b["new"],
-               "explanation": b["explanation"], "description_buggy": b["description"],
-               "description_error": b["description_error"], **_requested_bug(b["bug_skill"])},
-              bug_injection.classify_pair(
-                  async_client, language=request.language, filename=b["filename"],
-                  context=files_after[b["filename"]], correct=b["old"], buggy=b["new"], skills=skills,
-              ),
-              bug_injection.write_lesson(
-                  async_client, language=request.language, filename=b["filename"],
-                  context=files_after[b["filename"]], correct=b["old"], buggy=b["new"],
-                  bug_name=b["bug_skill"]["name"], bug_plan=b["explanation"], problem=agent_problem,
-              )) for i, b in enumerate(bugs)],
-        ))
+        with _use_llm_model(model) as aclient:
+            _spawn(_record_bug(
+                request.session_id, "agent", pair_id,
+                {"language": request.language, "mode": turn.mode, "message": turn.message[:3000],
+                 "files_changed": [c["filename"] for c in changes], "description_correct": turn.final_text,
+                 "description_offered": bugs[0]["description_offered"], "bug_options_requested": bug_count,
+                 "single_option": single, "bug_choice": bugs[0].get("choice") or {}, "llm_model": model,
+                 "options": turn.record["pair_options"], "solution_check": turn.record.get("solution_check", {}), **study},
+                [({"oid": buggy_oids[i], "filename": b["filename"], "correct": b["old"], "buggy": b["new"],
+                   "explanation": b["explanation"], "description_buggy": b["description"],
+                   "description_error": b["description_error"], **_requested_bug(b["bug_skill"])},
+                  bug_injection.classify_pair(
+                      aclient, language=request.language, filename=b["filename"],
+                      context=files_after[b["filename"]], correct=b["old"], buggy=b["new"], skills=skills,
+                  ),
+                  bug_injection.write_lesson(
+                      aclient, language=request.language, filename=b["filename"],
+                      context=files_after[b["filename"]], correct=b["old"], buggy=b["new"],
+                      bug_name=b["bug_skill"]["name"], bug_plan=b["explanation"], problem=agent_problem,
+                  )) for i, b in enumerate(bugs)],
+            ))
     # "single": the one version shown may be the correct or a buggy one, so the browser reports
     # applying it (and gets the fix if it was buggy). Sent for both, so it does not give that away.
     return {"type": "versions", "pair_id": pair_id, "single": single,
@@ -3365,36 +3546,39 @@ async def agent_chat(request: AgentChatRequest):
 
     started = time.monotonic()
     problem, images = await _session_problem_context(request.session_id)
-    turn = ai_assist.AgentTurn(
-        async_client,
-        mode=request.mode,
-        message=request.message,
-        history=request.history,
-        files=[{"filename": f.filename, "content": f.content} for f in request.files],
-        active_file=request.active_file or "",
-        language=request.language,
-        skills=[s.model_dump() for s in request.skills],
-        terminal_output=request.terminal_output,
-        run_code=lambda code, files, language, stdin: execute_code_safely(
-            code, language, files=files, key=f"{request.session_id}:agent", stdin=stdin
-        ),
-        problem=problem,
-        problem_images=images,
-        # Closing check on the problem's test cases; own runner keys, so it never stops the agent's runs.
-        run_check=lambda slot, code, language, stdin, files=None: execute_code_safely(
-            code, language, files=files, key=f"{request.session_id}:agentcheck{slot}", stdin=stdin),
-    )
+    model = await _session_llm_model(request.session_id)
+    with _use_llm_model(model) as aclient:
+        turn = ai_assist.AgentTurn(
+            aclient,
+            mode=request.mode,
+            message=request.message,
+            history=request.history,
+            files=[{"filename": f.filename, "content": f.content} for f in request.files],
+            active_file=request.active_file or "",
+            language=request.language,
+            skills=[s.model_dump() for s in request.skills],
+            terminal_output=request.terminal_output,
+            run_code=lambda code, files, language, stdin: execute_code_safely(
+                code, language, files=files, key=f"{request.session_id}:agent", stdin=stdin
+            ),
+            problem=problem,
+            problem_images=images,
+            # Closing check on the problem's test cases; own runner keys, so it never stops the agent's runs.
+            run_check=lambda slot, code, language, stdin, files=None: execute_code_safely(
+                code, language, files=files, key=f"{request.session_id}:agentcheck{slot}", stdin=stdin),
+        )
 
     async def events():
         try:
-            async for ev in turn.run():
-                yield f"data: {json.dumps(ev)}\n\n"
+            with _use_llm_model(model) as _aclient:
+                async for ev in turn.run():
+                    yield f"data: {json.dumps(ev)}\n\n"
             if turn.final_text and not turn.record.get("files_changed"):
                 # Held back in case it became a version's description, but the edits cancelled out.
                 yield f"data: {json.dumps({'type': 'text', 'delta': turn.final_text})}\n\n"
             if turn.record.get("files_changed"):
                 yield f"data: {json.dumps({'type': 'versions_pending'})}\n\n"
-                versions = await _agent_versions(turn, request, started)
+                versions = await _agent_versions(turn, request, started, model=model)
                 if versions:
                     yield f"data: {json.dumps(versions)}\n\n"
         except Exception as e:
@@ -3775,10 +3959,13 @@ async def health_check():
         "code_runs_local": sandbox.stats if not RUNNER_URL else None,
         "active_sessions": len(active_sessions),
         "environment": {
-            "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
+            "openai_configured": llm_client.openai_configured(),
+            "openrouter_configured": llm_client.openrouter_configured(),
+            "groq_configured": llm_client.groq_configured(),
             "firebase_configured": bool(firebase_db),
             "max_code_length": os.getenv("MAX_CODE_LENGTH", "10000"),
-            "max_submission_length": os.getenv("MAX_SUBMISSION_LENGTH", "15000")
+            "max_submission_length": os.getenv("MAX_SUBMISSION_LENGTH", "15000"),
+            "default_quiz_llm_model": llm_client.DEFAULT_QUIZ_LLM_MODEL,
         }
     }
 
@@ -3791,6 +3978,7 @@ async def get_stats():
         "firebase_status": firebase_status,
         "active_sessions": len(active_sessions),
         "openai_model": ai_assist.COMPLETION_MODEL,
+        "available_llm_models": llm_client.AVAILABLE_MODELS,
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "supported_languages": [
             "javascript", "python", "java", "cpp", "csharp", 
@@ -6241,18 +6429,8 @@ def build_quiz_join_response(
     problems = quiz_data.get("problems", []) or []
     prob = problems[problem_idx] if problem_idx < len(problems) else {}
     problem_description = prob.get("problem_statement", "")
-    quiz_starter = prob.get("starter_code", {})
-    lang_starter = quiz_starter.get(programming_language) if quiz_starter else None
-
-    starter_files = None
-    starter_code = None
-    if isinstance(lang_starter, list) and lang_starter:
-        starter_files = lang_starter
-        starter_code = lang_starter[0].get("content", "") if lang_starter else ""
-    elif isinstance(lang_starter, str) and lang_starter:
-        starter_code = lang_starter
-    else:
-        starter_code = get_starter_code(quiz_data.get("title", ""), programming_language)
+    starter_code, starter_files = resolve_problem_starter(
+        prob, programming_language, fallback_prefix=quiz_data.get("title", ""))
 
     has_pre_cfg = prob.get("pre_survey_enabled", False) and bool(prob.get("pre_survey"))
     has_post_cfg = prob.get("post_survey_enabled", False) and bool(prob.get("post_survey"))
@@ -6540,17 +6718,7 @@ async def quiz_next_problem(request: Request):
         problem = problems[idx]
         completed_problem = problems[idx - 1] if idx > 0 else {}
         completed_problem_title = (completed_problem.get("title") or "").strip() or f"Problem {idx}"
-        quiz_starter = problem.get("starter_code", {})
-        lang_starter = quiz_starter.get(programming_language) if quiz_starter else None
-        starter_files = None
-        starter_code = None
-        if isinstance(lang_starter, list) and lang_starter:
-            starter_files = lang_starter
-            starter_code = lang_starter[0].get("content", "") if lang_starter else ""
-        elif isinstance(lang_starter, str) and lang_starter:
-            starter_code = lang_starter
-        else:
-            starter_code = ""
+        starter_code, starter_files = resolve_problem_starter(problem, programming_language)
         return {
             "status": "next",
             "problem_index": idx,
@@ -6649,19 +6817,7 @@ async def quiz_next_problem(request: Request):
     completed_problem = problems[idx - 1] if idx > 0 else {}
     completed_problem_title = (completed_problem.get("title") or "").strip() or f"Problem {idx}"
 
-    # Get starter code for the next problem
-    quiz_starter = problem.get("starter_code", {})
-    lang_starter = quiz_starter.get(programming_language) if quiz_starter else None
-
-    starter_files = None
-    starter_code = None
-    if isinstance(lang_starter, list) and lang_starter:
-        starter_files = lang_starter
-        starter_code = lang_starter[0].get("content", "") if lang_starter else ""
-    elif isinstance(lang_starter, str) and lang_starter:
-        starter_code = lang_starter
-    else:
-        starter_code = ""
+    starter_code, starter_files = resolve_problem_starter(problem, programming_language)
 
     # Update problem description in session if condition 1
     if session_log.condition == 1:

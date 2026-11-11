@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
   <title>Instructor Dashboard</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -73,7 +76,12 @@
     }
 
     .quiz-card {
-      background: var(--panel); border: 1px solid var(--border);
+      --card-accent: var(--primary);
+      --card-accent-soft: rgba(59,130,246,0.14);
+      background:
+        linear-gradient(165deg, var(--card-accent-soft), transparent 42%),
+        var(--panel);
+      border: 1px solid color-mix(in srgb, var(--card-accent) 35%, var(--border));
       border-radius: var(--radius); padding: 24px;
       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       display: flex; flex-direction: column;
@@ -81,15 +89,22 @@
       overflow: hidden;
     }
     .quiz-card::before {
-      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
-      background: transparent; transition: background 0.3s;
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px;
+      background: var(--card-accent);
     }
-    .quiz-card:hover { 
-      transform: translateY(-4px); 
-      box-shadow: 0 12px 24px -8px rgba(0,0,0,0.5); 
-      border-color: var(--muted);
+    .quiz-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 24px -8px rgba(0,0,0,0.5);
+      border-color: color-mix(in srgb, var(--card-accent) 55%, var(--border));
     }
-    .quiz-card:hover::before { background: var(--primary); }
+    .quiz-card .access-code-box code { color: var(--card-accent); }
+    .quiz-card.mine .owner-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600;
+      background: color-mix(in srgb, var(--card-accent) 18%, transparent);
+      color: var(--card-accent);
+      border: 1px solid color-mix(in srgb, var(--card-accent) 40%, transparent);
+    }
 
     .quiz-card h3 { font-size: 1.15rem; font-weight: 600; margin-bottom: 8px; letter-spacing: -0.01em; color: white;}
     .quiz-card .desc { color: var(--muted); font-size: 0.9rem; margin-bottom: 20px; line-height: 1.5; flex-grow: 1; }
@@ -197,7 +212,20 @@
     {% if quizzes %}
     <div class="quiz-grid">
       {% for q in quizzes %}
-      <div class="quiz-card" data-id="{{ q.id }}">
+      {% set accent_palette = [
+        ['#3b82f6', 'rgba(59,130,246,0.16)'],
+        ['#10b981', 'rgba(16,185,129,0.16)'],
+        ['#f59e0b', 'rgba(245,158,11,0.16)'],
+        ['#a855f7', 'rgba(168,85,247,0.16)'],
+        ['#ec4899', 'rgba(236,72,153,0.16)'],
+        ['#14b8a6', 'rgba(20,184,166,0.16)'],
+        ['#f97316', 'rgba(249,115,22,0.16)'],
+        ['#6366f1', 'rgba(99,102,241,0.16)']
+      ] %}
+      {% set accent = accent_palette[(q.id|length + loop.index0) % (accent_palette|length)] %}
+      {% set is_mine = (q.created_by or '') == instructor_email %}
+      <div class="quiz-card{% if is_mine %} mine{% endif %}" data-id="{{ q.id }}"
+           style="--card-accent: {{ accent[0] }}; --card-accent-soft: {{ accent[1] }};">
         <h3>{{ q.teaser or (q.problems[0].title if q.problems and q.problems|length > 0 else '') or q.title or 'Quiz' }}</h3>
         <div class="desc">
           {% if q.problems and q.problems|length > 0 %}
@@ -215,6 +243,9 @@
         </div>
 
         <div class="meta">
+          {% if is_mine %}
+            <span class="owner-pill">Created by you</span>
+          {% endif %}
           {% if q.published %}
             <span class="badge published">Published</span>
           {% else %}

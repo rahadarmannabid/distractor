@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
   <title>Quiz analytics{% if quiz_teaser %} — {{ quiz_teaser[:48] }}{% endif %}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -603,7 +606,6 @@
   <div class="navbar">
     <div>
       <h1>Quiz analytics</h1>
-      {% if quiz_teaser %}<p class="sub">{{ quiz_teaser }}</p>{% endif %}
     </div>
     <div class="nav-actions">
       <span style="font-size:0.75rem;color:var(--muted);">{{ instructor_email }}</span>
@@ -667,7 +669,7 @@
         <div class="chart-card">
           <div class="chart-card-head">
             <div>
-              <h3>Time on task (seconds)</h3>
+              <h3>Time on task (minutes)</h3>
               <p>Total + P1… — one boxplot per condition when multiple conditions exist.</p>
             </div>
             <div class="chart-overlay-stat" id="overlay-time"></div>
@@ -722,7 +724,7 @@
       <div class="chart-card" style="margin-bottom:14px;">
         <div class="chart-card-head">
           <div>
-            <h3>Suggestion generation time (seconds)</h3>
+            <h3>Suggestion generation time (minutes)</h3>
             <p>Time from the student's request until a suggestion's options (correct and buggy) were ready: ghost-text suggestions in C2 / C4, agent replies in C3. Total + P1…; one boxplot per condition. A rising median or p90 means students wait too long.</p>
           </div>
           <div class="chart-overlay-stat" id="overlay-gen"></div>
@@ -831,12 +833,12 @@
                   <th class="col-user">User</th>
                   <th class="col-status">Status</th>
                   <th class="col-condition">Condition</th>
-                  <th class="col-time">Time</th>
+                  <th class="col-time">Time (min)</th>
                   <th class="col-per-problem">Per problem</th>
                   <th>AI gen</th>
                   <th>Accept</th>
                   <th>Reject</th>
-                  <th>Avg sug</th>
+                  <th>Avg sug (min)</th>
                   <th>Runs</th>
                   <th>Tabs</th>
                   <th>Paste</th>
@@ -947,6 +949,27 @@
       return String(v);
     }
 
+    /** Seconds → minutes string with exactly 2 decimals, e.g. "102.92". */
+    function fmtMin(secs) {
+      if (secs === null || secs === undefined || Number.isNaN(Number(secs))) return '—';
+      return (Number(secs) / 60).toFixed(2);
+    }
+
+    function fmtMinLabel(secs) {
+      var m = fmtMin(secs);
+      return m === '—' ? m : m + ' min';
+    }
+
+    function fmtMinVal(mins) {
+      if (mins === null || mins === undefined || Number.isNaN(Number(mins))) return '—';
+      return Number(mins).toFixed(2);
+    }
+
+    function fmtMinValLabel(mins) {
+      var m = fmtMinVal(mins);
+      return m === '—' ? m : m + ' min';
+    }
+
     function escHtml(s) {
       if (s === null || s === undefined) return '';
       return String(s)
@@ -1011,6 +1034,28 @@
         }
       }
       return m;
+    }
+
+    /** Scale boxplot five-number rows (e.g. seconds → minutes for display only). */
+    function scaleBoxplotSeriesList(seriesList, factor) {
+      return (seriesList || []).map(function(ser) {
+        var copy = Object.assign({}, ser);
+        copy.data = ((ser && ser.data) || []).map(function(row) {
+          if (!row || !row.length) return row;
+          return row.map(function(v) {
+            var n = Number(v);
+            return isNaN(n) ? v : n * factor;
+          });
+        });
+        return copy;
+      });
+    }
+
+    function secsToMinsArr(arr) {
+      return (arr || []).map(function(v) {
+        var n = Number(v);
+        return isNaN(n) ? v : n / 60;
+      });
     }
 
     function baseOption() {
@@ -1276,7 +1321,7 @@
           '<div class="kpi"><div class="label">Avg. compilation</div><div class="value">' + fmtNum(avgCompilation) + '</div><div class="hint">Mean code runs per session</div></div>',
           '<div class="kpi success"><div class="label">Completed</div><div class="value">' + (data.completed_assignments || 0) + '</div><div class="hint">Final submit</div></div>',
           '<div class="kpi' + ((data.incomplete_sessions || 0) > 0 ? ' warn' : '') + '"><div class="label">Incomplete</div><div class="value">' + (data.incomplete_sessions || 0) + '</div><div class="hint">Left without submitting</div></div>',
-          '<div class="kpi"><div class="label">Med. session time</div><div class="value">' + fmtNum(summary.median_session_time_seconds) + '</div><div class="hint">sec · completed (focus if logged)</div></div>',
+          '<div class="kpi"><div class="label">Med. session time</div><div class="value">' + fmtMin(summary.median_session_time_seconds) + '</div><div class="hint">min · completed (focus if logged)</div></div>',
           '<div class="kpi warn"><div class="label">Med. AI gen</div><div class="value">' + fmtNum(summary.median_ai_generations) + '</div><div class="hint">per session</div></div>',
           '<div class="kpi"><div class="label">Accepted</div><div class="value">' + totalAccepts + '</div><div class="hint">Σ all · med ' + fmtNum(medAccept) + '/session</div></div>',
           '<div class="kpi"><div class="label">Rejected</div><div class="value">' + totalRejects + '</div><div class="hint">Σ all · med ' + fmtNum(medReject) + '/session</div></div>',
@@ -1435,10 +1480,14 @@
         if (useCondMulti()) {
           var timeMedLines = condOrder.map(function(c) {
             var s = sbc[c] || {};
-            return condLab(c) + ' med: ' + fmtNum(s.median_session_time_seconds != null ? s.median_session_time_seconds : 0) + ' s';
+            var medSec = s.median_session_time_seconds != null ? s.median_session_time_seconds : 0;
+            return condLab(c) + ' med: ' + fmtMinLabel(medSec);
           });
           document.getElementById('overlay-time').innerHTML = timeMedLines.join('\n') + '\n(focus if logged; box: min–Q1–med–Q3–max)';
-          var timeSeriesList = boxPlotSeriesFromBbc('total_time_seconds', 'time_per_problem_seconds');
+          var timeSeriesList = scaleBoxplotSeriesList(
+            boxPlotSeriesFromBbc('total_time_seconds', 'time_per_problem_seconds'),
+            1 / 60
+          );
           var timeYMax = maxFromBoxplotSeriesList(timeSeriesList);
           initChart('chart-time-combined', Object.assign(baseOption(), {
             grid: { left: 52, right: 18, top: chartTopBox, bottom: gridBottomBox },
@@ -1452,13 +1501,13 @@
             },
             yAxis: {
               type: 'value',
-              name: 'Seconds',
+              name: 'Minutes',
               nameTextStyle: { color: '#64748b', fontSize: 10 },
               min: 0,
               max: timeYMax > 0 ? undefined : 1,
               scale: timeYMax > 0,
               splitLine: { lineStyle: { color: THEME.grid } },
-              axisLabel: { color: THEME.text, fontSize: 10, formatter: function(v) { return Number(v).toFixed(v >= 100 ? 0 : 1); } },
+              axisLabel: { color: THEME.text, fontSize: 10, formatter: function(v) { return Number(v).toFixed(2); } },
             },
             series: timeSeriesList,
             tooltip: {
@@ -1466,17 +1515,17 @@
               formatter: function(p) {
                 var d = p.data;
                 if (!d || d.length < 5) return '';
-                function s(x) { return fmtNum(x) + ' s'; }
+                function s(x) { return fmtMinValLabel(x); }
                 var prefix = (p.seriesName ? p.seriesName + ' · ' : '') + p.name + '<br/>';
                 return prefix + 'min: ' + s(d[0]) + ' · Q1: ' + s(d[1]) + '<br/>median: <strong>' + s(d[2]) + '</strong> · Q3: ' + s(d[3]) + '<br/>max: ' + s(d[4]);
               },
             },
           }));
         } else {
-          var timeBox = [boxRow(tt)].concat((tpm || []).map(function(col) { return boxRow(col); }));
+          var timeBox = [boxRow(secsToMinsArr(tt))].concat((tpm || []).map(function(col) { return boxRow(secsToMinsArr(col)); }));
           var medT = median(tt);
           var timeSingleMax = maxFromBoxplotSeriesList([{ data: timeBox }]);
-          document.getElementById('overlay-time').innerHTML = 'Median session time: <strong>' + fmtNum(medT) + '</strong> sec\n(focus if logged; box: min–Q1–med–Q3–max)';
+          document.getElementById('overlay-time').innerHTML = 'Median session time: <strong>' + fmtMin(medT) + '</strong> min\n(focus if logged; box: min–Q1–med–Q3–max)';
           initChart('chart-time-combined', Object.assign(baseOption(), {
             grid: { left: 52, right: 18, top: 22, bottom: gridBottomBox },
             xAxis: {
@@ -1488,13 +1537,13 @@
             },
             yAxis: {
               type: 'value',
-              name: 'Seconds',
+              name: 'Minutes',
               nameTextStyle: { color: '#64748b', fontSize: 10 },
               min: 0,
               max: timeSingleMax > 0 ? undefined : 1,
               scale: timeSingleMax > 0,
               splitLine: { lineStyle: { color: THEME.grid } },
-              axisLabel: { color: THEME.text, fontSize: 10, formatter: function(v) { return Number(v).toFixed(v >= 100 ? 0 : 1); } },
+              axisLabel: { color: THEME.text, fontSize: 10, formatter: function(v) { return Number(v).toFixed(2); } },
             },
             series: [{
               type: 'boxplot',
@@ -1510,7 +1559,7 @@
               formatter: function(p) {
                 var d = p.data;
                 if (!d || d.length < 5) return '';
-                function s(x) { return fmtNum(x) + ' s'; }
+                function s(x) { return fmtMinValLabel(x); }
                 return p.name + '<br/>min: ' + s(d[0]) + ' · Q1: ' + s(d[1]) + '<br/>median: <strong>' + s(d[2]) + '</strong> · Q3: ' + s(d[3]) + '<br/>max: ' + s(d[4]);
               },
             },
@@ -1881,9 +1930,9 @@
             var t = gen[c].total || [];
             var r = boxRow(t);
             var p90 = boxRowQuantile(t, 0.9);
-            return condLab(c) + ': n ' + t.length + ' · med ' + fmtNum(r[2]) + ' s · p90 ' + fmtNum(p90) + ' s · max ' + fmtNum(r[4]) + ' s';
+            return condLab(c) + ': n ' + t.length + ' · med ' + fmtMinLabel(r[2]) + ' · p90 ' + fmtMinLabel(p90) + ' · max ' + fmtMinLabel(r[4]);
           }).join('\n');
-          var genSeries = genConds.map(function(c, idx) {
+          var genSeries = scaleBoxplotSeriesList(genConds.map(function(c, idx) {
             var g = gen[c];
             var pp = g.per_problem || {};
             var ci = condOrder.indexOf(c);
@@ -1900,7 +1949,7 @@
               ser.barCategoryGap = '32%';
             }
             return ser;
-          });
+          }), 1 / 60);
           var genYMax = maxFromBoxplotSeriesList(genSeries);
           initChart('chart-gen-time', Object.assign(baseOption(), {
             grid: { left: 44, right: 18, top: 30, bottom: gridBottomBox },
@@ -1914,12 +1963,12 @@
             },
             yAxis: {
               type: 'value',
-              name: 'Seconds',
+              name: 'Minutes',
               min: 0,
               max: genYMax > 0 ? undefined : 1,
               scale: false,
               splitLine: { lineStyle: { color: THEME.grid } },
-              axisLabel: { color: THEME.text, fontSize: 10 },
+              axisLabel: { color: THEME.text, fontSize: 10, formatter: function(v) { return Number(v).toFixed(2); } },
             },
             series: genSeries,
             tooltip: {
@@ -1927,9 +1976,9 @@
               formatter: function(p) {
                 var d = p.data;
                 if (!d || d.length < 5) return '';
-                return p.seriesName + ' · ' + p.name + ' (seconds)<br/>min: ' + fmtNum(d[0]) + ' · Q1: ' + fmtNum(d[1]) +
-                  '<br/>median: <strong>' + fmtNum(d[2]) + '</strong> · Q3: ' + fmtNum(d[3]) +
-                  '<br/>max: ' + fmtNum(d[4]);
+                return p.seriesName + ' · ' + p.name + ' (minutes)<br/>min: ' + fmtMinValLabel(d[0]) + ' · Q1: ' + fmtMinValLabel(d[1]) +
+                  '<br/>median: <strong>' + fmtMinValLabel(d[2]) + '</strong> · Q3: ' + fmtMinValLabel(d[3]) +
+                  '<br/>max: ' + fmtMinValLabel(d[4]);
               },
             },
           }));
@@ -1993,12 +2042,12 @@
             var hasFocus = focus !== null && focus !== undefined && !Number.isNaN(Number(focus));
             if (hasFocus) {
               return (
-                '<div><span class="time-cell-main">' + formatNum(focus, 0) + 's</span></div>'
+                '<div><span class="time-cell-main">' + fmtMinLabel(focus) + '</span></div>'
               );
             }
             if (wall !== null && wall !== undefined && !Number.isNaN(Number(wall))) {
               return (
-                '<div><span class="time-cell-main">' + formatNum(wall, 0) + 's</span></div>'
+                '<div><span class="time-cell-main">' + fmtMinLabel(wall) + '</span></div>'
               );
             }
             return '—';
@@ -2131,11 +2180,11 @@
                 '<tr>' +
                   '<td>P' + (i + 1) + '</td>' +
                   '<td>' + done + '</td>' +
-                  '<td>' + formatNum(t, 0) + '</td>' +
+                  '<td>' + fmtMinLabel(t) + '</td>' +
                   '<td>' + formatNum(gen, 0) + '</td>' +
                   '<td>' + formatNum(acc, 0) + '</td>' +
                   '<td>' + formatNum(rej, 0) + '</td>' +
-                  '<td>' + formatNum(avgSug, 1) + '</td>' +
+                  '<td>' + fmtMinLabel(avgSug) + '</td>' +
                   '<td>' + formatNum(comp, 0) + '</td>' +
                   '<td>' + formatNum(tabs, 0) + '</td>' +
                   '<td>' + formatNum(pst, 0) + '</td>' +
@@ -2144,7 +2193,7 @@
             }
             var perProblemHtml =
               '<table class="per-problem-mini"><thead><tr>' +
-              '<th>#</th><th>Done</th><th>Time</th><th>AI</th><th>Acc</th><th>Rej</th><th>Avg</th><th>Run</th><th>Tab</th><th>Pst</th>' +
+              '<th>#</th><th>Done</th><th>Time (min)</th><th>AI</th><th>Acc</th><th>Rej</th><th>Avg (min)</th><th>Run</th><th>Tab</th><th>Pst</th>' +
               '</tr></thead><tbody>' +
               bodyRows.join('') +
               '</tbody></table>';
@@ -2172,7 +2221,7 @@
               aiGen: formatNum(row.ai_generated_total, 0),
               acc: formatNum(row.accepted_total, 0),
               rej: formatNum(row.rejected_total, 0),
-              avgSug: formatNum(row.avg_suggestion_time_seconds_total, 1) + 's',
+              avgSug: fmtMinLabel(row.avg_suggestion_time_seconds_total),
               runs: formatNum(row.compiles_total, 0),
               tabs: formatNum(row.tab_switch_total, 0),
               pasteTries: formatNum(row.paste_attempt_total, 0),

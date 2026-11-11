@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from openai import AsyncOpenAI
 
+from llm_client import get_active_model
 from llm_params import DEFAULT_MODEL, chat_args
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,8 @@ logger = logging.getLogger(__name__)
 
 # Writes the buggy version of an inline suggestion (from the correct one) and of an agent turn's changes.
 # The same model as the inline pairs (see ai_assist.COMPLETION_MODEL): it plants the most realistic bugs.
-BUG_MODEL = os.getenv("BUG_MODEL", "gpt-6-sol")
+# When a quiz sets llm_model, get_active_model() overrides these defaults for that request.
+BUG_MODEL = os.getenv("BUG_MODEL", "gpt-6-luna")
 CLASSIFIER_MODEL = os.getenv("BUG_CLASSIFIER_MODEL", DEFAULT_MODEL)
 
 _classify_semaphore = asyncio.Semaphore(int(os.getenv("BUG_CLASSIFIER_CONCURRENCY", "4")))
@@ -173,10 +175,11 @@ MAX_BUG_OPTIONS = 3  # plus the correct option: at most four options (A to D)
 
 
 def clean_problem_bug_settings(problem: Dict[str, Any], fallback: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """A problem's "Correct wrong picks" (bug_feedback), "Show correct answer" (bug_reveal) and
-    "Buggy options per suggestion" (bug_options: 1 to MAX_BUG_OPTIONS buggy next to the correct one,
-    or 0 for a single option that is randomly the correct or a buggy one). A key the problem lacks
-    comes from `fallback`: quizzes saved before these were per problem kept them on the quiz."""
+    """A problem's "Correct wrong picks" (bug_feedback), "Show correct answer" (bug_reveal),
+    "Uniform" (bug_uniform: shuffle-deck type balance) and "Buggy options per suggestion"
+    (bug_options: 1 to MAX_BUG_OPTIONS buggy next to the correct one, or 0 for a single option that
+    is randomly the correct or a buggy one). A key the problem lacks comes from `fallback`: quizzes
+    saved before these were per problem kept them on the quiz."""
     fallback = fallback or {}
     get = lambda k, d: problem[k] if k in problem else fallback.get(k, d)
     try:
@@ -186,8 +189,42 @@ def clean_problem_bug_settings(problem: Dict[str, Any], fallback: Optional[Dict[
     return {
         "bug_feedback": bool(get("bug_feedback", False)),
         "bug_reveal": bool(get("bug_reveal", False)),
+        "bug_uniform": bool(get("bug_uniform", False)),
         "bug_options": max(0, min(n, MAX_BUG_OPTIONS)),
     }
+
+
+def deal_shuffle_deck(
+    skills: List[Dict[str, Any]],
+    deck: Optional[List[str]] = None,
+    count: int = 1,
+    *,
+    exclude: Optional[set] = None,
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Deal the next `count` bug skills from a shuffled deck of enabled skill ids.
+
+    When the deck is empty it is reshuffled from every skill id. Types in `exclude` (already
+    planted in this suggestion) are skipped and left in the deck. Returns (chosen skills,
+    remaining deck)."""
+    by_id = {s["id"]: s for s in skills}
+    ids = [s["id"] for s in skills]
+    if not ids:
+        return [], list(deck or [])
+    exclude = set(exclude or ())
+    remaining = [x for x in list(deck or []) if x in by_id]
+    chosen: List[Dict[str, Any]] = []
+    while len(chosen) < count:
+        if not remaining:
+            remaining = ids[:]
+            random.shuffle(remaining)
+        # Prefer a type not yet chosen this suggestion; if the whole deck is excluded, stop.
+        pick_at = next((i for i, sid in enumerate(remaining)
+                        if sid not in exclude and all(sid != c["id"] for c in chosen)), None)
+        if pick_at is None:
+            break
+        sid = remaining.pop(pick_at)
+        chosen.append(by_id[sid])
+    return chosen, remaining
 
 
 # ─── Choosing the bug types ─────────────────────────────────────────────────
@@ -198,6 +235,18 @@ def clean_problem_bug_settings(problem: Dict[str, Any], fallback: Optional[Dict[
 # writer call then gets exactly one of the chosen types.
 
 SELECTOR_MODEL = os.getenv("BUG_SELECTOR_MODEL", BUG_MODEL)
+
+
+def _bug_model() -> str:
+    return get_active_model(BUG_MODEL)
+
+
+def _selector_model() -> str:
+    return get_active_model(SELECTOR_MODEL)
+
+
+def _classifier_model() -> str:
+    return get_active_model(CLASSIFIER_MODEL)
 _FIT_WEIGHT = {3: 3.0, 2: 1.0}  # fit 0 and 1 are never chosen
 # A type's weight is multiplied by this for each time it is among the session's recent bugs.
 _RECENT_PENALTY = float(os.getenv("BUG_RECENT_PENALTY", "0.35"))
@@ -253,7 +302,7 @@ async def choose_bug_types(
     parts = [f"<problem>\n{problem.strip()[:6000]}\n</problem>"] if problem.strip() else []
     parts += [f"Language: {language}.", f"<code>\n{code}\n</code>"]
     resp = await client.chat.completions.create(
-        **chat_args(SELECTOR_MODEL, temperature=0, max_tokens=25 * len(skills) + 100),
+        **chat_args(_selector_model(), temperature=0, max_tokens=25 * len(skills) + 100),
         response_format={"type": "json_object"},
         messages=[{"role": "system", "content": _SELECTOR_SYSTEM + "\n\n<bug_types>\n" + _bug_type_list(skills) + "\n</bug_types>"},
                   {"role": "user", "content": "\n\n".join(parts)}],
@@ -334,7 +383,7 @@ async def write_lesson(
               f"Correct version:\n```\n{correct[:6000]}\n```", f"Buggy version:\n```\n{buggy[:6000]}\n```",
               f"Kind of bug: {bug_name}." + (f" How it was made: {bug_plan}" if bug_plan else "")]
     resp = await client.chat.completions.create(
-        **chat_args(BUG_MODEL, temperature=0.3, max_tokens=600), response_format={"type": "json_object"},
+        **chat_args(_bug_model(), temperature=0.3, max_tokens=600), response_format={"type": "json_object"},
         messages=[{"role": "system", "content": _LESSON_SYSTEM},
                   {"role": "user", "content": "\n\n".join(parts)}],
     )
@@ -386,7 +435,7 @@ async def write_buggy_suggestions(
     parts += [f"File:\n{prefix[-4000:]}<CURSOR>{suffix[:1500]}", f"<suggestion>\n{correct}\n</suggestion>"]
     lines = len(correct.strip("\n").split("\n"))
     resp = await client.chat.completions.create(
-        **chat_args(BUG_MODEL, temperature=0.4, max_tokens=(80 + 60 * lines) * count),
+        **chat_args(_bug_model(), temperature=0.4, max_tokens=(80 + 60 * lines) * count),
         response_format={"type": "json_object"},
         messages=[{"role": "system", "content": _COMPLETION_BUG_SYSTEM.format(
                       language=language, count=want, others=other, note=note, types=bug_guides(skills))},
@@ -394,8 +443,14 @@ async def write_buggy_suggestions(
     )
     bugs: List[Dict[str, Any]] = []
     dropped: List[str] = []
-    for item in _bug_items(resp.choices[0].message.content or "{}", "bugs")[:count]:
+    items = _bug_items(resp.choices[0].message.content or "{}", "bugs")[:count]
+    for i, item in enumerate(items):
         skill = skill_by_id(skills, item.get("bug_type"))
+        # Type-locked plant (Uniform shuffle deck): only the dealt skill(s) are in `skills`.
+        if not skill and len(skills) == 1:
+            skill = skills[0]
+        elif not skill and len(skills) == count and i < len(skills):
+            skill = skills[i]
         buggy = clean(str(item.get("buggy") or ""))
         made = [b["buggy"] for b in bugs] + others
         if not skill:
@@ -413,8 +468,9 @@ async def write_buggy_suggestions(
     return bugs, dropped
 
 
-# Calls make_buggy_completions may make for one suggestion (the first and the retries).
-BUG_ATTEMPTS = int(os.getenv("BUG_ATTEMPTS", "3"))
+# First plant + one retry when the model returns empty / same-as-correct / etc.
+# After that the editor shows the correct suggestion (and any bugs already planted).
+BUG_ATTEMPTS = int(os.getenv("BUG_ATTEMPTS", "2"))
 _RETRY_NOTE = ("). Every buggy suggestion must be non-empty code that differs from <suggestion> in what it does, "
                "not only in spacing or names, and that is wrong for the problem. If the most plausible types do "
                "not fit, use another type from <bug_types>.")
@@ -422,15 +478,18 @@ _RETRY_NOTE = ("). Every buggy suggestion must be non-empty code that differs fr
 
 async def make_buggy_completions(
     client: AsyncOpenAI, *, skills: List[Dict[str, Any]], count: int = 1,
-    recent: Optional[List[str]] = None, **kwargs: Any,
+    recent: Optional[List[str]] = None, uniform: bool = False,
+    deck: Optional[List[str]] = None, **kwargs: Any,
 ) -> Dict[str, Any]:
     """Up to `count` buggy versions of a correct inline suggestion, each with a different bug type.
-    One call reads every selected bug type and picks the ones an AI assistant would most plausibly
-    get wrong in this code, writing a buggy suggestion for each. Versions that come back empty, the
-    same as the correct one or as each other are asked for again (other types, different code, told
-    why), up to BUG_ATTEMPTS calls in all: the student is shown all `count` or none.
-    {"bugs": [...], "choice": ...}, or {"no_bug": reason, "choice": ...}; "choice" records what was
-    dropped and the session's recent types (for the log only: they do not steer the choice)."""
+
+    Default (`uniform=False`): the model picks the most plausible types (`model_picks`).
+    With `uniform=True`: types are dealt from a shuffled deck (mutates `deck` in place when it is a
+    list), then planted type-locked; failed deals go back to the end of the deck.
+
+    Versions that come back empty / same-as-correct are retried once (BUG_ATTEMPTS=2). Whatever is
+    planted is returned; if none succeed, {"no_bug": reason} so the editor can show the correct
+    suggestion alone."""
     count = max(1, min(count, len(skills)))
     args = {k: kwargs[k] for k in ("language", "prefix", "suffix", "correct")}
     args.update(problem=kwargs.get("problem", ""), clean=kwargs.get("clean", lambda t: t))
@@ -438,25 +497,72 @@ async def make_buggy_completions(
     dropped: List[str] = []
     attempts = 0
     note = ""
+    deck_state: List[str] = list(deck) if deck is not None else []
+    dealt_ids: List[str] = []
+
     for attempts in range(1, BUG_ATTEMPTS + 1):
-        left = [s for s in skills if all(s["id"] != b["bug_skill"]["id"] for b in bugs)]
-        if not left:
+        need = count - len(bugs)
+        if need <= 0:
             break
+        if uniform:
+            forced, deck_state = deal_shuffle_deck(
+                skills, deck_state, need,
+                exclude={b["bug_skill"]["id"] for b in bugs},
+            )
+            if not forced:
+                dropped.append("none_fits")
+                break
+            dealt_ids.extend(s["id"] for s in forced)
+            plant_skills = forced
+        else:
+            plant_skills = [s for s in skills if all(s["id"] != b["bug_skill"]["id"] for b in bugs)]
+            if not plant_skills:
+                break
         try:
             new, why = await write_buggy_suggestions(
-                client, skills=left, count=count - len(bugs), others=[b["buggy"] for b in bugs], note=note, **args)
+                client, skills=plant_skills, count=need, others=[b["buggy"] for b in bugs],
+                note=note, **args)
         except Exception as e:
             logger.warning("Buggy suggestion failed: %s", e)
             new, why = [], ["error"]
+        if uniform:
+            # Put types that failed to plant back so the session still sees them later.
+            planted = {b["bug_skill"]["id"] for b in new}
+            for s in plant_skills:
+                if s["id"] not in planted:
+                    deck_state.append(s["id"])
         bugs += new
         why = why or ([] if new else ["none_fits"])
         dropped += why
         if len(bugs) >= count:
             break
         note = "\nYour last answer was rejected (" + ", ".join(sorted(set(why))) + _RETRY_NOTE
-    choice = {"method": "model_picks", "dropped": dropped, "attempts": attempts,
-              "recent": list(recent or [])[:RECENT_BUG_WINDOW], "chosen": [b["bug_skill"]["id"] for b in bugs]}
-    return {"bugs": bugs, "choice": choice} if bugs else {"no_bug": dropped[-1] if dropped else "none_fits", "choice": choice}
+
+    if deck is not None:
+        deck[:] = deck_state
+
+    choice = {
+        "method": "shuffle_deck" if uniform else "model_picks",
+        "uniform": bool(uniform),
+        "dropped": dropped,
+        "attempts": attempts,
+        "requested": count,
+        "fallback": len(bugs) < count,
+        "recent": list(recent or [])[:RECENT_BUG_WINDOW],
+        "dealt": dealt_ids,
+        "chosen": [b["bug_skill"]["id"] for b in bugs],
+        "deck_remaining": len(deck_state) if uniform else None,
+    }
+    if not bugs:
+        reason = dropped[-1] if dropped else "none_fits"
+        logger.info("Buggy completion fallback to correct (%s after %d attempt(s))", reason, attempts)
+        return {"no_bug": reason, "choice": choice}
+    if choice["fallback"]:
+        logger.info(
+            "Buggy completion partial: %d of %d after %d attempt(s) (%s)",
+            len(bugs), count, attempts, ",".join(sorted(set(dropped))) or "short",
+        )
+    return {"bugs": bugs, "choice": choice}
 
 
 # ─── Buggy versions of an agent turn ────────────────────────────────────────
@@ -526,24 +632,43 @@ async def make_buggy_agent_versions(
     problem: str = "",
     description: str = "",
     recent: Optional[List[str]] = None,
+    uniform: bool = False,
+    deck: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Up to `count` buggy copies of the agent's final files, each with one bug of a different bug
-    type ([] when no valid bug could be planted). choose_bug_types picks the types first (`recent`:
-    the session's latest bug type ids, newest first), and every result's "choice" is that record.
-    `problem` is the task the student is solving (statement, test cases, constraints).
-    `description` is the agent's summary of its changes; each result's "description" is that buggy
-    version's one, which on some turns (DESCRIPTION_ERROR_RATE) contains a wrong claim too."""
+    type ([] when no valid bug could be planted).
+
+    Default: choose_bug_types picks types first (`recent` soft-penalizes repeats).
+    With `uniform=True`: deal types from a shuffled deck (mutates `deck` in place when it is a list)
+    and plant those type-locked.
+
+    `problem` is the task the student is solving. `description` is the agent's summary; each result's
+    "description" may contain a wrong claim (DESCRIPTION_ERROR_RATE)."""
     if not skills or not files_after:
         return []
     count = max(1, min(count, len(skills)))
-    code = ("The agent's changes (unified diffs; rate the bug types for the added or changed lines):\n"
-            + "\n".join(diffs.values())[:12000])
-    pick = await choose_bug_types(client, language=language, code=code, problem=problem,
-                                  skills=skills, recent=recent)
-    choice = pick["choice"]
-    skills = pick["order"][:count]
+    all_skills = skills
+    deck_state: List[str] = list(deck) if deck is not None else []
+    if uniform:
+        skills, deck_state = deal_shuffle_deck(all_skills, deck_state, count)
+        choice = {
+            "method": "shuffle_deck",
+            "uniform": True,
+            "ratings": [],
+            "recent": list(recent or [])[:RECENT_BUG_WINDOW],
+            "dealt": [s["id"] for s in skills],
+        }
+    else:
+        code = ("The agent's changes (unified diffs; rate the bug types for the added or changed lines):\n"
+                + "\n".join(diffs.values())[:12000])
+        pick = await choose_bug_types(client, language=language, code=code, problem=problem,
+                                      skills=skills, recent=recent)
+        choice = {**pick["choice"], "method": "fit_recent", "uniform": False}
+        skills = pick["order"][:count]
     if not skills:
         logger.info("No bug type fits this agent turn")
+        if deck is not None:
+            deck[:] = deck_state
         return []
     count = len(skills)
     vary_description = bool(description.strip()) and random.random() < DESCRIPTION_ERROR_RATE
@@ -553,9 +678,13 @@ async def make_buggy_agent_versions(
     for name, content in files_after.items():
         parts.append(f"New content of {name}:\n```\n{content[:8000]}\n```")
     system = _AGENT_BUG_SYSTEM
-    hints = {r["bug_type"]: r["why"] for r in choice["ratings"]}
-    parts.append("Where each bug type fits (from an earlier look at the code):\n"
-                 + "\n".join(f"- {s['id']}: {hints.get(s['id'], '')}" for s in skills))
+    hints = {r["bug_type"]: r["why"] for r in choice.get("ratings") or []}
+    if uniform:
+        parts.append("Plant exactly these bug types (Uniform shuffle deck; one each):\n"
+                     + "\n".join(f"- {s['id']}: {s['name']}" for s in skills))
+    else:
+        parts.append("Where each bug type fits (from an earlier look at the code):\n"
+                     + "\n".join(f"- {s['id']}: {hints.get(s['id'], '')}" for s in skills))
     if vary_description:
         parts.append(f"<description>\n{description.strip()[:4000]}\n</description>")
         system += "\n\n" + _AGENT_DESCRIPTION_RULES
@@ -567,7 +696,7 @@ async def make_buggy_agent_versions(
     versions: List[Dict[str, Any]] = []
     for _attempt in range(2):
         resp = await client.chat.completions.create(
-            **chat_args(BUG_MODEL, temperature=0.4), response_format={"type": "json_object"}, messages=messages,
+            **chat_args(_bug_model(), temperature=0.4), response_format={"type": "json_object"}, messages=messages,
         )
         raw = resp.choices[0].message.content or "{}"
         items = _bug_items(raw, "versions")
@@ -576,8 +705,14 @@ async def make_buggy_agent_versions(
                 logger.info("No bug type fits this agent turn")
             break
         problems = []
-        for item in items[:count - len(versions)]:
+        for i, item in enumerate(items[:count - len(versions)]):
             skill = skill_by_id(skills, item.get("bug_type"))
+            if not skill and len(skills) == 1:
+                skill = skills[0]
+            elif not skill and uniform and i < len(skills):
+                # Prefer the next unused dealt type when the model mistypes the id.
+                used = {v["bug_skill"]["id"] for v in versions}
+                skill = next((s for s in skills if s["id"] not in used), skills[min(i, len(skills) - 1)])
             fn, old, new = item.get("filename"), item.get("old"), item.get("new")
             problem = None
             if not skill:
@@ -624,6 +759,14 @@ async def make_buggy_agent_versions(
                       + f"\nReply with {{\"versions\": [...]}} holding only {count - len(versions)} new buggy "
                       f"version(s) to replace them, with bug types other than the valid ones ({used})."}]
     choice["chosen"] = [v["bug_skill"]["id"] for v in versions]
+    if uniform:
+        planted = {v["bug_skill"]["id"] for v in versions}
+        for s in skills:
+            if s["id"] not in planted:
+                deck_state.append(s["id"])
+        choice["deck_remaining"] = len(deck_state)
+        if deck is not None:
+            deck[:] = deck_state
     for v in versions:
         v["choice"] = choice
     return versions
@@ -663,7 +806,7 @@ def _normalize(raw: Dict[str, Any], ids: List[str]) -> Dict[str, Any]:
         "buggy_code": str(raw.get("buggy_code") or "")[:1000],
         "fix": str(raw.get("fix") or "")[:1000],
         "manifestation": manifestation if manifestation in _MANIFESTATIONS else "unknown",
-        "model": CLASSIFIER_MODEL,
+        "model": _classifier_model(),
     }
 
 
@@ -675,7 +818,7 @@ async def classify_pair(
     types = "\n".join(f"- {s['id']}: {s['name']}. {s.get('description', '')}" for s in skills)
     async with _classify_semaphore:
         resp = await client.chat.completions.create(
-            **chat_args(CLASSIFIER_MODEL, temperature=0),
+            **chat_args(_classifier_model(), temperature=0),
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": _CLASSIFIER_SYSTEM.format(types=types)},
