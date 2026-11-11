@@ -497,14 +497,19 @@ body { background: var(--ui-page); color: var(--ui-text); font: var(--fs-md)/var
 
 /* "Correct wrong picks" (quiz setting): the accepted suggestion or agent version had the bug and was
    switched to the correct one. Editor notice (conditions 2 and 4) and agent chat card (condition 3). */
+/* Fixed to the viewport above the terminal (editor overlays are clipped under it). */
+.terminal, #terminal { position: relative; z-index: 1; }
 .fix-notice {
-    position: absolute; right: 14px; bottom: 14px; z-index: 60; width: min(420px, calc(100% - 28px));
+    position: fixed !important; right: 14px; bottom: 14px; z-index: 200000 !important;
+    width: min(420px, calc(100vw - 28px));
+    max-height: min(70vh, calc(100vh - 24px)); overflow-x: hidden; overflow-y: auto;
     display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 10px 14px;
     background: var(--ui-raised); border: 1px solid var(--ui-border-strong); border-left: 3px solid var(--ui-error);
     border-radius: var(--radius-lg); box-shadow: var(--shadow-pop);
     color: var(--ui-text); font: var(--fs-md)/1.5 var(--ui-font);
     animation: ui-toast-in var(--dur-slow) var(--ease-out);
     transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out);
+    box-sizing: border-box; pointer-events: auto;
 }
 .fix-notice.is-out { opacity: 0; transform: translateY(6px); }
 .fix-notice__head { display: flex; align-items: center; gap: 8px; }
@@ -550,7 +555,8 @@ body { background: var(--ui-page); color: var(--ui-text); font: var(--fs-md)/var
 }
 .agent-fix__head { display: flex; align-items: center; gap: 8px; color: var(--ui-text-strong); font-weight: 600; }
 /* Beside the changed lines in the editor (an overlay widget placed by ai_modes.js), not in the corner. */
-.fix-notice.is-beside { position: absolute; bottom: auto; width: min(340px, calc(100% - 40px)); }
+.fix-notice.is-beside { bottom: auto; width: min(340px, calc(100vw - 40px)); }
+.fix-notice__head, .fix-notice__foot, .fix-why-btn { flex-shrink: 0; }
 .fix-why__type { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; color: var(--ui-text-muted, #9da5b4); font-size: var(--fs-sm); }
 .fix-why__type span { padding: 1px 8px; border-radius: 10px; background: rgba(242, 167, 167, 0.14); border: 1px solid rgba(242, 167, 167, 0.35); color: #f2a7a7; font-weight: 600; }
 .fix-lesson + .fix-lesson { margin-top: 8px; }
@@ -562,8 +568,17 @@ body { background: var(--ui-page); color: var(--ui-text); font: var(--fs-md)/var
 }
 .fix-why-btn:hover { background: var(--ui-fill-hover); color: var(--ui-text-strong); }
 .fix-why-btn:focus-visible { outline: 1px solid var(--ui-focus); outline-offset: 2px; }
-.fix-why-body { display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto; }
+/* Scroll inside the card so expanding the lesson never pushes the footer into the terminal. */
+.fix-why-body {
+    display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; min-height: 0;
+    max-height: min(180px, 28vh); overflow-y: auto; overscroll-behavior: contain;
+}
 .fix-why-body[hidden] { display: none; }
+/* Top layer (popover): drop the UA popover box so the card keeps its own position and look. */
+.fix-notice[popover] { inset: auto; margin: 0; padding: 10px 12px 10px 14px; overflow-x: hidden; overflow-y: auto; }
+/* Explanation open: a wide centered panel that shows the full explanation without inner scrolling. */
+.fix-notice.is-expanded { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
+.fix-notice.is-expanded .fix-why-body { max-height: none !important; overflow: visible; flex: 0 0 auto; }
 /* The diff in the editor: highlighted lines in the file, the other version's lines in a view zone. */
 .fix-line.is-add { background: rgba(44, 187, 93, 0.16); }
 .fix-line.is-del { background: rgba(255, 107, 107, 0.16); }

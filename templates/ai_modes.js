@@ -117,6 +117,22 @@
     // and bug type are in a card beside those lines. Without a range in the open file (the code was
     // edited since), the card is in the corner and carries the diff itself. It stays until dismissed,
     // and no new suggestion appears meanwhile.
+    // With the explanation open, the card becomes a wide panel centered in the window, sized to
+    // show the whole explanation at once (it only scrolls if the window itself is too short).
+    function placeExpanded(el) {
+        var body = el.querySelector('.fix-why-body');
+        var open = !!(body && !body.hidden);
+        el.classList.toggle('is-expanded', open);
+        if (!open) return false;
+        body.style.maxHeight = '';
+        el.style.maxHeight = Math.max(160, window.innerHeight - 32) + 'px';
+        var w = el.offsetWidth, h = el.offsetHeight;
+        el.style.left = Math.max(16, Math.round((window.innerWidth - w) / 2)) + 'px';
+        el.style.top = Math.max(16, Math.round((window.innerHeight - h) / 2)) + 'px';
+        el.style.right = 'auto';
+        el.style.bottom = 'auto';
+        return true;
+    }
     function fixNotice(monaco, editor) {
         var el = null, onClose = null, zoneId = null, decorations = [], subs = [], widget = null;
         function close() {
@@ -177,18 +193,40 @@
                 zoneId = acc.addZone({ afterLineNumber: afterLine, heightInLines: other.length, domNode: zone, marginDomNode: margin });
             });
             editor.revealLinesInCenterIfOutsideViewport(Math.max(1, d.first - 1), last + other.length);
-            // The card follows the changed lines (from the top of the diff) as the editor scrolls.
+            // Fixed on document.body, above the terminal. Keep the whole card in the viewport
+            // (it may cover the terminal) so expanding the explanation is never truncated.
             var above = reveal ? 0 : other.length * lineHeight;
             function place() {
-                if (!el) return;
+                if (!el || placeExpanded(el)) return;
                 var layout = editor.getLayoutInfo();
-                var top = editor.getTopForLineNumber(d.first) - above - editor.getScrollTop();
-                top = Math.max(8, Math.min(top, layout.height - el.offsetHeight - 8));
+                var edRect = editor.getDomNode().getBoundingClientRect();
+                var viewBottom = window.innerHeight - 8;
+                var preferred = edRect.top + (editor.getTopForLineNumber(d.first) - above - editor.getScrollTop());
+                preferred = Math.max(8, preferred);
+                var maxH = Math.max(160, Math.min(Math.floor(window.innerHeight * 0.72), viewBottom - 8));
+                el.style.zIndex = '200000';
+                el.style.maxHeight = maxH + 'px';
+                var why = el.querySelector('.fix-why-body');
+                if (why) why.style.maxHeight = '';
+                var h = Math.min(el.offsetHeight || 0, maxH);
+                var top = Math.min(preferred, viewBottom - h);
+                top = Math.max(8, top);
+                if (top + h > viewBottom) {
+                    maxH = Math.max(140, viewBottom - top);
+                    el.style.maxHeight = maxH + 'px';
+                    h = Math.min(el.offsetHeight || 0, maxH);
+                    top = Math.max(8, viewBottom - h);
+                }
                 el.style.top = top + 'px';
-                el.style.right = (layout.verticalScrollbarWidth + layout.minimap.minimapWidth + 12) + 'px';
+                el.style.bottom = 'auto';
+                el.style.right = Math.max(8, window.innerWidth - edRect.right +
+                    layout.verticalScrollbarWidth + layout.minimap.minimapWidth + 12) + 'px';
+                el.style.left = 'auto';
             }
             subs.push(editor.onDidScrollChange(place), editor.onDidLayoutChange(place),
                       editor.onDidChangeModel(close));
+            window.addEventListener('resize', place);
+            subs.push({ dispose: function () { window.removeEventListener('resize', place); } });
             return place;
         }
         return {
@@ -219,17 +257,39 @@
                 el.querySelector('.fix-notice__ok').onclick = close;
                 el.addEventListener('keydown', function (e) { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
                 var place = null;
-                wireFixWhy(el, { pair_id: fb.pair_id || '' }, function () { if (place) place(); });
+                wireFixWhy(el, { pair_id: fb.pair_id || '' }, function () {
+                    requestAnimationFrame(function () { if (place) place(); });
+                });
+                // Body-level fixed card: paints above the terminal; keep fully in the viewport.
+                document.body.appendChild(el);
+                el.style.zIndex = '200000';
+                // Browser top layer (popover): nothing on the page, the terminal included, can paint over it.
+                if (typeof el.showPopover === 'function') {
+                    el.setAttribute('popover', 'manual');
+                    try { el.showPopover(); } catch (e) { el.removeAttribute('popover'); }
+                }
+                widget = null;
                 if (inline) {
                     place = showInline(model, range, fb);
-                    var node = el;
-                    widget = { getId: function () { return 'fix-notice'; }, getDomNode: function () { return node; },
-                               getPosition: function () { return null; } };
-                    editor.addOverlayWidget(widget);
-                    place();
                 } else {
-                    editor.getContainerDomNode().parentNode.appendChild(el);
+                    place = function () {
+                        if (!el || placeExpanded(el)) return;
+                        var viewBottom = window.innerHeight - 8;
+                        var maxH = Math.max(160, Math.min(Math.floor(window.innerHeight * 0.72), viewBottom - 8));
+                        el.style.zIndex = '200000';
+                        el.style.maxHeight = maxH + 'px';
+                        var why = el.querySelector('.fix-why-body');
+                        if (why) why.style.maxHeight = '';
+                        var h = Math.min(el.offsetHeight || 0, maxH);
+                        el.style.top = Math.max(8, viewBottom - h) + 'px';
+                        el.style.bottom = 'auto';
+                        el.style.right = '14px';
+                        el.style.left = 'auto';
+                    };
+                    window.addEventListener('resize', place);
+                    subs.push({ dispose: function () { window.removeEventListener('resize', place); } });
                 }
+                place();
                 el.querySelector('.fix-notice__ok').focus();
             }
         };

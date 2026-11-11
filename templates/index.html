@@ -131,8 +131,10 @@
         }
         #terminal {
             height: 35vh;
-            min-height: 200px;
+            /* Can be folded down to just its header bar. */
+            min-height: var(--h-card-header, 36px);
             max-height: 50vh;
+            overflow: hidden;
         }
 
         /* ── Left Problem Panel ─────────────────────────── */
@@ -7115,11 +7117,17 @@ async function proceedWithActualSubmission() {
        document.addEventListener('mouseup', handleMouseUp);
    });
 
+   // Smallest terminal height: just its header bar (and top border), so it can fold all the way down.
+   function terminalFoldedHeight(terminal) {
+       const head = terminal.querySelector('.terminal-header');
+       return Math.ceil((head ? head.offsetHeight : 36) + (terminal.offsetHeight - terminal.clientHeight));
+   }
+
    function handleTerminalResize(e) {
        if (!resize.terminal) return;
        e.preventDefault();
        const terminal = document.getElementById('terminal');
-       const minTerminalHeight = 200;
+       const minTerminalHeight = terminalFoldedHeight(terminal);
        const maxTerminalHeight = window.innerHeight * 0.5;
        const desiredHeight = window.innerHeight - e.clientY - 8;
        const newHeight = Math.max(minTerminalHeight, Math.min(maxTerminalHeight, desiredHeight));
@@ -7151,7 +7159,7 @@ async function proceedWithActualSubmission() {
        e.preventDefault();
        const touch = e.touches[0];
        const terminal = document.getElementById('terminal');
-       const minTerminalHeight = 200;
+       const minTerminalHeight = terminalFoldedHeight(terminal);
        const maxTerminalHeight = window.innerHeight * 0.5;
        const desiredHeight = window.innerHeight - touch.clientY - 8;
        const newHeight = Math.max(minTerminalHeight, Math.min(maxTerminalHeight, desiredHeight));
